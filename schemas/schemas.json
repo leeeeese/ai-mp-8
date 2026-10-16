@@ -5,7 +5,9 @@
     "MAX_EXPLORE_LOOP": 3,
     "MAX_REPLAN": 2,
     "MAX_TOOL_CALLS": 20,
-    "MEMORY_WINDOW_N": 5
+    "MEMORY_WINDOW_N": 5,
+    "KPI_MIN_EVIDENCE_COVERAGE": 0.8,
+    "KPI_MIN_CONFIRMED_RATIO": 0.5
   },
   "$defs": {
     "Difficulty": {
@@ -609,6 +611,30 @@
           ],
           "default": null
         },
+        "mail_draft": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/MailDraft"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "report_file_path": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "PDF/MD 저장 경로 (요청 시, save_report 결과)",
+          "title": "Report File Path"
+        },
         "markdown": {
           "description": "템플릿 렌더링 결과 (사용자 표시용)",
           "title": "Markdown",
@@ -1190,7 +1216,7 @@
           "type": "string"
         },
         "plan": {
-          "description": "simple: explorer, retriever / complex: explorer, retriever, simulator, verifier",
+          "description": "simple: explorer, retriever / complex: explorer, retriever, simulator, verifier (KPI Agent·Composer 는 Supervisor 가 항상 실행)",
           "items": {
             "$ref": "#/$defs/PlanStep"
           },
@@ -1494,6 +1520,18 @@
         },
         "sm_part": {
           "$ref": "#/$defs/SmPart"
+        },
+        "output_options": {
+          "description": "추가 산출물 요청",
+          "items": {
+            "enum": [
+              "mail_draft",
+              "pdf"
+            ],
+            "type": "string"
+          },
+          "title": "Output Options",
+          "type": "array"
         }
       },
       "required": [
@@ -1589,6 +1627,209 @@
         "checks"
       ],
       "title": "VerifierOutput",
+      "type": "object"
+    },
+    "KpiCategory": {
+      "enum": [
+        "quality",
+        "performance"
+      ],
+      "title": "KpiCategory",
+      "type": "string"
+    },
+    "KpiMetricName": {
+      "description": "quality: evidence_coverage(근거 확보 노드/탐색 노드), confirmed_ratio(confirmed 판정/전체 판정), area_coverage(판정 영역/4, complex만), unverified_segments(미확인 구간 수), verify_passed(1=pass, complex만) / performance: latency_ms, tool_calls, explore_loops, replans, total_tokens",
+      "enum": [
+        "evidence_coverage",
+        "confirmed_ratio",
+        "area_coverage",
+        "unverified_segments",
+        "verify_passed",
+        "latency_ms",
+        "tool_calls",
+        "explore_loops",
+        "replans",
+        "total_tokens"
+      ],
+      "title": "KpiMetricName",
+      "type": "string"
+    },
+    "KpiMetric": {
+      "properties": {
+        "name": {
+          "$ref": "#/$defs/KpiMetricName"
+        },
+        "category": {
+          "$ref": "#/$defs/KpiCategory"
+        },
+        "value": {
+          "title": "Value",
+          "type": "number"
+        },
+        "unit": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "ratio / ms / count / tokens",
+          "title": "Unit"
+        },
+        "threshold": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "기준값 (없으면 측정만)",
+          "title": "Threshold"
+        },
+        "passed": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "threshold 가 있을 때 충족 여부",
+          "title": "Passed"
+        }
+      },
+      "required": [
+        "name",
+        "category",
+        "value"
+      ],
+      "title": "KpiMetric",
+      "type": "object"
+    },
+    "AgentRunRecord": {
+      "description": "Supervisor 가 에이전트 실행마다 남기는 측정 기록 (KPI Agent 입력).",
+      "properties": {
+        "agent": {
+          "description": "planner / explorer / retriever / simulator / verifier / composer",
+          "title": "Agent",
+          "type": "string"
+        },
+        "latency_ms": {
+          "title": "Latency Ms",
+          "type": "number"
+        },
+        "tool_calls": {
+          "default": 0,
+          "title": "Tool Calls",
+          "type": "integer"
+        },
+        "input_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Input Tokens"
+        },
+        "output_tokens": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Output Tokens"
+        }
+      },
+      "required": [
+        "agent",
+        "latency_ms"
+      ],
+      "title": "AgentRunRecord",
+      "type": "object"
+    },
+    "KpiOutput": {
+      "description": "KPI Agent 출력. 단순: Retriever 이후, 복잡: Verifier 이후 → Composer.",
+      "properties": {
+        "complexity": {
+          "$ref": "#/$defs/Complexity"
+        },
+        "metrics": {
+          "items": {
+            "$ref": "#/$defs/KpiMetric"
+          },
+          "title": "Metrics",
+          "type": "array"
+        },
+        "agent_runs": {
+          "items": {
+            "$ref": "#/$defs/AgentRunRecord"
+          },
+          "title": "Agent Runs",
+          "type": "array"
+        },
+        "all_passed": {
+          "description": "threshold 가 있는 지표를 모두 충족했는지",
+          "title": "All Passed",
+          "type": "boolean"
+        },
+        "warnings": {
+          "description": "미달 지표 설명 (Composer 가 분석 한계에 반영)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Warnings",
+          "type": "array"
+        }
+      },
+      "required": [
+        "complexity",
+        "metrics",
+        "agent_runs",
+        "all_passed"
+      ],
+      "title": "KpiOutput",
+      "type": "object"
+    },
+    "MailDraft": {
+      "description": "회신 메일 초안 (요청 시).",
+      "properties": {
+        "to": {
+          "items": {
+            "type": "string"
+          },
+          "title": "To",
+          "type": "array"
+        },
+        "subject": {
+          "title": "Subject",
+          "type": "string"
+        },
+        "body": {
+          "title": "Body",
+          "type": "string"
+        }
+      },
+      "required": [
+        "subject",
+        "body"
+      ],
+      "title": "MailDraft",
       "type": "object"
     }
   }

@@ -13,6 +13,13 @@
 - 영역별 판정표, 일정 영향 요인, 경로 상세, 분석 한계, 체크리스트(business/developer)를 쓴다.
 - stage: initial → updated → final_for_dev
 
+## KPI 반영
+- `KpiOutput.warnings` 를 분석 한계(`analysis_limits`)에 반영한다.
+
+## 추가 산출물 (`UserInput.output_options`)
+- `mail_draft`: 회신 메일 초안(`MailDraft`)을 작성한다.
+- `pdf`: `save_report(format="pdf")` 로 저장하고 경로를 `report_file_path` 에 넣는다.
+
 ## 후속 입력
 - 후속 답변 때문에 영향 경로 자체가 바뀌어야 하면 `reanalysis_request` 를 반환한다.
 

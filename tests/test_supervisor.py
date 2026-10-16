@@ -7,6 +7,7 @@ from impact_agent.schemas import (
     Complexity,
     ComposerOutput,
     ExplorerOutput,
+    KpiOutput,
     PlannerOutput,
     PlanStep,
     ReexploreRequest,
@@ -48,7 +49,8 @@ def make_supervisor(complexity, reexplore=False, verify=VerifyResult.PASS):
     ))
     sup.simulator = Fake(lambda s: SimulationOutput(area_impacts=[]))
     sup.verifier = Fake(lambda s: VerifierOutput(result=verify, checks=[], reason="r"))
-    sup.composer = Fake(lambda s: ComposerOutput(complexity=complexity, markdown="ok"))
+    sup.seen_kpi = []
+    sup.composer = Fake(lambda s: (sup.seen_kpi.append(s.kpi), ComposerOutput(complexity=complexity, markdown="ok"))[1])
     return sup
 
 
@@ -73,3 +75,14 @@ def test_replan_is_bounded():
     run(sup)
     assert sup.planner.calls == config.MAX_REPLAN + 1
     assert sup.composer.calls == 1
+
+
+def test_kpi_runs_before_composer():
+    for complexity in Complexity:
+        sup = make_supervisor(complexity)
+        run(sup)
+        (kpi,) = sup.seen_kpi
+        assert isinstance(kpi, KpiOutput)
+        assert kpi.complexity is complexity
+        agents = [r.agent for r in kpi.agent_runs]
+        assert "composer" not in agents and agents[0] == "planner"

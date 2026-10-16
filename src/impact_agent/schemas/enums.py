@@ -99,3 +99,23 @@ class RequestType(str, Enum):
 class VerifyResult(str, Enum):
     PASS = "pass"
     NEEDS_SUPPLEMENT = "needs_supplement"
+
+
+class KpiCategory(str, Enum):
+    QUALITY = "quality"
+    PERFORMANCE = "performance"
+
+
+class KpiMetricName(str, Enum):
+    # quality
+    EVIDENCE_COVERAGE = "evidence_coverage"
+    CONFIRMED_RATIO = "confirmed_ratio"
+    AREA_COVERAGE = "area_coverage"
+    UNVERIFIED_SEGMENTS = "unverified_segments"
+    VERIFY_PASSED = "verify_passed"
+    # performance
+    LATENCY_MS = "latency_ms"
+    TOOL_CALLS = "tool_calls"
+    EXPLORE_LOOPS = "explore_loops"
+    REPLANS = "replans"
+    TOTAL_TOKENS = "total_tokens"

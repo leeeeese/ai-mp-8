@@ -18,6 +18,8 @@ from .enums import (
     AgentName,
     RequestType,
     VerifyResult,
+    KpiCategory,
+    KpiMetricName,
 )
 from .inputs import (
     UserInput,
@@ -55,6 +57,11 @@ from .verifier import (
     VerifierOutput,
     CheckKind,
 )
+from .kpi import (
+    KpiMetric,
+    AgentRunRecord,
+    KpiOutput,
+)
 from .composer import (
     AreaVerdictRow,
     ChecklistItem,
@@ -63,6 +70,7 @@ from .composer import (
     GuidanceQuery,
     QueryResultSummary,
     SimpleAnswer,
+    MailDraft,
     ReanalysisRequest,
     ComposerOutput,
 )
@@ -96,6 +104,8 @@ __all__ = [
     "AgentName",
     "RequestType",
     "VerifyResult",
+    "KpiCategory",
+    "KpiMetricName",
     "UserInput",
     "InputMeta",
     "FollowupInput",
@@ -120,6 +130,9 @@ __all__ = [
     "VerifyCheck",
     "VerifierOutput",
     "CheckKind",
+    "KpiMetric",
+    "AgentRunRecord",
+    "KpiOutput",
     "AreaVerdictRow",
     "ChecklistItem",
     "ComplexReport",
@@ -127,6 +140,7 @@ __all__ = [
     "GuidanceQuery",
     "QueryResultSummary",
     "SimpleAnswer",
+    "MailDraft",
     "ReanalysisRequest",
     "ComposerOutput",
     "SearchGraphNodesInput",

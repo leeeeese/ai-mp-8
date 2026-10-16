@@ -1,5 +1,7 @@
 """Supervisor 입력 / 후속 입력."""
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 from .enums import AnalysisPoint, FollowupType, InputSource, InputType, SmPart
@@ -10,6 +12,7 @@ class UserInput(BaseModel):
 
     request_text: str
     sm_part: SmPart
+    output_options: list[Literal["mail_draft", "pdf"]] = Field(default_factory=list, description="추가 산출물 요청")
 
 
 class InputMeta(BaseModel):

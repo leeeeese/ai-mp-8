@@ -36,6 +36,7 @@ class PlannerOutput(BaseModel):
     complexity_reason: str = Field(description="판정 근거 (필수)")
     plan: list[PlanStep] = Field(
         description="simple: explorer, retriever / complex: explorer, retriever, simulator, verifier"
+        " (KPI Agent·Composer 는 Supervisor 가 항상 실행)"
     )
 
 

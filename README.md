@@ -6,16 +6,29 @@
 ## 흐름
 
 ```
-UserInput ─▶ Supervisor
-              │
-              ├─▶ Planner ── StructuredRequest + complexity(simple|complex) + plan
-              │
-              ├─▶ Explorer ⇄ Retriever        (재탐색 ≤ MAX_EXPLORE_LOOP)
-              │
-              ├─▶ [complex] Simulator ─▶ Verifier
-              │                           └─ needs_supplement ─▶ Planner (재계획 ≤ MAX_REPLAN)
-              │
-              └─▶ Composer ── SimpleAnswer | ComplexReport ─▶ markdown
+요건서 + SM 파트 선택 (UserInput)
+        │
+        ▼
+   Supervisor ◀───────────── 재계획 (Verifier: needs_supplement, ≤ MAX_REPLAN)
+        │                                                         │
+        ▼                                                         │
+ 1. Planner ── 복잡도 판단 · flow 설계                            │
+        │                                                         │
+        ▼                                                         │
+ 2-1 Explorer ⇄ 2-2 Retriever   (재탐색 ≤ MAX_EXPLORE_LOOP)        │
+   (Neo4j)         (벡터 DB)                                       │
+        │ 단순          │ 복잡                                     │
+        │               ▼                                          │
+        │        2-3 Simulator ──▶ 2-4 Verifier ───────────────────┘
+        │                               │ pass
+        ▼                               ▼
+ 3. KPI Agent ── 품질 · 성능 지표 측정
+        │
+        ▼
+ 4. Composer ── 레포트 · 체크리스트 / 회신 메일 초안 · PDF 저장 (요청 시)
+        │
+        ├─▶ 복잡: ComplexReport (가능 여부·난이도, 현업 확인 체크리스트)
+        └─▶ 단순: SimpleAnswer (요약 결론, 영향 노드·근거)
 ```
 
 | 에이전트 | 출력 스키마 | 사용 tool |
@@ -25,6 +38,7 @@ UserInput ─▶ Supervisor
 | Retriever | `RetrieverOutput` | `search_source` |
 | Simulator | `SimulationOutput` | - |
 | Verifier | `VerifierOutput` | - |
+| KPI Agent | `KpiOutput` | - (규칙 기반, LLM 미사용) |
 | Composer | `ComposerOutput` | `save_report` |
 
 ## 폴더 구조
@@ -45,13 +59,14 @@ UserInput ─▶ Supervisor
 │   │   ├── retriever.py      #   Evidence, ReexploreRequest, RetrieverOutput
 │   │   ├── simulator.py      #   PathHop, ImpactPath, Alternative, AreaImpact, SimulationOutput
 │   │   ├── verifier.py       #   VerifyCheck, VerifierOutput
-│   │   ├── composer.py       #   SimpleAnswer, ComplexReport, ChecklistItem, ComposerOutput, ...
+│   │   ├── kpi.py            #   KpiMetric, AgentRunRecord, KpiOutput
+│   │   ├── composer.py       #   SimpleAnswer, ComplexReport, ChecklistItem, MailDraft, ComposerOutput, ...
 │   │   └── tools.py          #   tool 입출력 (SearchGraphNodes*, ExpandGraph*, SearchSource*, SaveReport*)
-│   ├── agents/               # 에이전트 구현 (supervisor = 흐름 제어)
+│   ├── agents/               # 에이전트 구현 (supervisor = 흐름 제어, kpi = 지표 측정)
 │   ├── tools/                # tool 구현 + TOOL_REGISTRY
 │   ├── prompts/              # 에이전트별 시스템 프롬프트 (*.md)
 │   └── templates/            # Composer markdown 템플릿 (Jinja2)
-├── tests/                    # 스키마 동기화 · Supervisor 루프 · 템플릿 테스트
+├── tests/                    # 스키마 동기화 · Supervisor 루프 · KPI · 템플릿 테스트
 ├── scripts/export_schema.py  # Pydantic 모델 → JSON Schema 재생성 (비교용)
 └── docs/architecture.md
 ```
@@ -76,3 +91,5 @@ pytest
 - [ ] 그래프 DB / 소스 검색 백엔드 연결 (`tools/graph.py`, `tools/source.py`)
 - [ ] 후속 입력(`FollowupInput`) 및 `ReanalysisRequest` 처리, MEMORY_WINDOW_N 기반 대화 메모리
 - [ ] MAX_TOOL_CALLS 강제
+- [ ] 회신 메일 초안 / PDF 저장 구현
+- [ ] KPI 기준값(KPI_MIN_*) 확정 및 LLM 토큰 사용량 기록

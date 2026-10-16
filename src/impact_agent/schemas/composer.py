@@ -70,6 +70,14 @@ class SimpleAnswer(BaseModel):
 
 
 # --- output ----------------------------------------------------------------
+class MailDraft(BaseModel):
+    """회신 메일 초안 (요청 시)."""
+
+    to: list[str] = Field(default_factory=list)
+    subject: str
+    body: str
+
+
 class ReanalysisRequest(BaseModel):
     """Composer → Supervisor. 답변 반영으로 영향 경로 자체가 바뀌어야 할 때."""
 
@@ -82,4 +90,6 @@ class ComposerOutput(BaseModel):
     complex_report: ComplexReport | None = None
     simple_answer: SimpleAnswer | None = None
     reanalysis_request: ReanalysisRequest | None = None
+    mail_draft: MailDraft | None = None
+    report_file_path: str | None = Field(default=None, description="PDF/MD 저장 경로 (요청 시, save_report 결과)")
     markdown: str = Field(description="템플릿 렌더링 결과 (사용자 표시용)")
