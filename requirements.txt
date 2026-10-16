@@ -1,0 +1,4 @@
+# 이 프로젝트에 필요한 모든 패키지를 한 번에 설치합니다.
+#   pip install -r requirements.txt
+# 패키지 목록과 버전 범위는 pyproject.toml 에서 관리합니다.
+-e .[all,dev]

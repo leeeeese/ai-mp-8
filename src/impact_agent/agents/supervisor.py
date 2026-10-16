@@ -15,8 +15,8 @@ from .. import config
 from ..schemas import (
     AgentName,
     AgentRunRecord,
-    ComposerOutput,
     Complexity,
+    ComposerOutput,
     ExplorerOutput,
     ReplanFeedback,
     UserInput,

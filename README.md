@@ -67,16 +67,70 @@
 │   ├── prompts/              # 에이전트별 시스템 프롬프트 (*.md)
 │   └── templates/            # Composer markdown 템플릿 (Jinja2)
 ├── tests/                    # 스키마 동기화 · Supervisor 루프 · KPI · 템플릿 테스트
-├── scripts/export_schema.py  # Pydantic 모델 → JSON Schema 재생성 (비교용)
+├── scripts/
+│   ├── setup.sh / setup.ps1  # 가상환경 + 패키지 일괄 설치
+│   └── export_schema.py      # Pydantic 모델 → JSON Schema 재생성 (비교용)
+├── requirements.txt          # pip install -r requirements.txt (= .[all,dev])
 └── docs/architecture.md
 ```
 
 ## 시작하기
 
+### 요구 사항
+- Python 3.11 이상
+- (PDF 저장 시) WeasyPrint 시스템 라이브러리
+  - macOS: `brew install pango`
+  - Ubuntu/Debian: `sudo apt install libpango-1.0-0 libpangoft2-1.0-0`
+  - Windows: [WeasyPrint 설치 안내](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#windows) 참고
+- (Explorer) Neo4j 5.x 이상. 로컬에서는 Docker로 띄울 수 있습니다:
+  `docker run -d --name neo4j -p 7474:7474 -p 7687:7687 -e NEO4J_AUTH=neo4j/<비밀번호> neo4j:5`
+
+### 한 번에 설치
+
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e ".[dev]"
+git clone -b dev-by-claude-code https://github.com/leeeeese/ai-mp-8.git
+cd ai-mp-8
+
+# macOS / Linux
+./scripts/setup.sh
+
+# Windows (PowerShell)
+powershell -ExecutionPolicy Bypass -File scripts\setup.ps1
+```
+
+스크립트는 `.venv` 가상환경을 만들고, `requirements.txt`로 모든 패키지를 설치하고, `.env.example`을 복사해 `.env`를 만든 다음 테스트까지 실행합니다.
+
+수동으로 설치할 때는 아래 명령을 차례로 실행합니다.
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate          # Windows: .venv\Scripts\activate
+pip install -r requirements.txt     # = pip install -e ".[all,dev]"
+cp .env.example .env               # Windows: copy .env.example .env
 pytest
+```
+
+### 패키지 묶음 (`pyproject.toml`)
+
+| 묶음 | 패키지 | 용도 |
+|---|---|---|
+| (기본) | pydantic, jinja2, python-dotenv | 스키마, 흐름 제어, 템플릿, .env 로드 |
+| `llm` | anthropic | 에이전트 LLM 호출 (Claude) |
+| `graph` | neo4j | 2-1 Explorer: 의존 그래프 |
+| `vector` | chromadb | 2-2 Retriever: 벡터 DB 근거 검색 |
+| `report` | markdown, weasyprint | 4 Composer: PDF 저장 |
+| `dev` | pytest, ruff | 테스트, 린트 |
+| `all` | llm + graph + vector + report | 전체 런타임 |
+
+필요한 묶음만 설치할 수도 있습니다. 예: `pip install -e ".[llm,graph,dev]"`
+
+### 자주 쓰는 명령
+
+```bash
+source .venv/bin/activate
+pytest                                    # 테스트
+ruff check src tests                      # 린트
+python -m impact_agent "요청 문장" --sm-part product   # 실행 (에이전트 구현 후)
 ```
 
 ## 스키마 변경 절차
