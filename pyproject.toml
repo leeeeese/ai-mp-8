@@ -1,0 +1,27 @@
+[project]
+name = "impact-agent"
+version = "0.1.0"
+description = "요건/운영 문의에 대한 영향도 분석 멀티 에이전트"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "pydantic>=2.7",
+    "jinja2>=3.1",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+impact-agent = "impact_agent.__main__:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/impact_agent"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

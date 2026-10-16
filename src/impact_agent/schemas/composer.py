@@ -1,0 +1,85 @@
+"""Composer 출력 (simple 답변 / complex 보고서)."""
+
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+from .enums import Area, ChecklistOwner, ChecklistStatus, Complexity, Confidence, Difficulty, Feasibility
+from .simulator import ImpactPath
+
+
+# --- complex ---------------------------------------------------------------
+class AreaVerdictRow(BaseModel):
+    """영역별 판정표 한 행."""
+
+    area: Area
+    impact_path_summary: str
+    feasibility: Feasibility
+    difficulty: Difficulty
+    alternative: str | None = None
+    confidence: Confidence
+    evidence_names: list[str] = Field(description="노드·테이블명·소스 위치")
+
+
+class ChecklistItem(BaseModel):
+    item_id: str
+    owner: ChecklistOwner
+    question: str
+    answer: str | None = None
+    status: ChecklistStatus = ChecklistStatus.UNCONFIRMED
+    related_area: Area | None = None
+
+
+class ComplexReport(BaseModel):
+    summary_conclusion: str
+    area_verdicts: list[AreaVerdictRow]
+    schedule_factors: list[str]
+    path_details: list[ImpactPath]
+    analysis_limits: list[str]
+    checklist: list[ChecklistItem]
+    stage: Literal["initial", "updated", "final_for_dev"] = "initial"
+
+
+# --- simple ----------------------------------------------------------------
+class SimpleEvidenceRow(BaseModel):
+    claim: str
+    evidence: str
+    location: str | None = None
+    confidence: Confidence
+
+
+class GuidanceQuery(BaseModel):
+    purpose: str
+    sql: str = Field(description="읽기 전용(SELECT)만 허용")
+
+
+class QueryResultSummary(BaseModel):
+    code_meanings: list[str] = Field(default_factory=list)
+    main_causes: list[str] = Field(default_factory=list)
+    inquiry_items: list[str] = Field(default_factory=list, description="문의 필요 항목")
+
+
+class SimpleAnswer(BaseModel):
+    conclusion_lines: list[str] = Field(min_length=3, max_length=5)
+    evidence_table: list[SimpleEvidenceRow]
+    check_queries: list[GuidanceQuery] = Field(default_factory=list)
+    inquiry_contacts: list[str] = Field(default_factory=list)
+    analysis_limits: list[str] = Field(default_factory=list)
+    detail_analysis_recommended: bool = Field(default=False, description="변경 요소가 보이면 True")
+    query_result_summary: QueryResultSummary | None = None
+
+
+# --- output ----------------------------------------------------------------
+class ReanalysisRequest(BaseModel):
+    """Composer → Supervisor. 답변 반영으로 영향 경로 자체가 바뀌어야 할 때."""
+
+    reason: str
+    changed_assumptions: list[str]
+
+
+class ComposerOutput(BaseModel):
+    complexity: Complexity
+    complex_report: ComplexReport | None = None
+    simple_answer: SimpleAnswer | None = None
+    reanalysis_request: ReanalysisRequest | None = None
+    markdown: str = Field(description="템플릿 렌더링 결과 (사용자 표시용)")

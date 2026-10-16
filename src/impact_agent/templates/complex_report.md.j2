@@ -1,0 +1,37 @@
+# 영향도 분석 보고서 ({{ report.stage }})
+
+## 요약 결론
+{{ report.summary_conclusion }}
+
+## 영역별 판정
+| 영역 | 영향 경로 | 가능성 | 난이도 | 대안 | 확신도 | 근거 |
+|---|---|---|---|---|---|---|
+{% for r in report.area_verdicts %}
+| {{ r.area.value }} | {{ r.impact_path_summary }} | {{ r.feasibility.value }} | {{ r.difficulty.value }} | {{ r.alternative or "-" }} | {{ r.confidence.value }} | {{ r.evidence_names | join(", ") }} |
+{% endfor %}
+
+## 일정 영향 요인
+{% for f in report.schedule_factors %}
+- {{ f }}
+{% endfor %}
+
+## 경로 상세
+{% for p in report.path_details %}
+### {{ p.path_id }}{% if p.cross_domain %} (도메인 연계){% endif %}
+
+{% for h in p.hops %}
+{{ loop.index }}. {{ h.node }} → {{ h.relation }} → {{ h.impact }}{% if h.evidence_ref %} [`{{ h.evidence_ref }}`]{% endif %} ({{ h.confidence.value }})
+{% endfor %}
+{% endfor %}
+
+## 분석 한계
+{% for l in report.analysis_limits %}
+- {{ l }}
+{% endfor %}
+
+## 확인 체크리스트
+| ID | 담당 | 질문 | 답변 | 상태 |
+|---|---|---|---|---|
+{% for c in report.checklist %}
+| {{ c.item_id }} | {{ c.owner.value }} | {{ c.question }} | {{ c.answer or "-" }} | {{ c.status.value }} |
+{% endfor %}

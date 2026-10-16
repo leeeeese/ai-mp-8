@@ -1,0 +1,32 @@
+## 결론
+{% for line in answer.conclusion_lines %}
+- {{ line }}
+{% endfor %}
+
+## 근거
+| 주장 | 근거 | 위치 | 확신도 |
+|---|---|---|---|
+{% for row in answer.evidence_table %}
+| {{ row.claim }} | {{ row.evidence }} | {{ row.location or "-" }} | {{ row.confidence.value }} |
+{% endfor %}
+{% if answer.check_queries %}
+
+## 확인 쿼리
+{% for q in answer.check_queries %}
+**{{ q.purpose }}**
+```sql
+{{ q.sql }}
+```
+{% endfor %}
+{% endif %}
+{% if answer.analysis_limits %}
+
+## 분석 한계
+{% for l in answer.analysis_limits %}
+- {{ l }}
+{% endfor %}
+{% endif %}
+{% if answer.detail_analysis_recommended %}
+
+> 변경 요소가 보입니다. 상세 영향도 분석을 권장합니다.
+{% endif %}

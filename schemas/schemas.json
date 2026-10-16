@@ -1,0 +1,1595 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "ImpactAnalysisAgentSchemas",
+  "constants": {
+    "MAX_EXPLORE_LOOP": 3,
+    "MAX_REPLAN": 2,
+    "MAX_TOOL_CALLS": 20,
+    "MEMORY_WINDOW_N": 5
+  },
+  "$defs": {
+    "Difficulty": {
+      "enum": [
+        "Major",
+        "Medium",
+        "Minor"
+      ],
+      "title": "Difficulty",
+      "type": "string"
+    },
+    "Feasibility": {
+      "enum": [
+        "feasible",
+        "hard",
+        "review"
+      ],
+      "title": "Feasibility",
+      "type": "string"
+    },
+    "Alternative": {
+      "properties": {
+        "description": {
+          "title": "Description",
+          "type": "string"
+        },
+        "feasibility": {
+          "$ref": "#/$defs/Feasibility"
+        },
+        "difficulty": {
+          "$ref": "#/$defs/Difficulty"
+        },
+        "pros_cons": {
+          "title": "Pros Cons",
+          "type": "string"
+        }
+      },
+      "required": [
+        "description",
+        "feasibility",
+        "difficulty",
+        "pros_cons"
+      ],
+      "title": "Alternative",
+      "type": "object"
+    },
+    "Area": {
+      "enum": [
+        "screen",
+        "db",
+        "interface",
+        "batch"
+      ],
+      "title": "Area",
+      "type": "string"
+    },
+    "Confidence": {
+      "enum": [
+        "confirmed",
+        "inferred"
+      ],
+      "title": "Confidence",
+      "type": "string"
+    },
+    "ImpactPath": {
+      "properties": {
+        "path_id": {
+          "title": "Path Id",
+          "type": "string"
+        },
+        "hops": {
+          "description": "A→C→X 순서",
+          "items": {
+            "$ref": "#/$defs/PathHop"
+          },
+          "title": "Hops",
+          "type": "array"
+        },
+        "cross_domain": {
+          "default": false,
+          "description": "상품↔마케팅 도메인 간 연계 여부",
+          "title": "Cross Domain",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path_id",
+        "hops"
+      ],
+      "title": "ImpactPath",
+      "type": "object"
+    },
+    "ImpactType": {
+      "enum": [
+        "add",
+        "modify",
+        "reference_only",
+        "none"
+      ],
+      "title": "ImpactType",
+      "type": "string"
+    },
+    "PathHop": {
+      "description": "'노드 → 관계 → 영향 → 근거' 한 hop.",
+      "properties": {
+        "node": {
+          "title": "Node",
+          "type": "string"
+        },
+        "relation": {
+          "title": "Relation",
+          "type": "string"
+        },
+        "impact": {
+          "title": "Impact",
+          "type": "string"
+        },
+        "evidence_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "Evidence 식별 (file_path#symbol)",
+          "title": "Evidence Ref"
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        }
+      },
+      "required": [
+        "node",
+        "relation",
+        "impact",
+        "confidence"
+      ],
+      "title": "PathHop",
+      "type": "object"
+    },
+    "AreaImpact": {
+      "properties": {
+        "area": {
+          "$ref": "#/$defs/Area"
+        },
+        "impact_type": {
+          "$ref": "#/$defs/ImpactType"
+        },
+        "paths": {
+          "items": {
+            "$ref": "#/$defs/ImpactPath"
+          },
+          "title": "Paths",
+          "type": "array"
+        },
+        "feasibility": {
+          "$ref": "#/$defs/Feasibility"
+        },
+        "difficulty": {
+          "$ref": "#/$defs/Difficulty"
+        },
+        "difficulty_basis": {
+          "description": "사전 확정한 난이도 판단 기준 중 적용한 항목",
+          "title": "Difficulty Basis",
+          "type": "string"
+        },
+        "schedule_factors": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Schedule Factors",
+          "type": "array"
+        },
+        "infeasible_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Infeasible Reason"
+        },
+        "alternatives": {
+          "items": {
+            "$ref": "#/$defs/Alternative"
+          },
+          "title": "Alternatives",
+          "type": "array"
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        }
+      },
+      "required": [
+        "area",
+        "impact_type",
+        "paths",
+        "feasibility",
+        "difficulty",
+        "difficulty_basis",
+        "confidence"
+      ],
+      "title": "AreaImpact",
+      "type": "object"
+    },
+    "AreaVerdictRow": {
+      "description": "영역별 판정표 한 행.",
+      "properties": {
+        "area": {
+          "$ref": "#/$defs/Area"
+        },
+        "impact_path_summary": {
+          "title": "Impact Path Summary",
+          "type": "string"
+        },
+        "feasibility": {
+          "$ref": "#/$defs/Feasibility"
+        },
+        "difficulty": {
+          "$ref": "#/$defs/Difficulty"
+        },
+        "alternative": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Alternative"
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        },
+        "evidence_names": {
+          "description": "노드·테이블명·소스 위치",
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence Names",
+          "type": "array"
+        }
+      },
+      "required": [
+        "area",
+        "impact_path_summary",
+        "feasibility",
+        "difficulty",
+        "confidence",
+        "evidence_names"
+      ],
+      "title": "AreaVerdictRow",
+      "type": "object"
+    },
+    "ChecklistOwner": {
+      "enum": [
+        "business",
+        "developer"
+      ],
+      "title": "ChecklistOwner",
+      "type": "string"
+    },
+    "ChecklistStatus": {
+      "enum": [
+        "confirmed",
+        "unconfirmed"
+      ],
+      "title": "ChecklistStatus",
+      "type": "string"
+    },
+    "ChecklistItem": {
+      "properties": {
+        "item_id": {
+          "title": "Item Id",
+          "type": "string"
+        },
+        "owner": {
+          "$ref": "#/$defs/ChecklistOwner"
+        },
+        "question": {
+          "title": "Question",
+          "type": "string"
+        },
+        "answer": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Answer"
+        },
+        "status": {
+          "$ref": "#/$defs/ChecklistStatus",
+          "default": "unconfirmed"
+        },
+        "related_area": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Area"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "item_id",
+        "owner",
+        "question"
+      ],
+      "title": "ChecklistItem",
+      "type": "object"
+    },
+    "ComplexReport": {
+      "properties": {
+        "summary_conclusion": {
+          "title": "Summary Conclusion",
+          "type": "string"
+        },
+        "area_verdicts": {
+          "items": {
+            "$ref": "#/$defs/AreaVerdictRow"
+          },
+          "title": "Area Verdicts",
+          "type": "array"
+        },
+        "schedule_factors": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Schedule Factors",
+          "type": "array"
+        },
+        "path_details": {
+          "items": {
+            "$ref": "#/$defs/ImpactPath"
+          },
+          "title": "Path Details",
+          "type": "array"
+        },
+        "analysis_limits": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Analysis Limits",
+          "type": "array"
+        },
+        "checklist": {
+          "items": {
+            "$ref": "#/$defs/ChecklistItem"
+          },
+          "title": "Checklist",
+          "type": "array"
+        },
+        "stage": {
+          "default": "initial",
+          "enum": [
+            "initial",
+            "updated",
+            "final_for_dev"
+          ],
+          "title": "Stage",
+          "type": "string"
+        }
+      },
+      "required": [
+        "summary_conclusion",
+        "area_verdicts",
+        "schedule_factors",
+        "path_details",
+        "analysis_limits",
+        "checklist"
+      ],
+      "title": "ComplexReport",
+      "type": "object"
+    },
+    "Complexity": {
+      "enum": [
+        "simple",
+        "complex"
+      ],
+      "title": "Complexity",
+      "type": "string"
+    },
+    "GuidanceQuery": {
+      "properties": {
+        "purpose": {
+          "title": "Purpose",
+          "type": "string"
+        },
+        "sql": {
+          "description": "읽기 전용(SELECT)만 허용",
+          "title": "Sql",
+          "type": "string"
+        }
+      },
+      "required": [
+        "purpose",
+        "sql"
+      ],
+      "title": "GuidanceQuery",
+      "type": "object"
+    },
+    "QueryResultSummary": {
+      "properties": {
+        "code_meanings": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Code Meanings",
+          "type": "array"
+        },
+        "main_causes": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Main Causes",
+          "type": "array"
+        },
+        "inquiry_items": {
+          "description": "문의 필요 항목",
+          "items": {
+            "type": "string"
+          },
+          "title": "Inquiry Items",
+          "type": "array"
+        }
+      },
+      "title": "QueryResultSummary",
+      "type": "object"
+    },
+    "ReanalysisRequest": {
+      "description": "Composer → Supervisor. 답변 반영으로 영향 경로 자체가 바뀌어야 할 때.",
+      "properties": {
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "changed_assumptions": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Changed Assumptions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "reason",
+        "changed_assumptions"
+      ],
+      "title": "ReanalysisRequest",
+      "type": "object"
+    },
+    "SimpleAnswer": {
+      "properties": {
+        "conclusion_lines": {
+          "items": {
+            "type": "string"
+          },
+          "maxItems": 5,
+          "minItems": 3,
+          "title": "Conclusion Lines",
+          "type": "array"
+        },
+        "evidence_table": {
+          "items": {
+            "$ref": "#/$defs/SimpleEvidenceRow"
+          },
+          "title": "Evidence Table",
+          "type": "array"
+        },
+        "check_queries": {
+          "items": {
+            "$ref": "#/$defs/GuidanceQuery"
+          },
+          "title": "Check Queries",
+          "type": "array"
+        },
+        "inquiry_contacts": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Inquiry Contacts",
+          "type": "array"
+        },
+        "analysis_limits": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Analysis Limits",
+          "type": "array"
+        },
+        "detail_analysis_recommended": {
+          "default": false,
+          "description": "변경 요소가 보이면 True",
+          "title": "Detail Analysis Recommended",
+          "type": "boolean"
+        },
+        "query_result_summary": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/QueryResultSummary"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "conclusion_lines",
+        "evidence_table"
+      ],
+      "title": "SimpleAnswer",
+      "type": "object"
+    },
+    "SimpleEvidenceRow": {
+      "properties": {
+        "claim": {
+          "title": "Claim",
+          "type": "string"
+        },
+        "evidence": {
+          "title": "Evidence",
+          "type": "string"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Location"
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        }
+      },
+      "required": [
+        "claim",
+        "evidence",
+        "confidence"
+      ],
+      "title": "SimpleEvidenceRow",
+      "type": "object"
+    },
+    "ComposerOutput": {
+      "properties": {
+        "complexity": {
+          "$ref": "#/$defs/Complexity"
+        },
+        "complex_report": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ComplexReport"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "simple_answer": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SimpleAnswer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "reanalysis_request": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/ReanalysisRequest"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "markdown": {
+          "description": "템플릿 렌더링 결과 (사용자 표시용)",
+          "title": "Markdown",
+          "type": "string"
+        }
+      },
+      "required": [
+        "complexity",
+        "markdown"
+      ],
+      "title": "ComposerOutput",
+      "type": "object"
+    },
+    "Domain": {
+      "enum": [
+        "swing",
+        "tos"
+      ],
+      "title": "Domain",
+      "type": "string"
+    },
+    "Evidence": {
+      "properties": {
+        "node_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Node Id"
+        },
+        "file_path": {
+          "title": "File Path",
+          "type": "string"
+        },
+        "symbol": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Symbol"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "라인/화면 ID 등",
+          "title": "Location"
+        },
+        "summary": {
+          "title": "Summary",
+          "type": "string"
+        },
+        "source_kind": {
+          "enum": [
+            "source",
+            "screen",
+            "interface_spec",
+            "common_code",
+            "ops_doc"
+          ],
+          "title": "Source Kind",
+          "type": "string"
+        },
+        "domain": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Domain"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Score"
+        }
+      },
+      "required": [
+        "file_path",
+        "summary",
+        "source_kind"
+      ],
+      "title": "Evidence",
+      "type": "object"
+    },
+    "ExpandGraphInput": {
+      "properties": {
+        "node_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Node Ids",
+          "type": "array"
+        },
+        "hops": {
+          "default": 1,
+          "maximum": 2,
+          "minimum": 1,
+          "title": "Hops",
+          "type": "integer"
+        },
+        "rel_types": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Rel Types"
+        }
+      },
+      "required": [
+        "node_ids"
+      ],
+      "title": "ExpandGraphInput",
+      "type": "object"
+    },
+    "GraphEdge": {
+      "properties": {
+        "from_id": {
+          "title": "From Id",
+          "type": "string"
+        },
+        "to_id": {
+          "title": "To Id",
+          "type": "string"
+        },
+        "type": {
+          "description": "CALLS / REFERENCES / UPDATES / FLOWS_TO 등",
+          "title": "Type",
+          "type": "string"
+        }
+      },
+      "required": [
+        "from_id",
+        "to_id",
+        "type"
+      ],
+      "title": "GraphEdge",
+      "type": "object"
+    },
+    "GraphNode": {
+      "properties": {
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "label": {
+          "description": "노드 유형 (Program/Method/SQL/Table/Batch/Interface/Screen 등)",
+          "title": "Label",
+          "type": "string"
+        },
+        "domain": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Domain"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "source_file": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source File"
+        },
+        "source_line": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Source Line"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": true,
+          "title": "Properties"
+        }
+      },
+      "required": [
+        "node_id",
+        "name",
+        "label"
+      ],
+      "title": "GraphNode",
+      "type": "object"
+    },
+    "ExpandGraphOutput": {
+      "properties": {
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/GraphNode"
+          },
+          "title": "Nodes",
+          "type": "array"
+        },
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/GraphEdge"
+          },
+          "title": "Edges",
+          "type": "array"
+        }
+      },
+      "required": [
+        "nodes",
+        "edges"
+      ],
+      "title": "ExpandGraphOutput",
+      "type": "object"
+    },
+    "StartNodeChoice": {
+      "properties": {
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "matched_keyword": {
+          "title": "Matched Keyword",
+          "type": "string"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "matched_keyword",
+        "reason"
+      ],
+      "title": "StartNodeChoice",
+      "type": "object"
+    },
+    "ExplorerOutput": {
+      "properties": {
+        "start_nodes": {
+          "items": {
+            "$ref": "#/$defs/StartNodeChoice"
+          },
+          "title": "Start Nodes",
+          "type": "array"
+        },
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/GraphNode"
+          },
+          "title": "Nodes",
+          "type": "array"
+        },
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/GraphEdge"
+          },
+          "title": "Edges",
+          "type": "array"
+        },
+        "hops_used": {
+          "maximum": 2,
+          "minimum": 1,
+          "title": "Hops Used",
+          "type": "integer"
+        },
+        "hop_extension_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "2hop 확장 시 근거",
+          "title": "Hop Extension Reason"
+        },
+        "tool_call_count": {
+          "default": 0,
+          "title": "Tool Call Count",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "start_nodes",
+        "nodes",
+        "edges",
+        "hops_used"
+      ],
+      "title": "ExplorerOutput",
+      "type": "object"
+    },
+    "FollowupType": {
+      "enum": [
+        "business_answer",
+        "developer_opinion",
+        "query_result",
+        "change_analysis",
+        "reanalysis"
+      ],
+      "title": "FollowupType",
+      "type": "string"
+    },
+    "FollowupInput": {
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/FollowupType"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "target_item_ids": {
+          "description": "답변 대상 체크리스트 항목",
+          "items": {
+            "type": "string"
+          },
+          "title": "Target Item Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "type",
+        "content"
+      ],
+      "title": "FollowupInput",
+      "type": "object"
+    },
+    "GetNodeDetailInput": {
+      "properties": {
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id"
+      ],
+      "title": "GetNodeDetailInput",
+      "type": "object"
+    },
+    "AnalysisPoint": {
+      "enum": [
+        "initial",
+        "operating"
+      ],
+      "title": "AnalysisPoint",
+      "type": "string"
+    },
+    "InputSource": {
+      "enum": [
+        "itsd",
+        "mail",
+        "etc"
+      ],
+      "title": "InputSource",
+      "type": "string"
+    },
+    "InputType": {
+      "enum": [
+        "requirement",
+        "ops_inquiry"
+      ],
+      "title": "InputType",
+      "type": "string"
+    },
+    "InputMeta": {
+      "properties": {
+        "source": {
+          "$ref": "#/$defs/InputSource"
+        },
+        "input_type": {
+          "$ref": "#/$defs/InputType"
+        },
+        "analysis_point": {
+          "$ref": "#/$defs/AnalysisPoint"
+        }
+      },
+      "required": [
+        "source",
+        "input_type",
+        "analysis_point"
+      ],
+      "title": "InputMeta",
+      "type": "object"
+    },
+    "OpenItem": {
+      "description": "[업무 확정 필요] 항목 — 요건서에 없는 내용.",
+      "properties": {
+        "item": {
+          "title": "Item",
+          "type": "string"
+        },
+        "reason": {
+          "description": "왜 확정이 필요한지",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "item",
+        "reason"
+      ],
+      "title": "OpenItem",
+      "type": "object"
+    },
+    "AgentName": {
+      "enum": [
+        "explorer",
+        "retriever",
+        "simulator",
+        "verifier"
+      ],
+      "title": "AgentName",
+      "type": "string"
+    },
+    "PlanStep": {
+      "properties": {
+        "agent": {
+          "$ref": "#/$defs/AgentName"
+        },
+        "purpose": {
+          "title": "Purpose",
+          "type": "string"
+        }
+      },
+      "required": [
+        "agent",
+        "purpose"
+      ],
+      "title": "PlanStep",
+      "type": "object"
+    },
+    "RequestType": {
+      "enum": [
+        "change",
+        "structure_query",
+        "ops_issue"
+      ],
+      "title": "RequestType",
+      "type": "string"
+    },
+    "StructuredRequest": {
+      "properties": {
+        "target": {
+          "description": "대상 (예: 신규 캠페인 화면)",
+          "title": "Target",
+          "type": "string"
+        },
+        "action": {
+          "description": "행위 (예: 비마케팅 여부 저장 후 채널 전송)",
+          "title": "Action",
+          "type": "string"
+        },
+        "condition": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Condition"
+        },
+        "policy": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Policy"
+        },
+        "scope": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "적용 범위",
+          "title": "Scope"
+        },
+        "request_type": {
+          "$ref": "#/$defs/RequestType"
+        },
+        "business_terms": {
+          "description": "공통코드 매핑이 필요한 현업 용어 (예: 안보폰)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Business Terms",
+          "type": "array"
+        },
+        "open_items": {
+          "items": {
+            "$ref": "#/$defs/OpenItem"
+          },
+          "title": "Open Items",
+          "type": "array"
+        }
+      },
+      "required": [
+        "target",
+        "action",
+        "request_type"
+      ],
+      "title": "StructuredRequest",
+      "type": "object"
+    },
+    "PlannerOutput": {
+      "properties": {
+        "structured_request": {
+          "$ref": "#/$defs/StructuredRequest"
+        },
+        "complexity": {
+          "$ref": "#/$defs/Complexity"
+        },
+        "complexity_reason": {
+          "description": "판정 근거 (필수)",
+          "title": "Complexity Reason",
+          "type": "string"
+        },
+        "plan": {
+          "description": "simple: explorer, retriever / complex: explorer, retriever, simulator, verifier",
+          "items": {
+            "$ref": "#/$defs/PlanStep"
+          },
+          "title": "Plan",
+          "type": "array"
+        }
+      },
+      "required": [
+        "structured_request",
+        "complexity",
+        "complexity_reason",
+        "plan"
+      ],
+      "title": "PlannerOutput",
+      "type": "object"
+    },
+    "ReexploreRequest": {
+      "properties": {
+        "node_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Node Ids",
+          "type": "array"
+        },
+        "reason": {
+          "description": "새로 발견된 연결과 재탐색 사유",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_ids",
+        "reason"
+      ],
+      "title": "ReexploreRequest",
+      "type": "object"
+    },
+    "ReplanFeedback": {
+      "description": "재계획마다 누적되는 항목 (replan_feedback).",
+      "properties": {
+        "round": {
+          "title": "Round",
+          "type": "integer"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        },
+        "additional_scope": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Additional Scope",
+          "type": "array"
+        }
+      },
+      "required": [
+        "round",
+        "reason",
+        "additional_scope"
+      ],
+      "title": "ReplanFeedback",
+      "type": "object"
+    },
+    "RetrieverOutput": {
+      "properties": {
+        "evidence": {
+          "items": {
+            "$ref": "#/$defs/Evidence"
+          },
+          "title": "Evidence",
+          "type": "array"
+        },
+        "nodes_without_evidence": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Nodes Without Evidence",
+          "type": "array"
+        },
+        "reexplore_request": {
+          "items": {
+            "$ref": "#/$defs/ReexploreRequest"
+          },
+          "title": "Reexplore Request",
+          "type": "array"
+        }
+      },
+      "required": [
+        "evidence"
+      ],
+      "title": "RetrieverOutput",
+      "type": "object"
+    },
+    "SaveReportInput": {
+      "properties": {
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "format": {
+          "enum": [
+            "md",
+            "pdf"
+          ],
+          "title": "Format",
+          "type": "string"
+        }
+      },
+      "required": [
+        "content",
+        "format"
+      ],
+      "title": "SaveReportInput",
+      "type": "object"
+    },
+    "SaveReportOutput": {
+      "properties": {
+        "file_path": {
+          "title": "File Path",
+          "type": "string"
+        }
+      },
+      "required": [
+        "file_path"
+      ],
+      "title": "SaveReportOutput",
+      "type": "object"
+    },
+    "SmPart": {
+      "enum": [
+        "product",
+        "marketing"
+      ],
+      "title": "SmPart",
+      "type": "string"
+    },
+    "SearchGraphNodesInput": {
+      "properties": {
+        "keyword": {
+          "title": "Keyword",
+          "type": "string"
+        },
+        "sm_part": {
+          "$ref": "#/$defs/SmPart"
+        },
+        "top_k": {
+          "default": 5,
+          "title": "Top K",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "keyword",
+        "sm_part"
+      ],
+      "title": "SearchGraphNodesInput",
+      "type": "object"
+    },
+    "SearchGraphNodesItem": {
+      "properties": {
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "label": {
+          "title": "Label",
+          "type": "string"
+        },
+        "score": {
+          "title": "Score",
+          "type": "number"
+        }
+      },
+      "required": [
+        "node_id",
+        "name",
+        "label",
+        "score"
+      ],
+      "title": "SearchGraphNodesItem",
+      "type": "object"
+    },
+    "SearchSourceInput": {
+      "properties": {
+        "query": {
+          "title": "Query",
+          "type": "string"
+        },
+        "domain": {
+          "$ref": "#/$defs/Domain"
+        },
+        "node_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Node Id"
+        },
+        "top_k": {
+          "default": 5,
+          "title": "Top K",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "query",
+        "domain"
+      ],
+      "title": "SearchSourceInput",
+      "type": "object"
+    },
+    "SearchSourceItem": {
+      "properties": {
+        "file_path": {
+          "title": "File Path",
+          "type": "string"
+        },
+        "symbol": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Symbol"
+        },
+        "snippet": {
+          "title": "Snippet",
+          "type": "string"
+        },
+        "score": {
+          "title": "Score",
+          "type": "number"
+        }
+      },
+      "required": [
+        "file_path",
+        "snippet",
+        "score"
+      ],
+      "title": "SearchSourceItem",
+      "type": "object"
+    },
+    "SimulationOutput": {
+      "properties": {
+        "area_impacts": {
+          "items": {
+            "$ref": "#/$defs/AreaImpact"
+          },
+          "title": "Area Impacts",
+          "type": "array"
+        },
+        "requested_vs_alternative": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "요청안/대안 비교 요약",
+          "title": "Requested Vs Alternative"
+        },
+        "unverified_segments": {
+          "description": "확인하지 못한 구간·파일 (분석 한계로 전달)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Unverified Segments",
+          "type": "array"
+        }
+      },
+      "required": [
+        "area_impacts"
+      ],
+      "title": "SimulationOutput",
+      "type": "object"
+    },
+    "UserInput": {
+      "description": "Supervisor가 받는 최초 입력.",
+      "properties": {
+        "request_text": {
+          "title": "Request Text",
+          "type": "string"
+        },
+        "sm_part": {
+          "$ref": "#/$defs/SmPart"
+        }
+      },
+      "required": [
+        "request_text",
+        "sm_part"
+      ],
+      "title": "UserInput",
+      "type": "object"
+    },
+    "VerifyCheck": {
+      "properties": {
+        "check": {
+          "enum": [
+            "area_path_missing",
+            "cross_domain_link",
+            "redundant_path",
+            "alternative_basis"
+          ],
+          "title": "Check",
+          "type": "string"
+        },
+        "area": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Area"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "result": {
+          "$ref": "#/$defs/VerifyResult"
+        },
+        "note": {
+          "title": "Note",
+          "type": "string"
+        }
+      },
+      "required": [
+        "check",
+        "result",
+        "note"
+      ],
+      "title": "VerifyCheck",
+      "type": "object"
+    },
+    "VerifyResult": {
+      "enum": [
+        "pass",
+        "needs_supplement"
+      ],
+      "title": "VerifyResult",
+      "type": "string"
+    },
+    "VerifierOutput": {
+      "properties": {
+        "result": {
+          "$ref": "#/$defs/VerifyResult"
+        },
+        "checks": {
+          "items": {
+            "$ref": "#/$defs/VerifyCheck"
+          },
+          "title": "Checks",
+          "type": "array"
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "보완 필요 시 필수",
+          "title": "Reason"
+        },
+        "additional_scope": {
+          "description": "추가로 볼 노드/영역/키워드 (보완 필요 시 필수)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Additional Scope",
+          "type": "array"
+        }
+      },
+      "required": [
+        "result",
+        "checks"
+      ],
+      "title": "VerifierOutput",
+      "type": "object"
+    }
+  }
+}
