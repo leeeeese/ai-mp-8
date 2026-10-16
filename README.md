@@ -88,7 +88,7 @@
 ### 한 번에 설치
 
 ```bash
-git clone -b dev-by-claude-code https://github.com/leeeeese/ai-mp-8.git
+git clone https://github.com/leeeeese/ai-mp-8.git
 cd ai-mp-8
 
 # macOS / Linux
