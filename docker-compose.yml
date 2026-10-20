@@ -1,0 +1,23 @@
+# 로컬 개발용 Neo4j (2-1 Explorer: 의존 그래프)
+#   실행: docker compose up -d
+#   종료: docker compose down        (데이터는 ./data/neo4j 에 유지)
+#   UI  : http://localhost:7474      (bolt://localhost:7687, neo4j / .env 의 NEO4J_PASSWORD)
+#
+# 계정은 .env 의 NEO4J_USER / NEO4J_PASSWORD 로 "최초 실행 시" 생성된다.
+# 이후 .env 비밀번호를 바꿔도 반영되지 않으므로, 초기화하려면 down 후 ./data/neo4j 를 삭제한다.
+services:
+  neo4j:
+    image: neo4j:5
+    container_name: neo4j
+    ports:
+      - "7474:7474" # 브라우저 UI
+      - "7687:7687" # bolt (Python 드라이버)
+    environment:
+      NEO4J_AUTH: ${NEO4J_USER:-neo4j}/${NEO4J_PASSWORD:?.env 에 NEO4J_PASSWORD(8자 이상)를 설정하세요}
+      # 필요 시 APOC 플러그인 활성화 (최초 실행 시 다운로드)
+      # NEO4J_PLUGINS: '["apoc"]'
+    volumes:
+      - ./data/neo4j/data:/data
+      - ./data/neo4j/logs:/logs
+      - ./data/neo4j/import:/import # CSV 적재 시 LOAD CSV 경로
+    restart: unless-stopped

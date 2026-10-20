@@ -13,4 +13,4 @@ if (-not (Test-Path .env)) { Copy-Item .env.example .env }
 .\.venv\Scripts\python.exe -m pytest -q
 Write-Host ""
 Write-Host "완료. 가상환경 활성화: .\.venv\Scripts\Activate.ps1"
-Write-Host ".env 에 ANTHROPIC_API_KEY, NEO4J_PASSWORD 등을 채워 주세요."
+Write-Host ".env 에 OPENAI_API_KEY, NEO4J_PASSWORD 등을 채워 주세요."

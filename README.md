@@ -71,6 +71,7 @@
 │   ├── setup.sh / setup.ps1  # 가상환경 + 패키지 일괄 설치
 │   └── export_schema.py      # Pydantic 모델 → JSON Schema 재생성 (비교용)
 ├── requirements.txt          # pip install -r requirements.txt (= .[all,dev])
+├── docker-compose.yml        # 로컬 Neo4j (2-1 Explorer)
 └── docs/architecture.md
 ```
 
@@ -82,8 +83,7 @@
   - macOS: `brew install pango`
   - Ubuntu/Debian: `sudo apt install libpango-1.0-0 libpangoft2-1.0-0`
   - Windows: [WeasyPrint 설치 안내](https://doc.courtbouillon.org/weasyprint/stable/first_steps.html#windows) 참고
-- (Explorer) Neo4j 5.x 이상. 로컬에서는 Docker로 띄울 수 있습니다:
-  `docker run -d --name neo4j -p 7474:7474 -p 7687:7687 -e NEO4J_AUTH=neo4j/<비밀번호> neo4j:5`
+- (Explorer) Neo4j 5.x 이상. 로컬에서는 Docker Desktop으로 띄웁니다. 아래 [Neo4j 실행 (Docker)](#neo4j-실행-docker) 참고
 
 ### 한 번에 설치
 
@@ -110,12 +110,39 @@ cp .env.example .env               # Windows: copy .env.example .env
 pytest
 ```
 
+### Neo4j 실행 (Docker)
+
+Neo4j 가입이나 별도 설치는 필요 없습니다. `docker compose up` 시 `neo4j:5` 이미지가 자동으로 내려받아집니다.
+
+1. `.env`에 비밀번호를 정합니다. 계정은 **최초 실행 시** 이 값으로 생성됩니다.
+   ```
+   NEO4J_URI=bolt://localhost:7687
+   NEO4J_USER=neo4j              # 기본 관리자 계정명, 변경하지 않음
+   NEO4J_PASSWORD=<8자 이상>      # 영문·숫자 권장 (/, $ 등 특수문자 피하기)
+   ```
+2. Docker Desktop을 켠 뒤 컨테이너를 실행합니다.
+   ```bash
+   docker compose up -d
+   docker compose logs -f neo4j    # "Started." 가 보이면 준비 완료
+   ```
+3. http://localhost:7474 에서 `neo4j` / `.env`의 비밀번호로 로그인해 확인합니다.
+
+| 목적 | 명령 |
+|---|---|
+| 중지 (데이터 유지) | `docker compose down` |
+| 다시 시작 | `docker compose up -d` |
+| 완전 초기화 (비밀번호 재설정 포함) | `docker compose down` 후 `rm -rf data/neo4j` |
+
+- 데이터는 `./data/neo4j`에 저장되며 `.gitignore` 대상입니다.
+- 최초 실행 이후에는 `.env` 비밀번호를 바꿔도 반영되지 않습니다. 브라우저 UI에서 `ALTER CURRENT USER SET PASSWORD FROM '기존' TO '새것'`으로 바꾸거나, 위의 완전 초기화를 하세요.
+- APOC 플러그인이 필요하면 `docker-compose.yml`의 `NEO4J_PLUGINS` 주석을 해제합니다.
+
 ### 패키지 묶음 (`pyproject.toml`)
 
 | 묶음 | 패키지 | 용도 |
 |---|---|---|
 | (기본) | pydantic, jinja2, python-dotenv | 스키마, 흐름 제어, 템플릿, .env 로드 |
-| `llm` | anthropic | 에이전트 LLM 호출 (Claude) |
+| `llm` | openai | 에이전트 LLM 호출 (OpenAI) |
 | `graph` | neo4j | 2-1 Explorer: 의존 그래프 |
 | `vector` | chromadb | 2-2 Retriever: 벡터 DB 근거 검색 |
 | `report` | markdown, weasyprint | 4 Composer: PDF 저장 |
@@ -129,6 +156,7 @@ pytest
 ```bash
 source .venv/bin/activate
 pytest                                    # 테스트
+docker compose up -d                      # Neo4j 실행
 ruff check src tests                      # 린트
 python -m impact_agent "요청 문장" --sm-part product   # 실행 (에이전트 구현 후)
 ```

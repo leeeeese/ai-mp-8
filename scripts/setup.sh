@@ -15,4 +15,4 @@ PYTHON="${PYTHON:-python3}"
 .venv/bin/python -m pytest -q
 echo
 echo "완료. 가상환경 활성화: source .venv/bin/activate"
-echo ".env 에 ANTHROPIC_API_KEY, NEO4J_PASSWORD 등을 채워 주세요."
+echo ".env 에 OPENAI_API_KEY, NEO4J_PASSWORD 등을 채워 주세요."
