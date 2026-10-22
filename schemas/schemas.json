@@ -487,6 +487,14 @@
           "title": "Conclusion Lines",
           "type": "array"
         },
+        "impact_paths": {
+          "description": "영향 경로 (A→…→끝)",
+          "items": {
+            "$ref": "#/$defs/ImpactPath"
+          },
+          "title": "Impact Paths",
+          "type": "array"
+        },
         "evidence_table": {
           "items": {
             "$ref": "#/$defs/SimpleEvidenceRow"
@@ -1696,9 +1704,13 @@
     },
     "KpiMetricName": {
       "enum": [
-        "recall",
-        "miss_rate",
-        "precision",
+        "path_recall",
+        "critical_miss_rate",
+        "path_precision",
+        "path_precision_excl_partial",
+        "partial_paths",
+        "initial_paths",
+        "pending_paths",
         "latency_ms",
         "tool_calls",
         "explore_loops",
@@ -1706,6 +1718,25 @@
         "total_tokens"
       ],
       "title": "KpiMetricName",
+      "type": "string"
+    },
+    "AnswerPathStatus": {
+      "enum": [
+        "confirmed",
+        "pending"
+      ],
+      "title": "AnswerPathStatus",
+      "type": "string"
+    },
+    "PathDetection": {
+      "enum": [
+        "exact",
+        "partial",
+        "initial",
+        "missed",
+        "pending"
+      ],
+      "title": "PathDetection",
       "type": "string"
     },
     "KpiMetric": {
@@ -1850,6 +1881,25 @@
           "title": "Agent Runs",
           "type": "array"
         },
+        "path_results": {
+          "description": "정답 경로별 탐지 판정",
+          "items": {
+            "$ref": "#/$defs/PathResult"
+          },
+          "title": "Path Results",
+          "type": "array"
+        },
+        "false_positive_paths": {
+          "description": "정답과 무관한 제시 경로 (오탐)",
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "False Positive Paths",
+          "type": "array"
+        },
         "matched_nodes": {
           "description": "찾은 정답 노드",
           "items": {
@@ -1897,12 +1947,126 @@
       "title": "KpiOutput",
       "type": "object"
     },
+    "PathResult": {
+      "description": "정답 경로별 탐지 결과 (\"어디까지 따라갔는가\").",
+      "properties": {
+        "path_id": {
+          "title": "Path Id",
+          "type": "string"
+        },
+        "critical": {
+          "title": "Critical",
+          "type": "boolean"
+        },
+        "detection": {
+          "$ref": "#/$defs/PathDetection"
+        },
+        "matched_len": {
+          "description": "정답 경로 앞에서부터 순서대로 따라간 노드 수",
+          "title": "Matched Len",
+          "type": "integer"
+        },
+        "path_len": {
+          "title": "Path Len",
+          "type": "integer"
+        },
+        "reached_node": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "마지막으로 따라간 정답 노드",
+          "title": "Reached Node"
+        },
+        "reached_stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "도달 단계 A~F (그래프 0~5단계)",
+          "title": "Reached Stage"
+        }
+      },
+      "required": [
+        "path_id",
+        "critical",
+        "detection",
+        "matched_len",
+        "path_len"
+      ],
+      "title": "PathResult",
+      "type": "object"
+    },
+    "AnswerPath": {
+      "description": "정답 영향 경로 하나. nodes 는 진입(A)부터 끝까지 호출되는 쪽(downstream) 순서.",
+      "properties": {
+        "path_id": {
+          "title": "Path Id",
+          "type": "string"
+        },
+        "nodes": {
+          "description": "A→B→…→끝 노드 ID",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Nodes",
+          "type": "array"
+        },
+        "critical": {
+          "default": false,
+          "description": "놓치면 장애·과금 오류로 이어질 수 있는 경로",
+          "title": "Critical",
+          "type": "boolean"
+        },
+        "status": {
+          "$ref": "#/$defs/AnswerPathStatus",
+          "default": "confirmed"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        }
+      },
+      "required": [
+        "path_id",
+        "nodes"
+      ],
+      "title": "AnswerPath",
+      "type": "object"
+    },
     "AnswerKey": {
       "description": "정답 경로 목록 (KPI Agent 입력). data/ground_truth/<요건ID>.json 에서 만든다.",
       "properties": {
         "req_id": {
           "title": "Req Id",
           "type": "string"
+        },
+        "paths": {
+          "description": "정답 영향 경로 (경로 KPI 계산 기준)",
+          "items": {
+            "$ref": "#/$defs/AnswerPath"
+          },
+          "title": "Paths",
+          "type": "array"
         },
         "expected_nodes": {
           "description": "반드시 찾아야 하는 노드 (재현율·미탐율 분모)",

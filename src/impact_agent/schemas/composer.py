@@ -61,6 +61,7 @@ class QueryResultSummary(BaseModel):
 
 class SimpleAnswer(BaseModel):
     conclusion_lines: list[str] = Field(min_length=3, max_length=5)
+    impact_paths: list[ImpactPath] = Field(default_factory=list, description="영향 경로 (A→…→끝)")
     evidence_table: list[SimpleEvidenceRow]
     check_queries: list[GuidanceQuery] = Field(default_factory=list)
     inquiry_contacts: list[str] = Field(default_factory=list)

@@ -138,11 +138,32 @@ class KpiCategory(str, Enum):
     PERFORMANCE = "performance"
 
 
+class AnswerPathStatus(str, Enum):
+    """정답 경로의 실제 영향 여부 확정 상태."""
+
+    CONFIRMED = "confirmed"
+    PENDING = "pending"  # 미확정 → KPI 계산에서 제외, 평가 보류 건수로 별도 공개
+
+
+class PathDetection(str, Enum):
+    """정답 경로별 탐지 판정."""
+
+    EXACT = "exact"  # 끝까지 정확히 탐지
+    PARTIAL = "partial"  # 중간 단계까지만 탐지
+    INITIAL = "initial"  # 시작 노드만 탐지
+    MISSED = "missed"  # 탐지 못 함
+    PENDING = "pending"  # 미확정 경로 (평가 보류)
+
+
 class KpiMetricName(str, Enum):
     # quality (정답 경로 목록 대비)
-    RECALL = "recall"
-    MISS_RATE = "miss_rate"
-    PRECISION = "precision"
+    PATH_RECALL = "path_recall"  # 정확 탐지 / 확정 경로
+    CRITICAL_MISS_RATE = "critical_miss_rate"  # Critical 확정 경로 중 정확 탐지 못 한 비율 (부분·초기 포함)
+    PATH_PRECISION = "path_precision"  # 정확 / 제시 경로 (부분·초기 포함 분모, 가안)
+    PATH_PRECISION_EXCL_PARTIAL = "path_precision_excl_partial"  # 정확 / (정확 + 오탐)
+    PARTIAL_PATHS = "partial_paths"  # 부분 탐지 경로 수
+    INITIAL_PATHS = "initial_paths"  # 초기 탐지 경로 수
+    PENDING_PATHS = "pending_paths"  # 평가 보류(미확정) 경로 수
     # performance (실행 로그)
     LATENCY_MS = "latency_ms"
     TOOL_CALLS = "tool_calls"

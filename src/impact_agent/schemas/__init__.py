@@ -15,6 +15,7 @@ from .composer import (
 from .enums import (
     AgentName,
     AnalysisPoint,
+    AnswerPathStatus,
     Area,
     ChecklistOwner,
     ChecklistStatus,
@@ -31,6 +32,7 @@ from .enums import (
     KpiCategory,
     KpiMetricName,
     NodeLabel,
+    PathDetection,
     RequestType,
     SmPart,
     TraverseDirection,
@@ -50,8 +52,10 @@ from .inputs import (
 from .kpi import (
     AgentRunRecord,
     AnswerKey,
+    AnswerPath,
     KpiMetric,
     KpiOutput,
+    PathResult,
 )
 from .planner import (
     OpenItem,
@@ -96,6 +100,8 @@ __all__ = [
     "Alternative",
     "AnalysisPoint",
     "AnswerKey",
+    "AnswerPath",
+    "AnswerPathStatus",
     "Area",
     "AreaImpact",
     "AreaVerdictRow",
@@ -133,7 +139,9 @@ __all__ = [
     "MailDraft",
     "NodeLabel",
     "OpenItem",
+    "PathDetection",
     "PathHop",
+    "PathResult",
     "PlanStep",
     "PlannerOutput",
     "QueryResultSummary",

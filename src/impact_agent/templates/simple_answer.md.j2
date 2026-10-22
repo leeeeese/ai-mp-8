@@ -3,6 +3,14 @@
 - {{ line }}
 {% endfor %}
 
+{% if answer.impact_paths %}
+## 영향 경로
+{% for p in answer.impact_paths %}
+- {{ p.path_id }}: {% for h in p.hops %}{{ h.node }}{% if not loop.last %} → {% endif %}{% endfor %}
+
+{% endfor %}
+
+{% endif %}
 ## 근거
 | 주장 | 근거 | 위치 | 확신도 |
 |---|---|---|---|

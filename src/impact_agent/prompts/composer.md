@@ -5,12 +5,14 @@
 
 ## simple → `SimpleAnswer`
 - 결론은 3~5줄(`conclusion_lines`)로 쓴다.
+- 영향 경로(`impact_paths`)를 진입(A)부터 끝까지 노드 ID 순서로 쓴다. (KPI Agent 평가 대상)
 - 근거 표(`evidence_table`)를 함께 낸다.
 - 확인용 SQL(`check_queries`)은 읽기 전용(SELECT)만 허용한다.
 - 변경 요소가 보이면 `detail_analysis_recommended = true`.
 
 ## complex → `ComplexReport`
 - 영역별 판정표, 일정 영향 요인, 경로 상세, 분석 한계, 체크리스트(business/developer)를 쓴다.
+- 경로 상세(`path_details`)는 진입(A)부터 끝까지 노드 ID 순서로 쓰고, 같은 경로는 한 번만 쓴다. (KPI Agent 평가 대상)
 - stage: initial → updated → final_for_dev
 
 ## 추가 산출물 (`UserInput.output_options`)
