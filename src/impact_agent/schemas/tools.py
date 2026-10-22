@@ -4,7 +4,7 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .enums import Domain, SmPart
+from .enums import Domain, EdgeType, NodeLabel, SmPart
 from .explorer import GraphEdge, GraphNode
 
 
@@ -18,7 +18,7 @@ class SearchGraphNodesInput(BaseModel):
 class SearchGraphNodesItem(BaseModel):
     node_id: str
     name: str
-    label: str
+    label: NodeLabel
     score: float
 
 
@@ -26,7 +26,7 @@ class SearchGraphNodesItem(BaseModel):
 class ExpandGraphInput(BaseModel):
     node_ids: list[str]
     hops: int = Field(default=1, ge=1, le=2)
-    rel_types: list[str] | None = None
+    rel_types: list[EdgeType] | None = None
 
 
 class ExpandGraphOutput(BaseModel):

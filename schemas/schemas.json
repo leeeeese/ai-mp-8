@@ -656,6 +656,37 @@
       "title": "Domain",
       "type": "string"
     },
+    "NodeLabel": {
+      "description": "영향도 그래프 노드 유형. 단계(depth): 0 Screen / 1 Controller·TP·Batch / 2 Service·Module·DBIO / 3 SQL·DBIO / 4 Table / 5 Column. tos: Controller·Service·SQL, swing: TP·Module, 공통: Screen·Batch·DBIO·Table·Column",
+      "enum": [
+        "Screen",
+        "Controller",
+        "TP",
+        "Batch",
+        "Service",
+        "Module",
+        "DBIO",
+        "SQL",
+        "Table",
+        "Column"
+      ],
+      "title": "NodeLabel",
+      "type": "string"
+    },
+    "EdgeType": {
+      "description": "영향도 그래프 엣지 유형. CALLS: Screen→Controller/TP, TP→TP / INVOKES: 로직→로직·DBIO / EXECUTES: Service·Batch→SQL / READS·WRITES: DBIO·SQL→Table / REFERENCES: Table→Table / HAS_COLUMN: Table→Column",
+      "enum": [
+        "CALLS",
+        "INVOKES",
+        "EXECUTES",
+        "READS",
+        "WRITES",
+        "REFERENCES",
+        "HAS_COLUMN"
+      ],
+      "title": "EdgeType",
+      "type": "string"
+    },
     "Evidence": {
       "properties": {
         "node_id": {
@@ -766,7 +797,7 @@
           "anyOf": [
             {
               "items": {
-                "type": "string"
+                "$ref": "#/$defs/EdgeType"
               },
               "type": "array"
             },
@@ -795,9 +826,14 @@
           "type": "string"
         },
         "type": {
-          "description": "CALLS / REFERENCES / UPDATES / FLOWS_TO 등",
-          "title": "Type",
-          "type": "string"
+          "$ref": "#/$defs/EdgeType",
+          "description": "엣지 유형 (EdgeType)"
+        },
+        "properties": {
+          "type": "object",
+          "additionalProperties": true,
+          "title": "Properties",
+          "description": "엣지 속성 (event: 화면 이벤트, via: 참조 컬럼, columns: DBIO 가 접근하는 컬럼 목록 등)"
         }
       },
       "required": [
@@ -819,9 +855,8 @@
           "type": "string"
         },
         "label": {
-          "description": "노드 유형 (Program/Method/SQL/Table/Batch/Interface/Screen 등)",
-          "title": "Label",
-          "type": "string"
+          "$ref": "#/$defs/NodeLabel",
+          "description": "노드 유형 (NodeLabel)"
         },
         "domain": {
           "anyOf": [
@@ -1388,8 +1423,7 @@
           "type": "string"
         },
         "label": {
-          "title": "Label",
-          "type": "string"
+          "$ref": "#/$defs/NodeLabel"
         },
         "score": {
           "title": "Score",

@@ -6,11 +6,27 @@ usage: python scripts/build_graph_seed.py && python scripts/check_ground_truth.p
 import csv
 import json
 import sys
+from collections import defaultdict, deque
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 GT_DIR = ROOT / "data" / "ground_truth"
 NODES_CSV = ROOT / "data" / "graph" / "nodes.csv"
+EDGES_CSV = ROOT / "data" / "graph" / "edges.csv"
+EXPLORER_MAX_HOPS = 2
+
+
+def hop_distances(starts: list[str], adj: dict[str, set[str]]) -> dict[str, int]:
+    """시작 노드들로부터 방향 무시 최단 hop 수."""
+    dist = {s: 0 for s in starts}
+    q = deque(starts)
+    while q:
+        cur = q.popleft()
+        for nxt in adj[cur]:
+            if nxt not in dist:
+                dist[nxt] = dist[cur] + 1
+                q.append(nxt)
+    return dist
 
 
 def referenced_ids(gt: dict) -> list[tuple[str, str]]:
@@ -26,6 +42,12 @@ def main() -> int:
     with open(NODES_CSV, encoding="utf-8") as f:
         node_ids = {row["node_id"] for row in csv.DictReader(f)}
 
+    adj: dict[str, set[str]] = defaultdict(set)
+    with open(EDGES_CSV, encoding="utf-8") as f:
+        for e in csv.DictReader(f):
+            adj[e["from_id"]].add(e["to_id"])
+            adj[e["to_id"]].add(e["from_id"])
+
     errors = 0
     for path in sorted(GT_DIR.glob("*.json")):
         gt = json.loads(path.read_text(encoding="utf-8"))
@@ -38,6 +60,11 @@ def main() -> int:
         errors += len(missing) + len(overlap)
         if not missing and not overlap:
             print(f"[OK] {path.name}: {len(referenced_ids(gt))} refs")
+        dist = hop_distances(gt["expected"]["start_nodes"], adj)
+        for it in gt["expected"]["impacted"]:
+            d = dist.get(it["node_id"])
+            if it["must_find"] and (d is None or d > EXPLORER_MAX_HOPS):
+                print(f"  [INFO] must_find {it['node_id']} : 시작 노드에서 {d if d is not None else '도달불가'} hop")
     return 1 if errors else 0
 
 

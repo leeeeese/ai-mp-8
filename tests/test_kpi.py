@@ -37,7 +37,7 @@ def make_state(complexity, nodes=4, missing=0, confirmed=2, inferred=0, verify=V
     )
     state.explorer = ExplorerOutput(
         start_nodes=[], edges=[], hops_used=1,
-        nodes=[GraphNode(node_id=f"n{i}", name="n", label="Program") for i in range(nodes)],
+        nodes=[GraphNode(node_id=f"n{i}", name="n", label="TP") for i in range(nodes)],
     )
     state.retriever = RetrieverOutput(evidence=[], nodes_without_evidence=[f"n{i}" for i in range(missing)])
     hops = [PathHop(node="n", relation="r", impact="i", confidence=Confidence.CONFIRMED)] * confirmed

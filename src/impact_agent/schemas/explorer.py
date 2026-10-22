@@ -4,13 +4,13 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
-from .enums import Domain
+from .enums import Domain, EdgeType, NodeLabel
 
 
 class GraphNode(BaseModel):
     node_id: str
     name: str
-    label: str = Field(description="노드 유형 (Program/Method/SQL/Table/Batch/Interface/Screen 등)")
+    label: NodeLabel = Field(description="노드 유형 (NodeLabel)")
     domain: Domain | None = None
     source_file: str | None = None
     source_line: int | None = None
@@ -20,7 +20,10 @@ class GraphNode(BaseModel):
 class GraphEdge(BaseModel):
     from_id: str
     to_id: str
-    type: str = Field(description="CALLS / REFERENCES / UPDATES / FLOWS_TO 등")
+    type: EdgeType = Field(description="엣지 유형 (EdgeType)")
+    properties: dict[str, Any] = Field(
+        default_factory=dict, description="엣지 속성 (event: 화면 이벤트, via: 참조 컬럼, columns: DBIO 가 접근하는 컬럼 목록 등)"
+    )
 
 
 class StartNodeChoice(BaseModel):

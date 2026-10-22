@@ -39,10 +39,25 @@
 - Difficulty: Major / Medium / Minor
 - Confidence: confirmed / inferred
 - Domain: swing / tos, SmPart: product / marketing
+- NodeLabel: Screen / Controller / TP / Batch / Service / Module / DBIO / SQL / Table / Column
+- EdgeType: CALLS / INVOKES / EXECUTES / READS / WRITES / REFERENCES / HAS_COLUMN
 - KpiCategory: quality / performance
 - KpiMetricName: evidence_coverage, confirmed_ratio, area_coverage, unverified_segments, verify_passed, latency_ms, tool_calls, explore_loops, replans, total_tokens
 
 ## 데이터 소스
 
-- Explorer: Neo4j 의존 그래프 (시작 노드 → 1~2 hop)
+- Explorer: Neo4j 영향도 그래프 (시작 노드 → 1~2 hop). 노드 구조는 아래 참고, 목업 데이터는 `data/README.md`
 - Retriever: 벡터 DB 소스·문서 근거
+
+## 영향도 그래프 노드 구조
+
+| 단계 | tos | swing | 엣지 |
+|---|---|---|---|
+| 0 진입 | Screen | Screen | Screen -CALLS→ Controller / TP |
+| 1 처리 진입 | Controller, Batch | TP (자기 호출), Batch | Controller -INVOKES→ Service, TP -INVOKES→ Module / DBIO, Batch -INVOKES→ DBIO |
+| 2 업무 로직 | Service (자기 호출), DBIO | Module (자기 호출), DBIO | Service / Batch -EXECUTES→ SQL, Module -INVOKES→ DBIO |
+| 3 데이터 접근 | SQL | DBIO (Module 경유) | SQL / DBIO -READS·WRITES→ Table |
+| 4 테이블 | Table | Table | Table -REFERENCES→ Table |
+| 5 컬럼 | Column | Column | Table -HAS_COLUMN→ Column |
+
+tos / swing 은 같은 라벨 체계의 하나의 그래프로 저장하고 노드 `domain` 속성으로 구분한다.

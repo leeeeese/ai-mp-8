@@ -54,6 +54,31 @@ class Domain(str, Enum):
     TOS = "tos"
 
 
+class NodeLabel(str, Enum):
+    """영향도 그래프 노드 유형. tos: Controller/Service/SQL, swing: TP/Module, 공통: Screen/Batch/DBIO/Table/Column."""
+
+    SCREEN = "Screen"
+    CONTROLLER = "Controller"
+    TP = "TP"
+    BATCH = "Batch"
+    SERVICE = "Service"
+    MODULE = "Module"
+    DBIO = "DBIO"
+    SQL = "SQL"
+    TABLE = "Table"
+    COLUMN = "Column"
+
+
+class EdgeType(str, Enum):
+    CALLS = "CALLS"  # Screen→Controller/TP, TP→TP
+    INVOKES = "INVOKES"  # 로직→로직, 로직→DBIO
+    EXECUTES = "EXECUTES"  # Service/Batch→SQL (tos)
+    READS = "READS"  # DBIO/SQL→Table
+    WRITES = "WRITES"  # DBIO/SQL→Table
+    REFERENCES = "REFERENCES"  # Table→Table
+    HAS_COLUMN = "HAS_COLUMN"  # Table→Column
+
+
 class SmPart(str, Enum):
     PRODUCT = "product"
     MARKETING = "marketing"
