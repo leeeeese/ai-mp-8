@@ -1,4 +1,4 @@
-"""Retriever: 노드별 소스/문서 근거 수집, 필요 시 재탐색 요청 (search_source)."""
+"""Retriever: Explorer 가 찾은 경로의 노드 소스를 직접 조회해 근거 수집, 필요 시 확장 요청 (read_source)."""
 
 from ..schemas import RetrieverOutput
 from ..state import AgentState

@@ -1,9 +1,10 @@
-"""Supervisor: 순서·분기·재계획 제어.
+"""Supervisor: 순서·재계획 제어 · 실행 로그 기록.
 
 UserInput → Planner → Explorer ⇄ Retriever (≤ MAX_EXPLORE_LOOP)
-         → [단순] KPI Agent → Composer
+         → [단순] Composer
          → [복잡] Simulator → Verifier ─ needs_supplement → Planner (≤ MAX_REPLAN)
-                                        └ pass → KPI Agent → Composer
+                                        └ pass → Composer
+         → (PoC 평가) KPI Agent ← AnswerKey(정답 경로 목록) + 실행 로그
 """
 
 import time
@@ -15,6 +16,7 @@ from .. import config
 from ..schemas import (
     AgentName,
     AgentRunRecord,
+    AnswerKey,
     Complexity,
     ComposerOutput,
     ExplorerOutput,
@@ -43,9 +45,12 @@ class Supervisor:
         self.verifier = VerifierAgent()
         self.kpi = KpiAgent()
         self.composer = ComposerAgent()
+        self.last_state: AgentState | None = None
 
-    def run(self, user_input: UserInput) -> ComposerOutput:
-        state = AgentState(user_input=user_input)
+    def run(self, user_input: UserInput, answer_key: AnswerKey | None = None) -> ComposerOutput:
+        """분석을 실행하고 Composer 결과를 반환한다. KPI 평가 결과는 last_state.kpi 에 남는다."""
+        state = AgentState(user_input=user_input, answer_key=answer_key)
+        self.last_state = state
 
         while True:
             state.planner = self._call("planner", self.planner, state)
@@ -65,12 +70,12 @@ class Supervisor:
                     continue
             break
 
-        state.kpi = self.kpi.run(state)
         state.composer = self._call("composer", self.composer, state)
+        state.kpi = self.kpi.run(state)  # PoC 평가: Composer 결과에는 반영하지 않음
         return state.composer
 
     def _call(self, name: str, agent, state: AgentState) -> OutputT:
-        """에이전트를 실행하고 KPI 측정용 실행 기록을 남긴다."""
+        """에이전트를 실행하고 실행 로그(KPI Agent 입력)를 남긴다."""
         start = time.perf_counter()
         output = agent.run(state)
         tool_calls = output.tool_call_count if isinstance(output, ExplorerOutput) else 0

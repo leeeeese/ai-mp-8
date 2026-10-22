@@ -79,6 +79,13 @@ class EdgeType(str, Enum):
     HAS_COLUMN = "HAS_COLUMN"  # Table→Column
 
 
+class TraverseDirection(str, Enum):
+    """그래프 탐색 방향."""
+
+    DOWNSTREAM = "downstream"  # 호출되는 쪽 (Screen → TP → Module → DBIO → Table → Column)
+    UPSTREAM = "upstream"  # 호출하는 쪽
+
+
 class SmPart(str, Enum):
     PRODUCT = "product"
     MARKETING = "marketing"
@@ -132,13 +139,11 @@ class KpiCategory(str, Enum):
 
 
 class KpiMetricName(str, Enum):
-    # quality
-    EVIDENCE_COVERAGE = "evidence_coverage"
-    CONFIRMED_RATIO = "confirmed_ratio"
-    AREA_COVERAGE = "area_coverage"
-    UNVERIFIED_SEGMENTS = "unverified_segments"
-    VERIFY_PASSED = "verify_passed"
-    # performance
+    # quality (정답 경로 목록 대비)
+    RECALL = "recall"
+    MISS_RATE = "miss_rate"
+    PRECISION = "precision"
+    # performance (실행 로그)
     LATENCY_MS = "latency_ms"
     TOOL_CALLS = "tool_calls"
     EXPLORE_LOOPS = "explore_loops"

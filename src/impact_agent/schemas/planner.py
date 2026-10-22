@@ -2,7 +2,8 @@
 
 from pydantic import BaseModel, Field
 
-from .enums import AgentName, Complexity, RequestType
+from .. import config
+from .enums import AgentName, Complexity, NodeLabel, RequestType, TraverseDirection
 
 
 class OpenItem(BaseModel):
@@ -34,9 +35,14 @@ class PlannerOutput(BaseModel):
     structured_request: StructuredRequest
     complexity: Complexity
     complexity_reason: str = Field(description="판정 근거 (필수)")
+    target_roles: list[NodeLabel] = Field(
+        default_factory=list, description="목표 역할: Explorer 가 도달해야 할 노드 유형 (예: Batch, Table, Column)"
+    )
+    direction: TraverseDirection = Field(default=TraverseDirection.DOWNSTREAM, description="탐색 방향 (기본: 호출되는 쪽)")
+    max_hops: int = Field(default=config.MAX_HOPS, ge=1, le=config.MAX_HOPS, description="탐색 hop 상한")
     plan: list[PlanStep] = Field(
         description="simple: explorer, retriever / complex: explorer, retriever, simulator, verifier"
-        " (KPI Agent·Composer 는 Supervisor 가 항상 실행)"
+        " (Composer 는 Supervisor 가 항상 실행, KPI Agent 는 Composer 이후 평가용으로 실행)"
     )
 
 

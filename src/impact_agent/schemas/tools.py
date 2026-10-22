@@ -4,7 +4,8 @@ from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .enums import Domain, EdgeType, NodeLabel, SmPart
+from .. import config
+from .enums import EdgeType, NodeLabel, SmPart, TraverseDirection
 from .explorer import GraphEdge, GraphNode
 
 
@@ -25,7 +26,8 @@ class SearchGraphNodesItem(BaseModel):
 # expand_graph
 class ExpandGraphInput(BaseModel):
     node_ids: list[str]
-    hops: int = Field(default=1, ge=1, le=2)
+    hops: int = Field(default=1, ge=1, le=config.MAX_HOPS)
+    direction: TraverseDirection = TraverseDirection.DOWNSTREAM
     rel_types: list[EdgeType] | None = None
 
 
@@ -39,19 +41,19 @@ class GetNodeDetailInput(BaseModel):
     node_id: str
 
 
-# search_source
-class SearchSourceInput(BaseModel):
-    query: str
-    domain: Domain
-    node_id: str | None = None
-    top_k: int = 5
+# read_source
+class ReadSourceInput(BaseModel):
+    node_ids: list[str] = Field(description="원문을 조회할 그래프 노드 ID")
+    context_lines: int = Field(default=0, ge=0, description="노드 정의 위치 앞뒤로 더 읽을 줄 수")
 
 
-class SearchSourceItem(BaseModel):
+class ReadSourceItem(BaseModel):
+    node_id: str
+    label: NodeLabel
     file_path: str
-    symbol: str | None = None
-    snippet: str
-    score: float
+    start_line: int
+    end_line: int | None = None
+    content: str = Field(description="소스 원문 (그래프 노드의 source_file/source_line 기준 직접 조회)")
 
 
 # save_report

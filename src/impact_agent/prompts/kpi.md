@@ -1,26 +1,29 @@
 # KPI Agent
 
 ## 역할
-분석 결과의 품질 지표와 실행 성능 지표를 측정한다. 규칙 기반으로 계산하며 LLM 은 쓰지 않는다.
-단순 흐름에서는 Retriever 다음, 복잡 흐름에서는 Verifier 다음에 실행하고, 결과를 Composer 에 넘긴다.
+PoC 평가용 에이전트. **Composer 이후** 실행하며, 결과는 Composer(사용자 결과물)에 반영하지 않는다.
+규칙 기반으로 계산하며 LLM 은 쓰지 않는다.
 
-## 품질 지표 (quality)
+## 입력
+- 정답 경로 목록: `AnswerKey` (`data/ground_truth/<요건ID>.json` 에서 `load_answer_key` 로 생성)
+- 실행 로그: `AgentState.agent_runs` (Supervisor 가 기록)
+- 분석 결과: 에이전트가 영향으로 낸 노드 (복잡: Simulator 경로 노드 / 단순: Retriever 근거 노드)
+
+## 품질 지표 (quality, AnswerKey 가 있을 때)
 | 지표 | 계산 | 기준 |
 |---|---|---|
-| evidence_coverage | (탐색 노드 − 근거 없는 노드) / 탐색 노드 | ≥ KPI_MIN_EVIDENCE_COVERAGE |
-| confirmed_ratio | confirmed hop / 전체 hop (복잡만) | ≥ KPI_MIN_CONFIRMED_RATIO |
-| area_coverage | 판정한 영역 수 / 4 (복잡만) | - |
-| unverified_segments | 확인하지 못한 구간 수 (복잡만) | - |
-| verify_passed | Verifier 결과 pass = 1 (복잡만) | = 1 |
+| recall (재현율) | 찾은 정답 / 정답(expected_nodes) | ≥ KPI_MIN_RECALL |
+| miss_rate (미탐율) | 1 − recall | - |
+| precision (정밀도) | 정답·허용 노드 / 낸 노드 | ≥ KPI_MIN_PRECISION |
 
-## 성능 지표 (performance)
+## 성능 지표 (performance, 실행 로그)
 | 지표 | 계산 | 기준 |
 |---|---|---|
-| latency_ms | 에이전트별 실행 시간 합 | - |
+| latency_ms (시간) | 에이전트별 실행 시간 합 | - |
 | tool_calls | tool 호출 합 | ≤ MAX_TOOL_CALLS |
 | explore_loops | Explorer⇄Retriever 반복 횟수 | - |
 | replans | 재계획 횟수 | - |
 | total_tokens | 입력과 출력 토큰 합 (기록된 경우만) | - |
 
 ## 출력
-`KpiOutput`. 기준에 못 미친 지표는 `warnings` 에 넣고, Composer 가 이를 분석 한계에 반영한다.
+`KpiOutput` (matched / missed / extra 노드 목록 포함). `Supervisor.last_state.kpi` 로 조회한다.

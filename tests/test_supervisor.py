@@ -4,6 +4,7 @@ from impact_agent import config
 from impact_agent.agents import Supervisor
 from impact_agent.schemas import (
     AgentName,
+    AnswerKey,
     Complexity,
     ComposerOutput,
     ExplorerOutput,
@@ -77,12 +78,20 @@ def test_replan_is_bounded():
     assert sup.composer.calls == 1
 
 
-def test_kpi_runs_before_composer():
+def test_kpi_runs_after_composer():
     for complexity in Complexity:
         sup = make_supervisor(complexity)
         run(sup)
-        (kpi,) = sup.seen_kpi
+        assert sup.seen_kpi == [None]  # Composer 는 KPI 결과를 보지 않는다
+        kpi = sup.last_state.kpi
         assert isinstance(kpi, KpiOutput)
         assert kpi.complexity is complexity
         agents = [r.agent for r in kpi.agent_runs]
-        assert "composer" not in agents and agents[0] == "planner"
+        assert agents[0] == "planner" and agents[-1] == "composer"
+
+
+def test_answer_key_reaches_kpi():
+    sup = make_supervisor(Complexity.SIMPLE)
+    sup.run(UserInput(request_text="요청", sm_part=SmPart.PRODUCT), AnswerKey(req_id="L-1", expected_nodes=["n"]))
+    assert sup.last_state.kpi.req_id == "L-1"
+    assert sup.last_state.kpi.missed_nodes == ["n"]

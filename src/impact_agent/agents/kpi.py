@@ -1,18 +1,20 @@
-"""KPI Agent: 분석 결과의 품질 지표와 실행 성능 지표를 측정한다 (LLM 미사용).
+"""KPI Agent: PoC 평가. Composer 이후 실행하며 결과는 Composer 에 전달하지 않는다 (LLM 미사용).
 
-단순: Retriever 이후, 복잡: Verifier 이후 실행되며 결과는 Composer 로 전달된다.
+입력: 정답 경로 목록(AnswerKey) + 실행 로그(agent_runs) + 분석 결과
+지표: 재현율 · 미탐율 · 정밀도 (AnswerKey 가 있을 때) / 시간 등 실행 성능
 """
+
+import json
+from pathlib import Path
 
 from .. import config
 from ..schemas import (
-    Area,
+    AnswerKey,
     Complexity,
-    Confidence,
     KpiCategory,
     KpiMetric,
     KpiMetricName,
     KpiOutput,
-    VerifyResult,
 )
 from ..state import AgentState
 from .base import BaseAgent
@@ -34,49 +36,76 @@ def _metric(
     return KpiMetric(name=name, category=category, value=value, unit=unit, threshold=threshold, passed=passed)
 
 
+def load_answer_key(path: str | Path) -> AnswerKey:
+    """data/ground_truth/<요건ID>.json → AnswerKey.
+
+    expected: impacted 중 must_find / optional: 나머지 impacted + reference_only / distractor: distractors
+    """
+    gt = json.loads(Path(path).read_text(encoding="utf-8"))
+    exp = gt["expected"]
+    return AnswerKey(
+        req_id=gt["req_id"],
+        expected_nodes=[i["node_id"] for i in exp["impacted"] if i["must_find"]],
+        optional_nodes=[i["node_id"] for i in exp["impacted"] if not i["must_find"]] + exp.get("reference_only", []),
+        distractor_nodes=[d["node_id"] for d in gt.get("distractors", [])],
+    )
+
+
 class KpiAgent(BaseAgent[KpiOutput]):
     name = "kpi"
     output_model = KpiOutput
 
     def run(self, state: AgentState) -> KpiOutput:
         complexity = state.planner.complexity if state.planner else Complexity.SIMPLE
-        metrics = self._quality(state, complexity) + self._performance(state)
+        key = state.answer_key
+        metrics = self._performance(state)
+        matched: list[str] = []
+        missed: list[str] = []
+        extra: list[str] = []
+
+        if key is not None:
+            predicted = self.predicted_nodes(state)
+            expected = set(key.expected_nodes)
+            allowed = expected | set(key.optional_nodes)
+            matched = sorted(predicted & expected)
+            missed = sorted(expected - predicted)
+            extra = sorted(predicted - allowed)
+            metrics = self._quality(expected, predicted, allowed) + metrics
+
         failed = [m for m in metrics if m.passed is False]
         return KpiOutput(
             complexity=complexity,
+            req_id=key.req_id if key else None,
             metrics=metrics,
             agent_runs=list(state.agent_runs),
+            matched_nodes=matched,
+            missed_nodes=missed,
+            extra_nodes=extra,
             all_passed=not failed,
             warnings=[f"{m.name.value}={m.value:g} (기준 {m.threshold:g}) 미달" for m in failed],
         )
 
-    def _quality(self, state: AgentState, complexity: Complexity) -> list[KpiMetric]:
+    @staticmethod
+    def predicted_nodes(state: AgentState) -> set[str]:
+        """에이전트가 영향으로 낸 노드. 복잡: Simulator 경로의 노드 / 단순: Retriever 근거 노드.
+
+        TODO: Composer 산출물 기준으로 바꿀지 팀 내 확정 필요.
+        """
+        if state.simulation:
+            return {h.node for a in state.simulation.area_impacts for p in a.paths for h in p.hops}
+        if state.retriever:
+            return {e.node_id for e in state.retriever.evidence if e.node_id}
+        return set()
+
+    def _quality(self, expected: set[str], predicted: set[str], allowed: set[str]) -> list[KpiMetric]:
         q = KpiCategory.QUALITY
-        metrics: list[KpiMetric] = []
-
-        if state.explorer and state.retriever:
-            total = len(state.explorer.nodes)
-            missing = len(set(state.retriever.nodes_without_evidence))
-            coverage = (total - missing) / total if total else 0.0
-            metrics.append(
-                _metric(KpiMetricName.EVIDENCE_COVERAGE, q, coverage, "ratio", config.KPI_MIN_EVIDENCE_COVERAGE)
-            )
-
-        if complexity is Complexity.COMPLEX and state.simulation:
-            hops = [h for a in state.simulation.area_impacts for p in a.paths for h in p.hops]
-            confirmed = sum(h.confidence is Confidence.CONFIRMED for h in hops)
-            ratio = confirmed / len(hops) if hops else 0.0
-            areas = {a.area for a in state.simulation.area_impacts}
-            metrics += [
-                _metric(KpiMetricName.CONFIRMED_RATIO, q, ratio, "ratio", config.KPI_MIN_CONFIRMED_RATIO),
-                _metric(KpiMetricName.AREA_COVERAGE, q, len(areas) / len(Area), "ratio"),
-                _metric(KpiMetricName.UNVERIFIED_SEGMENTS, q, len(state.simulation.unverified_segments), "count"),
-            ]
-        if complexity is Complexity.COMPLEX and state.verifier:
-            passed = float(state.verifier.result is VerifyResult.PASS)
-            metrics.append(_metric(KpiMetricName.VERIFY_PASSED, q, passed, "bool", 1.0))
-
-        return metrics
+        recall = len(predicted & expected) / len(expected) if expected else 0.0
+        precision = len(predicted & allowed) / len(predicted) if predicted else 0.0
+        return [
+            _metric(KpiMetricName.RECALL, q, recall, "ratio", config.KPI_MIN_RECALL),
+            _metric(KpiMetricName.MISS_RATE, q, 1 - recall, "ratio"),
+            _metric(KpiMetricName.PRECISION, q, precision, "ratio", config.KPI_MIN_PRECISION),
+        ]
 
     def _performance(self, state: AgentState) -> list[KpiMetric]:
         p = KpiCategory.PERFORMANCE

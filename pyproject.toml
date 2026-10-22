@@ -15,9 +15,8 @@ dependencies = [
 [project.optional-dependencies]
 llm = ["openai>=1.0,<3"]                   # Planner/Explorer/Retriever/Simulator/Verifier/Composer LLM 호출
 graph = ["neo4j>=5.20,<7"]                 # 2-1 Explorer: Neo4j 의존 그래프
-vector = ["chromadb>=1.0,<2"]              # 2-2 Retriever: 벡터 DB 소스 근거
 report = ["markdown>=3.6,<4", "weasyprint>=62"]  # 4 Composer: 레포트 PDF 저장
-all = ["impact-agent[llm,graph,vector,report]"]
+all = ["impact-agent[llm,graph,report]"]
 dev = ["pytest>=8", "ruff>=0.6"]
 
 [project.scripts]

@@ -3,20 +3,20 @@
 from ..schemas import (
     ExpandGraphInput,
     GetNodeDetailInput,
+    ReadSourceInput,
     SaveReportInput,
     SearchGraphNodesInput,
-    SearchSourceInput,
 )
 from .graph import expand_graph, get_node_detail, search_graph_nodes
 from .report import save_report
-from .source import search_source
+from .source import read_source
 
 TOOL_REGISTRY = {
     "search_graph_nodes": (search_graph_nodes, SearchGraphNodesInput),
     "expand_graph": (expand_graph, ExpandGraphInput),
     "get_node_detail": (get_node_detail, GetNodeDetailInput),
-    "search_source": (search_source, SearchSourceInput),
+    "read_source": (read_source, ReadSourceInput),
     "save_report": (save_report, SaveReportInput),
 }
 
-__all__ = ["TOOL_REGISTRY", "expand_graph", "get_node_detail", "save_report", "search_graph_nodes", "search_source"]
+__all__ = ["TOOL_REGISTRY", "expand_graph", "get_node_detail", "read_source", "save_report", "search_graph_nodes"]

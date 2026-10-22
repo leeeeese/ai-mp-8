@@ -13,11 +13,10 @@ class Evidence(BaseModel):
     node_id: str | None = None
     file_path: str
     symbol: str | None = None
-    location: str | None = Field(default=None, description="라인/화면 ID 등")
+    location: str | None = Field(default=None, description="라인 범위/화면 ID 등")
     summary: str
     source_kind: SourceKind
     domain: Domain | None = None
-    score: float | None = None
 
 
 class ReexploreRequest(BaseModel):

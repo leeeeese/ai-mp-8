@@ -4,6 +4,7 @@ from typing import Any
 
 from pydantic import BaseModel, Field
 
+from .. import config
 from .enums import Domain, EdgeType, NodeLabel
 
 
@@ -36,6 +37,6 @@ class ExplorerOutput(BaseModel):
     start_nodes: list[StartNodeChoice]
     nodes: list[GraphNode]
     edges: list[GraphEdge]
-    hops_used: int = Field(ge=1, le=2)
-    hop_extension_reason: str | None = Field(default=None, description="2hop 확장 시 근거")
+    hops_used: int = Field(ge=1, le=config.MAX_HOPS, description="실제 사용한 hop 수 (≤ PlannerOutput.max_hops)")
+    hop_extension_reason: str | None = Field(default=None, description="1hop 초과 확장 시 근거")
     tool_call_count: int = 0
