@@ -3,6 +3,7 @@
 - 소스: 영역 소스 루트(SOURCE_ROOT_<DOMAIN>) / node.source_file 의 source_line 부터 노드 범위
   (범위 = 그래프 code 속성 줄 수. Screen 의 js, Batch 의 .pc 처럼 code 에 붙은 파일은 파일 전체를 이어 붙임)
 - 인터페이스 정의서: 노드 interfaces 속성의 ID → 문서 루트(DOCS_ROOT_<DOMAIN>)/interface 에서 찾음
+  (파일명 = ID, 또는 파일 안의 "# [IF:<ID>]" 절 / "INTERFACE <ID> … END INTERFACE" 블록)
 """
 
 import os
@@ -89,7 +90,9 @@ def _interface_items(node: GraphNode, roots: SourceRoots) -> list[ReadSourceItem
             if path.stem == if_id:
                 found = (path, text)
                 break
-            block = re.search(rf"^#\s*\[IF:{re.escape(if_id)}\].*?(?=^#\s*\[IF:|\Z)", text, re.M | re.S)
+            # 한 파일에 여러 인터페이스: "# [IF:<ID>]" 머리 절 또는 "INTERFACE <ID> … END INTERFACE" 블록
+            block = (re.search(rf"^#\s*\[IF:{re.escape(if_id)}\].*?(?=^#\s*\[IF:|\Z)", text, re.M | re.S)
+                     or re.search(rf"^INTERFACE\s+{re.escape(if_id)}\b.*?^END INTERFACE\b", text, re.M | re.S))
             if block:
                 found = (path, block.group(0).strip())
                 break

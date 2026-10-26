@@ -3,15 +3,20 @@
 ## 0. 데이터 받기 (git 에 없음)
 
 `data/`(목업 소스·문서·그래프 seed·Neo4j 저장소)와 `mock_dev/`(목업 작성·검증용)는 `.gitignore` 대상이라 저장소에 없습니다.
-필요하면 **관리자(파트너 모두 해당)에게 `data` 폴더 zip 을 요청**해서 저장소 루트에 `data/` 로 풀어 주세요.
+필요하면 **관리자(파트너 모두 해당)에게 `data` 폴더 zip 을 요청**해서 저장소 루트에 풀어 주세요 (zip 안이 `data/…` 로 시작하므로 루트에서 풀면 `data/` 가 됩니다).
 
 ```
 data/
-├── source/<영역>/   tos · swing 목업 소스
-├── docs/<영역>/     정의서·인터페이스 문서
-├── snapshot/tos/    운영 DB 조회 결과
-├── graph/           nodes.csv · edges.csv · seed.cypher (적재 원본)
-└── neo4j/           Neo4j 저장소 (zip 에서 빼고 받아도 됨. 아래 2번으로 다시 적재)
+├── source/<영역>/   tos · swing 목업 소스                      ← 적재에 필요 (zip 포함)
+├── docs/<영역>/     정의서·인터페이스 문서                     ← 적재에 필요 (zip 포함). swing 은 한글 이름·설명을 여기서 읽음
+├── graph/           nodes.csv · edges.csv · seed.cypher        ← zip 포함 (2번에서 다시 만들어지며, 받은 것과 같으면 정상)
+├── snapshot/tos/    운영 DB 조회 결과                           ← zip 포함. 그래프 적재에는 쓰지 않지만 분석 근거 (정답셋이 근거 위치로 참조)
+└── neo4j/           Neo4j 저장소                                ← zip 제외 (1번에서 새로 생성, 2번으로 적재)
+```
+
+```bash
+# 저장소 루트에서
+unzip impact-agent-data-<날짜>.zip      # → data/source, data/docs, data/snapshot, data/graph
 ```
 
 ## 1. Neo4j 실행
@@ -22,7 +27,7 @@ data/
 docker compose up -d
 ```
 
-> 받은 zip 에 `data/neo4j` 가 들어 있으면 그 저장소를 만든 사람의 비밀번호로 계정이 이미 만들어져 있습니다.
+> zip 에 `data/neo4j` 가 들어 있으면 그 저장소를 만든 사람의 비밀번호로 계정이 이미 만들어져 있습니다.
 > 내 `.env` 비밀번호로 쓰려면 `docker compose down` → `rm -rf data/neo4j` → `docker compose up -d` 후 2번으로 적재하세요.
 
 ## 2. 그래프 생성·적재
@@ -34,7 +39,9 @@ python scripts/build_graph.py --load     # Neo4j 적재 (기존 :Node 그래프�
 python scripts/check_ground_truth.py     # 정답셋(eval/ground_truth/*.json)이 그래프와 맞는지 검사
 ```
 
-적재 결과 예: swing 노드 366 · tos 노드 322 · 엣지 871. 노드 ID 규칙과 엣지 근거는 [mock_data.md](mock_data.md) 참고.
+적재 결과: swing 노드 366 · tos 노드 322 · 엣지 850, `check_ground_truth.py` 16건 모두 OK. 노드 ID 규칙과 엣지 근거는 [mock_data.md](mock_data.md) 참고.
+
+> swing 파서는 코드 관례로 노드·엣지를 만들고, 한글 이름·설명은 `data/docs/swing/` 정의서에서 읽습니다. 정의서가 없으면 그래프는 만들어지지만 한글 검색이 거의 되지 않습니다.
 
 ## 3. 브라우저에서 확인
 
