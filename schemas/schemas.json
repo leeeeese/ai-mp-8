@@ -2076,6 +2076,7 @@
         "check": {
           "enum": [
             "area_path_missing",
+            "evidence_missing",
             "cross_domain_link",
             "redundant_path",
             "alternative_basis"
