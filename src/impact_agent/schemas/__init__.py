@@ -15,6 +15,7 @@ from .composer import (
 from .enums import (
     AgentName,
     AnalysisPoint,
+    AnswerPathStatus,
     Area,
     ChangeType,
     ChecklistOwner,
@@ -34,6 +35,7 @@ from .enums import (
     MatchSource,
     MentionKind,
     NodeRole,
+    PathDetection,
     ReexploreMode,
     RequestType,
     SmPart,
@@ -56,8 +58,11 @@ from .inputs import (
 )
 from .kpi import (
     AgentRunRecord,
+    AnswerKey,
+    AnswerPath,
     KpiMetric,
     KpiOutput,
+    PathResult,
 )
 from .planner import (
     ExcludeOption,
@@ -105,6 +110,9 @@ __all__ = [
     "AgentRunRecord",
     "Alternative",
     "AnalysisPoint",
+    "AnswerKey",
+    "AnswerPath",
+    "AnswerPathStatus",
     "Area",
     "AreaImpact",
     "AreaVerdictRow",
@@ -148,7 +156,9 @@ __all__ = [
     "MentionKind",
     "NodeRole",
     "OpenItem",
+    "PathDetection",
     "PathHop",
+    "PathResult",
     "PlanStep",
     "PlannerOutput",
     "QueryResultSummary",

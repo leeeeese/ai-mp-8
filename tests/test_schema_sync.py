@@ -38,5 +38,5 @@ def test_constants():
     assert config.MAX_HOPS_FORWARD == SPEC["constants"]["MAX_HOPS_FORWARD"]
     assert config.MAX_HOPS_BIDIRECTIONAL == SPEC["constants"]["MAX_HOPS_BIDIRECTIONAL"]
     assert config.MEMORY_WINDOW_N == SPEC["constants"]["MEMORY_WINDOW_N"]
-    assert config.KPI_MIN_EVIDENCE_COVERAGE == SPEC["constants"]["KPI_MIN_EVIDENCE_COVERAGE"]
-    assert config.KPI_MIN_CONFIRMED_RATIO == SPEC["constants"]["KPI_MIN_CONFIRMED_RATIO"]
+    assert config.KPI_MIN_RECALL == SPEC["constants"]["KPI_MIN_RECALL"]
+    assert config.KPI_MIN_PRECISION == SPEC["constants"]["KPI_MIN_PRECISION"]

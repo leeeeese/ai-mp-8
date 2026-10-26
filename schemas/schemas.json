@@ -8,8 +8,8 @@
     "MAX_HOPS_FORWARD": 5,
     "MAX_HOPS_BIDIRECTIONAL": 10,
     "MEMORY_WINDOW_N": 5,
-    "KPI_MIN_EVIDENCE_COVERAGE": 0.8,
-    "KPI_MIN_CONFIRMED_RATIO": 0.5
+    "KPI_MIN_RECALL": 0.8,
+    "KPI_MIN_PRECISION": 0.5
   },
   "$defs": {
     "Difficulty": {
@@ -314,11 +314,7 @@
           "title": "Answer"
         },
         "status": {
-          "allOf": [
-            {
-              "$ref": "#/$defs/ChecklistStatus"
-            }
-          ],
+          "$ref": "#/$defs/ChecklistStatus",
           "default": "unconfirmed"
         },
         "related_area": {
@@ -524,6 +520,14 @@
           "maxItems": 5,
           "minItems": 3,
           "title": "Conclusion Lines",
+          "type": "array"
+        },
+        "impact_paths": {
+          "description": "영향 경로 (A→…→끝)",
+          "items": {
+            "$ref": "#/$defs/ImpactPath"
+          },
+          "title": "Impact Paths",
           "type": "array"
         },
         "evidence_table": {
@@ -796,6 +800,7 @@
         },
         "properties": {
           "type": "object",
+          "additionalProperties": true,
           "description": "event, note, via, columns",
           "title": "Properties"
         }
@@ -886,6 +891,7 @@
         },
         "properties": {
           "type": "object",
+          "additionalProperties": true,
           "title": "Properties"
         }
       },
@@ -930,11 +936,7 @@
           "type": "string"
         },
         "match_source": {
-          "allOf": [
-            {
-              "$ref": "#/$defs/MatchSource"
-            }
-          ],
+          "$ref": "#/$defs/MatchSource",
           "default": "text"
         },
         "score": {
@@ -999,11 +1001,7 @@
           "type": "array"
         },
         "direction": {
-          "allOf": [
-            {
-              "$ref": "#/$defs/Direction"
-            }
-          ],
+          "$ref": "#/$defs/Direction",
           "description": "이 경로를 찾은 탐색 방향 (forward / reverse)"
         },
         "reached_role": {
@@ -1103,6 +1101,7 @@
           "type": "string"
         },
         "args": {
+          "additionalProperties": true,
           "title": "Args",
           "type": "object"
         },
@@ -1457,6 +1456,20 @@
       "title": "ExcludeOption",
       "type": "object"
     },
+    "MentionKind": {
+      "description": "요건에서 언급한 대상의 종류 (Planner 가 그래프를 모르는 상태에서 고른다).",
+      "enum": [
+        "Screen",
+        "Batch",
+        "Function",
+        "Table",
+        "Column",
+        "Interface",
+        "Term"
+      ],
+      "title": "MentionKind",
+      "type": "string"
+    },
     "Mention": {
       "description": "요건에서 \"무엇을 말했는지\". Planner 는 그래프를 모르므로 노드 ID 가 아니라 표현과 힌트만 넘긴다.",
       "properties": {
@@ -1529,20 +1542,6 @@
       "title": "Mention",
       "type": "object"
     },
-    "MentionKind": {
-      "description": "요건에서 언급한 대상의 종류 (Planner 가 그래프를 모르는 상태에서 고른다).",
-      "enum": [
-        "Screen",
-        "Batch",
-        "Function",
-        "Table",
-        "Column",
-        "Interface",
-        "Term"
-      ],
-      "title": "MentionKind",
-      "type": "string"
-    },
     "ExploreItem": {
       "description": "Explorer 에 넘기는 탐색 명세 1건 (요건 항목 단위).",
       "properties": {
@@ -1566,11 +1565,7 @@
           "type": "array"
         },
         "target_role": {
-          "allOf": [
-            {
-              "$ref": "#/$defs/NodeRole"
-            }
-          ],
+          "$ref": "#/$defs/NodeRole",
           "description": "여기에 닿으면 멈춤 (config.CHANGE_TYPE_RULES)"
         },
         "direction": {
@@ -1681,11 +1676,7 @@
           "title": "Item Id"
         },
         "mode": {
-          "allOf": [
-            {
-              "$ref": "#/$defs/ReexploreMode"
-            }
-          ],
+          "$ref": "#/$defs/ReexploreMode",
           "default": "continue"
         },
         "node_ids": {
@@ -1938,11 +1929,7 @@
           "title": "Matched Term"
         },
         "match_source": {
-          "allOf": [
-            {
-              "$ref": "#/$defs/MatchSource"
-            }
-          ],
+          "$ref": "#/$defs/MatchSource",
           "default": "text"
         }
       },
@@ -2148,11 +2135,13 @@
     },
     "KpiMetricName": {
       "enum": [
-        "evidence_coverage",
-        "confirmed_ratio",
-        "area_coverage",
-        "unverified_segments",
-        "verify_passed",
+        "path_recall",
+        "critical_miss_rate",
+        "path_precision",
+        "path_precision_excl_partial",
+        "partial_paths",
+        "initial_paths",
+        "pending_paths",
         "latency_ms",
         "tool_calls",
         "explore_loops",
@@ -2223,7 +2212,7 @@
       "type": "object"
     },
     "AgentRunRecord": {
-      "description": "Supervisor 가 에이전트 실행마다 남기는 측정 기록 (KPI Agent 입력).",
+      "description": "Supervisor 가 에이전트 실행마다 남기는 실행 로그 (KPI Agent 입력).",
       "properties": {
         "agent": {
           "description": "planner / explorer / retriever / simulator / verifier / composer",
@@ -2271,11 +2260,96 @@
       "title": "AgentRunRecord",
       "type": "object"
     },
+    "PathDetection": {
+      "description": "정답 경로별 탐지 판정.",
+      "enum": [
+        "exact",
+        "partial",
+        "initial",
+        "missed",
+        "pending"
+      ],
+      "title": "PathDetection",
+      "type": "string"
+    },
+    "PathResult": {
+      "description": "정답 경로별 탐지 결과 (\"어디까지 따라갔는가\").",
+      "properties": {
+        "path_id": {
+          "title": "Path Id",
+          "type": "string"
+        },
+        "critical": {
+          "title": "Critical",
+          "type": "boolean"
+        },
+        "detection": {
+          "$ref": "#/$defs/PathDetection"
+        },
+        "matched_len": {
+          "description": "정답 경로 앞에서부터 순서대로 따라간 노드 수",
+          "title": "Matched Len",
+          "type": "integer"
+        },
+        "path_len": {
+          "title": "Path Len",
+          "type": "integer"
+        },
+        "reached_node": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "마지막으로 따라간 정답 노드",
+          "title": "Reached Node"
+        },
+        "reached_stage": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "도달 단계 A~F (그래프 0~5단계)",
+          "title": "Reached Stage"
+        }
+      },
+      "required": [
+        "path_id",
+        "critical",
+        "detection",
+        "matched_len",
+        "path_len"
+      ],
+      "title": "PathResult",
+      "type": "object"
+    },
     "KpiOutput": {
-      "description": "KPI Agent 출력. 단순: Retriever 이후, 복잡: Verifier 이후 → Composer.",
+      "description": "KPI Agent 출력. Composer 이후 실행하는 평가 결과이며 Composer 에 전달하지 않는다.",
       "properties": {
         "complexity": {
           "$ref": "#/$defs/Complexity"
+        },
+        "req_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "평가한 요건 ID (AnswerKey 가 없으면 None)",
+          "title": "Req Id"
         },
         "metrics": {
           "items": {
@@ -2291,13 +2365,56 @@
           "title": "Agent Runs",
           "type": "array"
         },
+        "path_results": {
+          "description": "정답 경로별 탐지 판정",
+          "items": {
+            "$ref": "#/$defs/PathResult"
+          },
+          "title": "Path Results",
+          "type": "array"
+        },
+        "false_positive_paths": {
+          "description": "정답과 무관한 제시 경로 (오탐)",
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "False Positive Paths",
+          "type": "array"
+        },
+        "matched_nodes": {
+          "description": "찾은 정답 노드",
+          "items": {
+            "type": "string"
+          },
+          "title": "Matched Nodes",
+          "type": "array"
+        },
+        "missed_nodes": {
+          "description": "놓친 정답 노드 (미탐)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Missed Nodes",
+          "type": "array"
+        },
+        "extra_nodes": {
+          "description": "정답이 아닌데 영향으로 낸 노드 (오탐)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Extra Nodes",
+          "type": "array"
+        },
         "all_passed": {
           "description": "threshold 가 있는 지표를 모두 충족했는지",
           "title": "All Passed",
           "type": "boolean"
         },
         "warnings": {
-          "description": "미달 지표 설명 (Composer 가 분석 한계에 반영)",
+          "description": "미달 지표 설명 (평가 리포트용)",
           "items": {
             "type": "string"
           },
@@ -2541,6 +2658,108 @@
         "paths"
       ],
       "title": "TraverseGraphOutput",
+      "type": "object"
+    },
+    "AnswerPathStatus": {
+      "description": "정답 경로의 실제 영향 여부 확정 상태.",
+      "enum": [
+        "confirmed",
+        "pending"
+      ],
+      "title": "AnswerPathStatus",
+      "type": "string"
+    },
+    "AnswerPath": {
+      "description": "정답 영향 경로 하나. nodes 는 진입(A)부터 끝까지 호출되는 쪽(downstream) 순서.",
+      "properties": {
+        "path_id": {
+          "title": "Path Id",
+          "type": "string"
+        },
+        "nodes": {
+          "description": "A→B→…→끝 노드 ID",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Nodes",
+          "type": "array"
+        },
+        "critical": {
+          "default": false,
+          "description": "놓치면 장애·과금 오류로 이어질 수 있는 경로",
+          "title": "Critical",
+          "type": "boolean"
+        },
+        "status": {
+          "$ref": "#/$defs/AnswerPathStatus",
+          "default": "confirmed"
+        },
+        "note": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Note"
+        }
+      },
+      "required": [
+        "path_id",
+        "nodes"
+      ],
+      "title": "AnswerPath",
+      "type": "object"
+    },
+    "AnswerKey": {
+      "description": "정답 경로 목록 (KPI Agent 입력). eval/ground_truth/<요건ID>.json 에서 만든다.",
+      "properties": {
+        "req_id": {
+          "title": "Req Id",
+          "type": "string"
+        },
+        "paths": {
+          "description": "정답 영향 경로 (경로 KPI 계산 기준)",
+          "items": {
+            "$ref": "#/$defs/AnswerPath"
+          },
+          "title": "Paths",
+          "type": "array"
+        },
+        "expected_nodes": {
+          "description": "반드시 찾아야 하는 노드 (재현율·미탐율 분모)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Expected Nodes",
+          "type": "array"
+        },
+        "optional_nodes": {
+          "description": "찾으면 정답으로 인정하는 노드 (정밀도 계산 시 오탐 아님)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Optional Nodes",
+          "type": "array"
+        },
+        "distractor_nodes": {
+          "description": "키워드가 겹치지만 영향이 없는 노드 (오탐 분석용)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Distractor Nodes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "req_id",
+        "expected_nodes"
+      ],
+      "title": "AnswerKey",
       "type": "object"
     }
   }

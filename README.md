@@ -9,37 +9,37 @@
 요건서 + SM 파트 선택 (UserInput)
         │
         ▼
-   Supervisor ◀───────────── 재계획 (Verifier: needs_supplement, ≤ MAX_REPLAN)
-        │                                                         │
-        ▼                                                         │
- 1. Planner ── 복잡도 판단 · flow 설계                            │
-        │                                                         │
-        ▼                                                         │
- 2-1 Explorer ⇄ 2-2 Retriever   (재탐색 ≤ MAX_EXPLORE_LOOP)        │
-   (Neo4j)         (벡터 DB)                                       │
-        │ 단순          │ 복잡                                     │
-        │               ▼                                          │
-        │        2-3 Simulator ──▶ 2-4 Verifier ───────────────────┘
-        │                               │ pass
-        ▼                               ▼
- 3. KPI Agent ── 품질 · 성능 지표 측정
-        │
+   Supervisor ── 순서·재계획 제어 · 실행 로그 기록 ◀── 재계획 (Verifier: needs_supplement, ≤ MAX_REPLAN)
+        │                                                                      │
+        ▼                                                                      │
+ 1. Planner ── 복잡도 · 요건 항목별 탐색 명세(목표 역할 · 방향 · hop 상한)      │
+        │ 판정 결과로 이후 flow 결정                                           │
+        ▼                                                                      │
+ 2-1 Explorer ──경로──▶ 2-2 Retriever          (확장 요청 ≤ MAX_EXPLORE_LOOP)   │
+   (Neo4j)  ◀─확장 요청─  (소스 직접 조회)                                     │
+                              │ 복잡                 │ 단순                     │
+                              ▼                      │                          │
+                       2-3 Simulator ──▶ 2-4 Verifier ┼─────────────────────────┘
+                                              │ pass  │
+                                              ▼       ▼
+ 3. Composer ── 레포트 · 체크리스트 / 회신 메일 초안 · MD/PDF (요청 시)
+        ├─▶ 복잡: ComplexReport (영역별 영향·가능성·대안, 업무·개발 확인 체크리스트)
+        ├─▶ 단순: SimpleAnswer (요약 결론, 영향 경로·근거)
+        ┆
+        ┆ (PoC 평가)
         ▼
- 4. Composer ── 레포트 · 체크리스트 / 회신 메일 초안 · PDF 저장 (요청 시)
-        │
-        ├─▶ 복잡: ComplexReport (가능 여부·난이도, 현업 확인 체크리스트)
-        └─▶ 단순: SimpleAnswer (요약 결론, 영향 노드·근거)
+ KPI Agent ── 재현율 · 미탐율 · 정밀도 · 시간   ◀── 정답 경로 목록(AnswerKey) + 실행 로그
 ```
 
 | 에이전트 | 출력 스키마 | 사용 tool |
 |---|---|---|
 | Planner | `PlannerOutput` | - |
-| Explorer | `ExplorerOutput` | `search_graph_nodes`, `expand_graph`, `get_node_detail` |
-| Retriever | `RetrieverOutput` | `search_source` |
+| Explorer | `ExplorerOutput` | `search_graph_nodes`, `traverse_graph`, `get_node_detail` |
+| Retriever | `RetrieverOutput` | `read_source` |
 | Simulator | `SimulationOutput` | - |
 | Verifier | `VerifierOutput` | - |
-| KPI Agent | `KpiOutput` | - (규칙 기반, LLM 미사용) |
 | Composer | `ComposerOutput` | `save_report` |
+| KPI Agent | `KpiOutput` | - (PoC 평가, 규칙 기반, LLM 미사용. Composer 이후 실행) |
 
 ## 폴더 구조
 
@@ -59,10 +59,10 @@
 │   │   ├── retriever.py      #   Evidence, ReexploreRequest, RetrieverOutput
 │   │   ├── simulator.py      #   PathHop, ImpactPath, Alternative, AreaImpact, SimulationOutput
 │   │   ├── verifier.py       #   VerifyCheck, VerifierOutput
-│   │   ├── kpi.py            #   KpiMetric, AgentRunRecord, KpiOutput
+│   │   ├── kpi.py            #   KpiMetric, AgentRunRecord, AnswerKey, KpiOutput
 │   │   ├── composer.py       #   SimpleAnswer, ComplexReport, ChecklistItem, MailDraft, ComposerOutput, ...
-│   │   └── tools.py          #   tool 입출력 (SearchGraphNodes*, ExpandGraph*, SearchSource*, SaveReport*)
-│   ├── agents/               # 에이전트 구현 (supervisor = 흐름 제어, kpi = 지표 측정)
+│   │   └── tools.py          #   tool 입출력 (SearchGraphNodes*, TraverseGraph*, ReadSource*, SaveReport*)
+│   ├── agents/               # 에이전트 구현 (supervisor = 흐름 제어, kpi = PoC 평가)
 │   ├── tools/                # tool 구현 + TOOL_REGISTRY
 │   ├── prompts/              # 에이전트별 시스템 프롬프트 (*.md)
 │   └── templates/            # Composer markdown 템플릿 (Jinja2)
@@ -145,10 +145,9 @@ Neo4j 가입이나 별도 설치는 필요 없습니다. `docker compose up` 시
 | (기본) | pydantic, jinja2, python-dotenv | 스키마, 흐름 제어, 템플릿, .env 로드 |
 | `llm` | openai | 에이전트 LLM 호출 (OpenAI) |
 | `graph` | neo4j | 2-1 Explorer: 의존 그래프 |
-| `vector` | chromadb | 2-2 Retriever: 벡터 DB 근거 검색 |
 | `report` | markdown, weasyprint | 4 Composer: PDF 저장 |
 | `dev` | pytest, ruff | 테스트, 린트 |
-| `all` | llm + graph + vector + report | 전체 런타임 |
+| `all` | llm + graph + report | 전체 런타임 |
 
 필요한 묶음만 설치할 수도 있습니다. 예: `pip install -e ".[llm,graph,dev]"`
 
@@ -161,6 +160,7 @@ docker compose up -d                      # Neo4j 실행
 ruff check src tests                      # 린트
 python -m impact_agent "요청 문장" --sm-part product   # 실행 (Composer 구현 후)
 python -m impact_agent --case SC-001 --until retriever  # 정답셋 요청으로 Planner→Explorer→Retriever 까지 (설계: docs/YJ_agent_design.md)
+python -m impact_agent --case L-1 --answer-key eval/ground_truth/L-1.json   # + KPI 평가 (PoC)
 ```
 
 ## 웹 UI
@@ -177,8 +177,8 @@ python -m impact_agent --case SC-001 --until retriever  # 정답셋 요청으로
 ## TODO
 
 - [ ] LLM 프로바이더 선택 및 각 에이전트 `run()` 구현 (structured output)
-- [ ] 그래프 DB / 소스 검색 백엔드 연결 (`tools/graph.py`, `tools/source.py`)
+- [ ] 그래프 DB / 소스 직접 조회 연결 (`tools/graph.py`, `tools/source.py`)
 - [ ] 후속 입력(`FollowupInput`) 및 `ReanalysisRequest` 처리, MEMORY_WINDOW_N 기반 대화 메모리
 - [ ] MAX_TOOL_CALLS 강제
 - [ ] 회신 메일 초안 / PDF 저장 구현
-- [ ] KPI 기준값(KPI_MIN_*) 확정 및 LLM 토큰 사용량 기록
+- [ ] KPI 기준값(KPI_MIN_*)·MAX_HOPS_* 확정, KPI 예측 노드 기준(현재 Simulator 경로/Retriever 근거) 확정, LLM 토큰 사용량 기록

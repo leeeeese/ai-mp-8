@@ -4,6 +4,7 @@
     python -m impact_agent --case SC-001 --until retriever            # 정답셋 요청 문장으로 Retriever 까지 실행
     python -m impact_agent --case SC-001 --until retriever --plan plan.json   # LLM 대신 준비한 PlannerOutput 사용
     python -m impact_agent ... --confirm "비마케팅 여부=COL:TCP_MSG_SCRT.ADVT_YN" --out state.json
+    python -m impact_agent --case L-1 --answer-key eval/ground_truth/L-1.json        # + KPI 평가 (PoC)
 """
 
 import argparse
@@ -12,6 +13,7 @@ import sys
 from pathlib import Path
 
 from .agents import Supervisor
+from .agents.kpi import load_answer_key
 from .schemas import ConfirmedNode, PlannerOutput, SmPart, UserInput
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -76,6 +78,7 @@ def main() -> None:
     parser.add_argument("--plan", type=Path, help="LLM 대신 사용할 PlannerOutput JSON")
     parser.add_argument("--confirm", action="append", default=[], help='확정 매핑 "표현=노드ID" (여러 번 가능)')
     parser.add_argument("--out", type=Path, help="최종 상태(AgentState) JSON 저장 경로")
+    parser.add_argument("--answer-key", type=Path, help="PoC 평가용 정답 파일 (eval/ground_truth/<요건ID>.json)")
     args = parser.parse_args()
 
     try:
@@ -93,10 +96,13 @@ def main() -> None:
         parser.error("요청 문장과 --sm-part (또는 --case) 가 필요합니다")
     confirmed = [ConfirmedNode(phrase=c.split("=", 1)[0], node_id=c.split("=", 1)[1]) for c in args.confirm if "=" in c]
 
+    answer_key = load_answer_key(args.answer_key) if args.answer_key else None
+
     sup = Supervisor()
     if args.plan:
         sup.planner = FixedPlanner(args.plan)
-    state = sup.analyze(UserInput(request_text=request, sm_part=SmPart(sm_part), confirmed_nodes=confirmed), until=args.until)
+    user_input = UserInput(request_text=request, sm_part=SmPart(sm_part), confirmed_nodes=confirmed)
+    state = sup.analyze(user_input, until=args.until, answer_key=answer_key)
 
     if args.out:
         args.out.parent.mkdir(parents=True, exist_ok=True)
@@ -105,6 +111,12 @@ def main() -> None:
         print(summary(state))
     else:
         print(state.composer.markdown)
+
+    kpi = state.kpi
+    if kpi is not None:
+        print("\n## KPI")
+        for m in kpi.metrics:
+            print(f"- {m.name.value}: {m.value:g} {m.unit or ''}".rstrip())
 
 
 if __name__ == "__main__":
