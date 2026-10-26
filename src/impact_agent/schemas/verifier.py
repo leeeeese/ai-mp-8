@@ -6,7 +6,7 @@ from pydantic import BaseModel, Field
 
 from .enums import Area, VerifyResult
 
-CheckKind = Literal["area_path_missing", "cross_domain_link", "redundant_path", "alternative_basis"]
+CheckKind = Literal["area_path_missing", "evidence_missing", "cross_domain_link", "redundant_path", "alternative_basis"]
 
 
 class VerifyCheck(BaseModel):

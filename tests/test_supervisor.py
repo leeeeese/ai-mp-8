@@ -5,6 +5,7 @@ from impact_agent.agents import Supervisor
 from impact_agent.schemas import (
     AgentName,
     AnswerKey,
+    AnswerNode,
     Complexity,
     ComposerOutput,
     ExplorerOutput,
@@ -94,6 +95,6 @@ def test_kpi_runs_after_composer():
 
 def test_answer_key_reaches_kpi():
     sup = make_supervisor(Complexity.SIMPLE)
-    sup.run(UserInput(request_text="요청", sm_part=SmPart.PRODUCT), AnswerKey(req_id="L-1", expected_nodes=["n"]))
+    sup.run(UserInput(request_text="요청", sm_part=SmPart.PRODUCT), AnswerKey(req_id="L-1", answer_nodes=[AnswerNode(node_id="TBL:n", type="Table")]))
     assert sup.last_state.kpi.req_id == "L-1"
-    assert sup.last_state.kpi.missed_nodes == ["n"]
+    assert sup.last_state.kpi.missed_nodes == ["TBL:n"]

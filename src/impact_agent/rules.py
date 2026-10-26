@@ -4,10 +4,27 @@
 - SM_PART_DOMAINS: SM 선택 → 탐색 영역
 - ROLE_ORDER: 진입 → DB 순서의 역할 단계 (Explorer 멈춤 판정)
 - MENTION_LABELS: 언급 종류 → 시작 노드로 찾을 영역별 라벨
+- path_areas / build_impact_paths: 역할 → 영역(screen·db·interface·batch) 분류, Explorer 경로 → 영향 경로 골격
+  (Simulator · Verifier · Composer 공통)
 """
 
 from . import config
-from .schemas import ChangeType, Direction, Domain, MentionKind, NodeRole, SmPart
+from .schemas import (
+    Area,
+    ChangeType,
+    Confidence,
+    Direction,
+    Domain,
+    Evidence,
+    ExplorePath,
+    GraphEdge,
+    GraphNode,
+    ImpactPath,
+    MentionKind,
+    NodeRole,
+    PathHop,
+    SmPart,
+)
 
 F, R, FR = Direction.FORWARD, Direction.REVERSE, Direction.FORWARD_THEN_REVERSE
 
@@ -45,3 +62,97 @@ MENTION_LABELS: dict[MentionKind, list[str] | None] = {
     MentionKind.INTERFACE: ["Batch", "TP", "Module"],
     MentionKind.TERM: None,
 }
+
+
+# --- Simulator · Verifier · Composer 공통 (docs/SE_agent_design.md 0장 영역 분류, 1장 경로 골격) -------------
+
+# 역할 라벨이 비어 있는 노드용 (영역별 라벨 → 역할)
+LABEL_ROLES: dict[str, NodeRole] = {
+    "Screen": NodeRole.ENTRY, "Batch": NodeRole.ENTRY, "Controller": NodeRole.ENTRY_HANDLER, "TP": NodeRole.ENTRY_HANDLER,
+    "Service": NodeRole.LOGIC, "Module": NodeRole.LOGIC, "SQL": NodeRole.DATA_ACCESS, "DBIO": NodeRole.DATA_ACCESS,
+    "Table": NodeRole.TABLE, "Column": NodeRole.COLUMN,
+}
+ENTRY_AREAS: dict[str, Area] = {"Screen": Area.SCREEN, "Batch": Area.BATCH}
+DB_ROLES = {NodeRole.DATA_ACCESS, NodeRole.TABLE, NodeRole.COLUMN}
+AREA_ORDER = [Area.SCREEN, Area.DB, Area.INTERFACE, Area.BATCH]
+FIRST_RELATION = "ENTRY"  # 경로 첫 hop 의 relation
+
+
+def node_role(node: GraphNode | None) -> NodeRole | None:
+    if node is None:
+        return None
+    return node.role or LABEL_ROLES.get(node.label)
+
+
+def interface_node_ids(nodes: dict[str, GraphNode], evidence: list[Evidence]) -> set[str]:
+    """인터페이스가 걸린 노드: 노드 속성 interfaces 가 있거나 인터페이스 정의서 근거가 있는 노드."""
+    ids = {nid for nid, n in nodes.items() if n.properties.get("interfaces")}
+    return ids | {e.node_id for e in evidence if e.node_id and e.source_kind == "interface_spec"}
+
+
+def path_areas(path: list[str], nodes: dict[str, GraphNode], interface_ids: set[str]) -> list[Area]:
+    """경로가 걸치는 영역 (AREA_ORDER 순).
+
+    Entry 는 라벨로 screen / batch, DataAccess·Table·Column 은 db, EntryHandler·Logic 은 경로 진입 노드의 영역,
+    interface 는 인터페이스가 걸린 노드가 있으면 추가. 진입 노드 없이 EntryHandler 에서 시작한 경로는 screen 으로 본다.
+    """
+    roles = [node_role(nodes.get(n)) for n in path]
+    entry = next((ENTRY_AREAS.get(nodes[n].label) for n, r in zip(path, roles) if r is NodeRole.ENTRY and n in nodes), None)
+    if entry is None and NodeRole.ENTRY_HANDLER in roles:
+        entry = Area.SCREEN
+    areas = set()
+    for n, r in zip(path, roles):
+        if r is NodeRole.ENTRY:
+            areas.add(ENTRY_AREAS.get(nodes[n].label, entry or Area.SCREEN))
+        elif r in DB_ROLES:
+            areas.add(Area.DB)
+        elif r in (NodeRole.ENTRY_HANDLER, NodeRole.LOGIC) and entry is not None:
+            areas.add(entry)
+        if n in interface_ids:
+            areas.add(Area.INTERFACE)
+    return [a for a in AREA_ORDER if a in areas]
+
+
+def evidence_by_node(evidence: list[Evidence]) -> dict[str, Evidence]:
+    """노드별 첫 근거."""
+    out: dict[str, Evidence] = {}
+    for e in evidence:
+        if e.node_id:
+            out.setdefault(e.node_id, e)
+    return out
+
+
+def evidence_ref(e: Evidence) -> str:
+    return f"{e.file_path}#{e.location}" if e.location else e.file_path
+
+
+def build_impact_paths(
+    paths: list[ExplorePath], edges: list[GraphEdge], evidence: list[Evidence], impact: str = "영향 검토 필요"
+) -> list[tuple[ImpactPath, list[ExplorePath]]]:
+    """Explorer 경로 → ImpactPath 골격 (같은 노드 순서는 합침). 경로마다 원래 Explorer 경로 목록을 같이 돌려준다.
+
+    hop: relation = 앞 노드 → 이 노드 엣지 유형 (첫 hop 은 ENTRY), evidence_ref = 노드 근거 위치,
+    confidence = 근거가 있으면 confirmed, 없으면 inferred. path_id = P<item_id>-<n>.
+    """
+    relation = {(e.from_id, e.to_id): e.type for e in edges}
+    ev = evidence_by_node(evidence)
+    merged: dict[tuple[str, ...], tuple[ImpactPath, list[ExplorePath]]] = {}
+    count: dict[int, int] = {}
+    for p in paths:
+        key = tuple(p.nodes)
+        if key in merged:
+            merged[key][1].append(p)
+            continue
+        count[p.item_id] = count.get(p.item_id, 0) + 1
+        hops = [
+            PathHop(
+                node=n,
+                relation=FIRST_RELATION if i == 0 else relation.get((p.nodes[i - 1], n), "-"),
+                impact=impact,
+                evidence_ref=evidence_ref(ev[n]) if n in ev else None,
+                confidence=Confidence.CONFIRMED if n in ev else Confidence.INFERRED,
+            )
+            for i, n in enumerate(p.nodes)
+        ]
+        merged[key] = (ImpactPath(path_id=f"P{p.item_id}-{count[p.item_id]}", hops=hops), [p])
+    return list(merged.values())

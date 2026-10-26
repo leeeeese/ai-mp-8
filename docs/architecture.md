@@ -23,7 +23,7 @@
 | Simulator | explorer, retriever | SimulationOutput |
 | Verifier | simulation | VerifierOutput |
 | Composer | 분석 결과 전체 + followups | ComposerOutput |
-| KPI Agent (PoC 평가) | answer_key(정답 경로 목록), agent_runs(실행 로그), simulation / retriever | KpiOutput |
+| KPI Agent (PoC 평가) | answer_key(정답 노드 목록), agent_runs(실행 로그), simulation(복잡) / retriever(단순) 의 final_nodes | KpiOutput |
 
 ## 분기 규칙
 
@@ -33,7 +33,7 @@ Supervisor 는 LangGraph `StateGraph(AgentState)` 의 조건부 엣지로 구현
 - `complexity == simple` → Explorer/Retriever → Composer → `SimpleAnswer`
 - `complexity == complex` → Explorer/Retriever → Simulator → Verifier → Composer → `ComplexReport`
 - KPI Agent 는 Composer 이후 한 번 실행하는 PoC 평가 단계다. 결과는 `Supervisor.last_state.kpi` 에 남고 Composer 결과에는 반영하지 않는다.
-  `AnswerKey`(`eval/ground_truth/<요건ID>.json`) 가 없으면 성능 지표(시간 등)만 계산한다.
+  `AnswerKey`(`eval/ground_truth/<요건ID>.json`) 가 없으면 성능 지표(시간 등)만 계산한다. 노드 단위 판정 (설계: [SE_kpi-agent-design.md](SE_kpi-agent-design.md)).
 - `UserInput.output_options` 에 `mail_draft` / `pdf` 가 있으면 Composer 가 `mail_draft` / `report_file_path` 를 채운다.
 - `ComplexReport.stage`: `initial` → (후속 답변 반영) `updated` → `final_for_dev`
 - Composer 가 `reanalysis_request` 를 반환하면 Supervisor 가 재분석을 시작한다 (TODO)
@@ -48,7 +48,7 @@ Supervisor 는 LangGraph `StateGraph(AgentState)` 의 조건부 엣지로 구현
 - NodeRole: Entry / EntryHandler / Logic / DataAccess / Table / Column (영역별 노드 라벨은 `GraphNode.label` 문자열)
 - Direction: forward / reverse / forward_then_reverse
 - KpiCategory: quality / performance
-- KpiMetricName: path_recall, critical_miss_rate, path_precision, path_precision_excl_partial, partial_paths, initial_paths, pending_paths, latency_ms, tool_calls, explore_loops, replans, total_tokens
+- KpiMetricName: node_recall, node_miss_rate, critical_miss_rate, node_precision, excluded_nodes, out_of_scope_nodes, latency_ms, tool_calls, explore_loops, replans, total_tokens
 
 ## 데이터 소스
 

@@ -1,6 +1,7 @@
 # 요건별 정답 (ground truth)
 
-에이전트 출력 평가용 정답. **KPI 는 노드 ID 경로 기준 JSON 을 씁니다** (라인 단위 정답은 KPI 에서 제외).
+에이전트 출력 평가용 정답. **KPI 는 노드 ID 기준 JSON 을 씁니다** (정답 노드 = `impacted` 중 `must_find`, 라인 단위 정답은 KPI 에서 제외).
+KPI 변환 규칙은 `src/impact_agent/prompts/kpi.md` (`load_answer_key`).
 
 - `H-*/M-*/L-*.json` (swing), `SC-*.json` (tos): 노드 ID 경로 기준. 아래 형식.
 - 소스 위치(file·lines·anchor) 기준 tos 근거(`SC-*.yaml`)와 목업 검증 스크립트는 로컬 작업 폴더 `mock_dev/` 에 있습니다 (git 미포함).
@@ -24,6 +25,7 @@
   "difficulty": "Minor",
   "complexity": "simple",
   "sm_part": "product",
+  "eval_target_labels": ["Screen", "Batch", "DBIO", "Table", "Column"],   // (선택) KPI 평가 노드 유형, 없으면 전체
   "request_text": "...",                // 에이전트 입력(UserInput.request_text) 그대로 쓸 요청 문장
 
   "expected": {
@@ -35,15 +37,16 @@
     },
     "impacted": [                       // 변경이 필요한 기존 노드
       {"node_id": "COL:TB_BAT_JOB.CRON_EXPR", "area": "db", "impact_type": "modify",
-       "reason": "CRON_EXPR 30분 → 5분 데이터 변경", "must_find": true},
+       "reason": "CRON_EXPR 30분 → 5분 데이터 변경", "must_find": true,
+       "severity": "Critical"},          // (선택) KPI 중요도 Critical / Major / Minor, 없으면 Major. stage(0~5)도 선택 (없으면 정답 경로로 산출)
       {"node_id": "SCR:ZROMRR0700090", "area": "screen", "impact_type": "modify", "reason": "...", "must_find": true,
        "detail": ["images: rom_ib_eqp_k.jpg", "event btnSearch_onClick"],      // (선택) 노드 안의 변경 지점
        "detail_exclude": ["images: rom_ib_sim_k/e/j/c.jpg - ..."]}            // (선택) 같은 노드 안의 비대상
     ],
-    "paths": [                          // 정답 영향 경로 (KPI 경로 재현율·Critical 미탐율·정밀도 기준)
+    "paths": [                          // 정답 영향 경로 (KPI: 노드 단계 산출, 경로 위 비정답 노드는 평가 제외)
       {"path_id": "P1", "nodes": ["BAT:ZDOCBB0100010", "DBIO:BatJobSql.updateLastRun", "TBL:TB_BAT_JOB", "COL:TB_BAT_JOB.CRON_EXPR"],
        "critical": false,              // 놓치면 장애·과금 오류로 이어지는 경로
-       "status": "confirmed",          // confirmed / pending(실제 영향 미확정 → KPI 계산 제외, 평가 보류 건수로 공개)
+       "status": "confirmed",          // confirmed / pending(실제 영향 미확정 → 경로 노드를 KPI 평가 제외로 처리)
        "note": "..."}
     ],
     "new": [                            // 신규로 만들어야 하는 대상 (아직 소스에 없음)

@@ -27,6 +27,26 @@
 ```
 {% endfor %}
 {% endif %}
+{% if answer.query_result_summary %}
+
+## 조회 결과 요약
+{% for x in answer.query_result_summary.code_meanings %}
+- 코드 의미: {{ x }}
+{% endfor %}
+{% for x in answer.query_result_summary.main_causes %}
+- 주요 원인: {{ x }}
+{% endfor %}
+{% for x in answer.query_result_summary.inquiry_items %}
+- 문의 필요: {{ x }}
+{% endfor %}
+{% endif %}
+{% if answer.inquiry_contacts %}
+
+## 문의처
+{% for c in answer.inquiry_contacts %}
+- {{ c }}
+{% endfor %}
+{% endif %}
 {% if answer.analysis_limits %}
 
 ## 분석 한계

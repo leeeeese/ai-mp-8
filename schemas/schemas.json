@@ -99,7 +99,7 @@
             }
           ],
           "default": null,
-          "description": "Evidence 식별 (file_path#symbol)",
+          "description": "Evidence 식별 (file_path#location, 예: java/A.java#L40-88)",
           "title": "Evidence Ref"
         },
         "confidence": {
@@ -337,6 +337,24 @@
       "title": "ChecklistItem",
       "type": "object"
     },
+    "DroppedPath": {
+      "description": "요건과 무관해 영향 경로에서 제외한 경로 (가드 규칙 통과분). 레포트 \"검토 제외 경로\"로 표시, KPI 평가에서 제외.",
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/ImpactPath"
+        },
+        "reason": {
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "path",
+        "reason"
+      ],
+      "title": "DroppedPath",
+      "type": "object"
+    },
     "ComplexReport": {
       "properties": {
         "summary_conclusion": {
@@ -369,6 +387,14 @@
             "type": "string"
           },
           "title": "Analysis Limits",
+          "type": "array"
+        },
+        "dropped_paths": {
+          "description": "검토 제외 경로 (Simulator 가 요건과 무관하다고 본 경로)",
+          "items": {
+            "$ref": "#/$defs/DroppedPath"
+          },
+          "title": "Dropped Paths",
           "type": "array"
         },
         "checklist": {
@@ -1972,6 +1998,14 @@
           },
           "title": "Unverified Segments",
           "type": "array"
+        },
+        "dropped_paths": {
+          "description": "요건과 무관해 제외한 경로 (사유 포함)",
+          "items": {
+            "$ref": "#/$defs/DroppedPath"
+          },
+          "title": "Dropped Paths",
+          "type": "array"
         }
       },
       "required": [
@@ -2050,6 +2084,7 @@
         "check": {
           "enum": [
             "area_path_missing",
+            "evidence_missing",
             "cross_domain_link",
             "redundant_path",
             "alternative_basis"
@@ -2135,13 +2170,12 @@
     },
     "KpiMetricName": {
       "enum": [
-        "path_recall",
+        "node_recall",
+        "node_miss_rate",
         "critical_miss_rate",
-        "path_precision",
-        "path_precision_excl_partial",
-        "partial_paths",
-        "initial_paths",
-        "pending_paths",
+        "node_precision",
+        "excluded_nodes",
+        "out_of_scope_nodes",
         "latency_ms",
         "tool_calls",
         "explore_loops",
@@ -2260,83 +2294,142 @@
       "title": "AgentRunRecord",
       "type": "object"
     },
-    "PathDetection": {
-      "description": "정답 경로별 탐지 판정.",
-      "enum": [
-        "exact",
-        "partial",
-        "initial",
-        "missed",
-        "pending"
-      ],
-      "title": "PathDetection",
-      "type": "string"
-    },
-    "PathResult": {
-      "description": "정답 경로별 탐지 결과 (\"어디까지 따라갔는가\").",
+    "GroupKpi": {
+      "description": "집계 축(노드 유형·단계 등) 값 하나의 탐지 성능.",
       "properties": {
-        "path_id": {
-          "title": "Path Id",
+        "key": {
+          "title": "Key",
           "type": "string"
         },
-        "critical": {
-          "title": "Critical",
-          "type": "boolean"
-        },
-        "detection": {
-          "$ref": "#/$defs/PathDetection"
-        },
-        "matched_len": {
-          "description": "정답 경로 앞에서부터 순서대로 따라간 노드 수",
-          "title": "Matched Len",
+        "tp": {
+          "default": 0,
+          "title": "Tp",
           "type": "integer"
         },
-        "path_len": {
-          "title": "Path Len",
+        "fn": {
+          "default": 0,
+          "title": "Fn",
           "type": "integer"
         },
-        "reached_node": {
+        "fp": {
+          "default": 0,
+          "title": "Fp",
+          "type": "integer"
+        },
+        "recall": {
           "anyOf": [
             {
-              "type": "string"
+              "type": "number"
             },
             {
               "type": "null"
             }
           ],
           "default": null,
-          "description": "마지막으로 따라간 정답 노드",
-          "title": "Reached Node"
+          "description": "TP / (TP + FN), 분모 0 이면 None (해당 없음)",
+          "title": "Recall"
         },
-        "reached_stage": {
+        "precision": {
           "anyOf": [
             {
-              "type": "string"
+              "type": "number"
             },
             {
               "type": "null"
             }
           ],
           "default": null,
-          "description": "도달 단계 A~F (그래프 0~5단계)",
-          "title": "Reached Stage"
+          "description": "TP / (TP + FP), 분모 0 이면 None (해당 없음)",
+          "title": "Precision"
         }
       },
       "required": [
-        "path_id",
-        "critical",
-        "detection",
-        "matched_len",
-        "path_len"
+        "key"
       ],
-      "title": "PathResult",
+      "title": "GroupKpi",
+      "type": "object"
+    },
+    "NodeSeverity": {
+      "description": "정답 노드 중요도 (미탐 시 영향).",
+      "enum": [
+        "Critical",
+        "Major",
+        "Minor"
+      ],
+      "title": "NodeSeverity",
+      "type": "string"
+    },
+    "NodeVerdict": {
+      "description": "노드 판정 (KPI 설계서 5.1).",
+      "enum": [
+        "detected",
+        "missed",
+        "false_positive",
+        "excluded",
+        "out_of_scope"
+      ],
+      "title": "NodeVerdict",
+      "type": "string"
+    },
+    "NodeJudgement": {
+      "description": "사례별 노드 판정표 한 줄.",
+      "properties": {
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "type": {
+          "title": "Type",
+          "type": "string"
+        },
+        "stage": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Stage"
+        },
+        "severity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeSeverity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "정답 노드만"
+        },
+        "verdict": {
+          "$ref": "#/$defs/NodeVerdict"
+        },
+        "in_output": {
+          "description": "final_nodes 에 있었는지",
+          "title": "In Output",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "node_id",
+        "type",
+        "verdict",
+        "in_output"
+      ],
+      "title": "NodeJudgement",
       "type": "object"
     },
     "KpiOutput": {
       "description": "KPI Agent 출력. Composer 이후 실행하는 평가 결과이며 Composer 에 전달하지 않는다.",
       "properties": {
         "complexity": {
-          "$ref": "#/$defs/Complexity"
+          "$ref": "#/$defs/Complexity",
+          "description": "실행 flow (Planner 판정)"
         },
         "req_id": {
           "anyOf": [
@@ -2350,6 +2443,25 @@
           "default": null,
           "description": "평가한 요건 ID (AnswerKey 가 없으면 None)",
           "title": "Req Id"
+        },
+        "evaluable": {
+          "default": true,
+          "description": "품질 KPI 를 계산했는지 (AnswerKey·final_nodes 가 있어야 함)",
+          "title": "Evaluable",
+          "type": "boolean"
+        },
+        "skip_reason": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "evaluable=false 사유",
+          "title": "Skip Reason"
         },
         "metrics": {
           "items": {
@@ -2365,31 +2477,36 @@
           "title": "Agent Runs",
           "type": "array"
         },
-        "path_results": {
-          "description": "정답 경로별 탐지 판정",
-          "items": {
-            "$ref": "#/$defs/PathResult"
-          },
-          "title": "Path Results",
-          "type": "array"
-        },
-        "false_positive_paths": {
-          "description": "정답과 무관한 제시 경로 (오탐)",
-          "items": {
-            "items": {
-              "type": "string"
-            },
-            "type": "array"
-          },
-          "title": "False Positive Paths",
-          "type": "array"
-        },
-        "matched_nodes": {
-          "description": "찾은 정답 노드",
+        "final_nodes": {
+          "description": "평가한 Agent 출력 노드 (중복 제거)",
           "items": {
             "type": "string"
           },
-          "title": "Matched Nodes",
+          "title": "Final Nodes",
+          "type": "array"
+        },
+        "judgements": {
+          "description": "노드 판정표",
+          "items": {
+            "$ref": "#/$defs/NodeJudgement"
+          },
+          "title": "Judgements",
+          "type": "array"
+        },
+        "by_type": {
+          "description": "노드 유형별 탐지 성능",
+          "items": {
+            "$ref": "#/$defs/GroupKpi"
+          },
+          "title": "By Type",
+          "type": "array"
+        },
+        "by_stage": {
+          "description": "단계별 탐지 성능",
+          "items": {
+            "$ref": "#/$defs/GroupKpi"
+          },
+          "title": "By Stage",
           "type": "array"
         },
         "missed_nodes": {
@@ -2400,12 +2517,20 @@
           "title": "Missed Nodes",
           "type": "array"
         },
-        "extra_nodes": {
-          "description": "정답이 아닌데 영향으로 낸 노드 (오탐)",
+        "false_positive_nodes": {
+          "description": "정답이 아닌데 출력한 노드 (오탐)",
           "items": {
             "type": "string"
           },
-          "title": "Extra Nodes",
+          "title": "False Positive Nodes",
+          "type": "array"
+        },
+        "distractors_found": {
+          "description": "출력에 섞인 distractor 노드",
+          "items": {
+            "type": "string"
+          },
+          "title": "Distractors Found",
           "type": "array"
         },
         "all_passed": {
@@ -2414,7 +2539,7 @@
           "type": "boolean"
         },
         "warnings": {
-          "description": "미달 지표 설명 (평가 리포트용)",
+          "description": "미달 지표·평가 불가 설명 (평가 리포트용)",
           "items": {
             "type": "string"
           },
@@ -2660,90 +2785,129 @@
       "title": "TraverseGraphOutput",
       "type": "object"
     },
-    "AnswerPathStatus": {
-      "description": "정답 경로의 실제 영향 여부 확정 상태.",
-      "enum": [
-        "confirmed",
-        "pending"
-      ],
-      "title": "AnswerPathStatus",
-      "type": "string"
-    },
-    "AnswerPath": {
-      "description": "정답 영향 경로 하나. nodes 는 진입(A)부터 끝까지 호출되는 쪽(downstream) 순서.",
+    "AnswerNode": {
+      "description": "정답 노드 하나 (영향받는 노드).",
       "properties": {
-        "path_id": {
-          "title": "Path Id",
+        "node_id": {
+          "description": "그래프 노드 ID (<접두어>:<식별 키>)",
+          "title": "Node Id",
           "type": "string"
         },
-        "nodes": {
-          "description": "A→B→…→끝 노드 ID",
-          "items": {
-            "type": "string"
-          },
-          "minItems": 1,
-          "title": "Nodes",
-          "type": "array"
+        "type": {
+          "description": "노드 유형 (Screen / Controller / TP / Batch / Service / Module / DBIO / SQL / Table / Column)",
+          "title": "Type",
+          "type": "string"
         },
-        "critical": {
-          "default": false,
-          "description": "놓치면 장애·과금 오류로 이어질 수 있는 경로",
-          "title": "Critical",
-          "type": "boolean"
-        },
-        "status": {
-          "$ref": "#/$defs/AnswerPathStatus",
-          "default": "confirmed"
-        },
-        "note": {
+        "stage": {
           "anyOf": [
             {
-              "type": "string"
+              "maximum": 5,
+              "minimum": 0,
+              "type": "integer"
             },
             {
               "type": "null"
             }
           ],
           "default": null,
-          "title": "Note"
+          "description": "그래프 단계 0~5 (DBIO 는 경로 맥락에 따라 2 또는 3)",
+          "title": "Stage"
+        },
+        "severity": {
+          "$ref": "#/$defs/NodeSeverity",
+          "default": "Major"
         }
       },
       "required": [
-        "path_id",
-        "nodes"
+        "node_id",
+        "type"
       ],
-      "title": "AnswerPath",
+      "title": "AnswerNode",
+      "type": "object"
+    },
+    "ExcludedNode": {
+      "description": "평가 제외 노드: 출력돼도 오탐으로 세지 않고, 분모에서도 뺀다.",
+      "properties": {
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "reason": {
+          "description": "must_find=false / reference_only / 정답 경로 중간 노드 / 미확정 경로 등",
+          "title": "Reason",
+          "type": "string"
+        }
+      },
+      "required": [
+        "node_id",
+        "reason"
+      ],
+      "title": "ExcludedNode",
       "type": "object"
     },
     "AnswerKey": {
-      "description": "정답 경로 목록 (KPI Agent 입력). eval/ground_truth/<요건ID>.json 에서 만든다.",
+      "description": "정답 노드 목록 (KPI Agent 입력). eval/ground_truth/<요건ID>.json 에서 만든다 (load_answer_key).",
       "properties": {
         "req_id": {
           "title": "Req Id",
           "type": "string"
         },
-        "paths": {
-          "description": "정답 영향 경로 (경로 KPI 계산 기준)",
-          "items": {
-            "$ref": "#/$defs/AnswerPath"
-          },
-          "title": "Paths",
-          "type": "array"
+        "system": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Domain"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "swing / tos (집계 축)"
         },
-        "expected_nodes": {
-          "description": "반드시 찾아야 하는 노드 (재현율·미탐율 분모)",
+        "sm_part": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SmPart"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "complexity": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Complexity"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "정답 복잡도 (집계 축·확장 KPI 용)"
+        },
+        "eval_target_labels": {
+          "description": "평가할 노드 유형. 비우면 전체 유형",
           "items": {
             "type": "string"
           },
-          "title": "Expected Nodes",
+          "title": "Eval Target Labels",
           "type": "array"
         },
-        "optional_nodes": {
-          "description": "찾으면 정답으로 인정하는 노드 (정밀도 계산 시 오탐 아님)",
+        "answer_nodes": {
+          "description": "반드시 찾아야 하는 노드 (탐지율 분모)",
           "items": {
-            "type": "string"
+            "$ref": "#/$defs/AnswerNode"
           },
-          "title": "Optional Nodes",
+          "title": "Answer Nodes",
+          "type": "array"
+        },
+        "excluded_nodes": {
+          "items": {
+            "$ref": "#/$defs/ExcludedNode"
+          },
+          "title": "Excluded Nodes",
           "type": "array"
         },
         "distractor_nodes": {
@@ -2756,8 +2920,7 @@
         }
       },
       "required": [
-        "req_id",
-        "expected_nodes"
+        "req_id"
       ],
       "title": "AnswerKey",
       "type": "object"

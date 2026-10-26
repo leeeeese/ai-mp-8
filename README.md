@@ -28,7 +28,7 @@
         ┆
         ┆ (PoC 평가)
         ▼
- KPI Agent ── 재현율 · 미탐율 · 정밀도 · 시간   ◀── 정답 경로 목록(AnswerKey) + 실행 로그
+ KPI Agent ── 탐지율 · 미탐률 · 정밀도 · 시간   ◀── 정답 노드 목록(AnswerKey) + 실행 로그
 ```
 
 | 에이전트 | 출력 스키마 | 사용 tool |
@@ -161,6 +161,7 @@ ruff check src tests                      # 린트
 python -m impact_agent "요청 문장" --sm-part product   # 실행 (Composer 구현 후)
 python -m impact_agent --case SC-001 --until retriever  # 정답셋 요청으로 Planner→Explorer→Retriever 까지 (설계: docs/YJ_agent_design.md)
 python -m impact_agent --case L-1 --answer-key eval/ground_truth/L-1.json   # + KPI 평가 (PoC)
+python scripts/eval_kpi.py outputs/runs/YJ/<run_id>   # 저장된 *.state.json 배치 KPI 평가
 ```
 
 ## 웹 UI
@@ -181,4 +182,4 @@ python -m impact_agent --case L-1 --answer-key eval/ground_truth/L-1.json   # + 
 - [ ] 후속 입력(`FollowupInput`) 및 `ReanalysisRequest` 처리, MEMORY_WINDOW_N 기반 대화 메모리
 - [ ] MAX_TOOL_CALLS 강제
 - [ ] 회신 메일 초안 / PDF 저장 구현
-- [ ] KPI 기준값(KPI_MIN_*)·MAX_HOPS_* 확정, KPI 예측 노드 기준(현재 Simulator 경로/Retriever 근거) 확정, LLM 토큰 사용량 기록
+- [ ] KPI 기준값(KPI_MIN_*)·MAX_HOPS_* 확정, Simulator 구현 후 복잡 flow KPI 평가 확인, LLM 토큰 사용량 기록

@@ -4,54 +4,60 @@ import pytest
 
 from impact_agent import config
 from impact_agent.agents import KpiAgent
-from impact_agent.agents.kpi import load_answer_key, matched_prefix_len, stage_of
+from impact_agent.agents.kpi import infer_system, judge, load_answer_key, node_type, stage_of
 from impact_agent.schemas import (
     AgentRunRecord,
     AnswerKey,
-    AnswerPath,
-    AnswerPathStatus,
+    AnswerNode,
+    Area,
+    AreaImpact,
     Complexity,
-    ComplexReport,
-    ComposerOutput,
     Confidence,
+    Difficulty,
+    Direction,
+    Domain,
+    Evidence,
+    ExcludedNode,
+    ExplorePath,
+    ExplorerOutput,
+    Feasibility,
     ImpactPath,
+    ImpactType,
     KpiMetricName,
-    PathDetection,
+    NodeSeverity,
+    NodeVerdict,
     PathHop,
     PlannerOutput,
     RequestType,
-    SimpleAnswer,
+    RetrieverOutput,
+    SimulationOutput,
     SmPart,
+    StopReason,
     StructuredRequest,
     UserInput,
 )
 from impact_agent.state import AgentState
 
-# 정답 경로: 확정 4 (Critical 3) + 미확정 1
+C, M, m = NodeSeverity.CRITICAL, NodeSeverity.MAJOR, NodeSeverity.MINOR
+
+
+def answer(node_id, stage, severity=M):
+    return AnswerNode(node_id=node_id, type=node_type(node_id), stage=stage, severity=severity)
+
+
+# 설계서 8장 판정표 예시 (swing): 정답 8, 출력 7
 KEY = AnswerKey(
     req_id="T-1",
-    paths=[
-        AnswerPath(path_id="P1", nodes=["SCR:a", "TP:b", "MOD:c", "DBIO:d"], critical=True),
-        AnswerPath(path_id="P2", nodes=["SCR:a", "TP:x", "DBIO:y"], critical=True),
-        AnswerPath(path_id="P3", nodes=["BAT:j", "DBIO:k"]),
-        AnswerPath(path_id="P4", nodes=["SCR:m", "TP:n", "TBL:o"], critical=True),
-        AnswerPath(path_id="P5", nodes=["SCR:p", "TP:q"], status=AnswerPathStatus.PENDING),
+    answer_nodes=[
+        answer("SCR:S1", 0), answer("TP:TP1", 1), answer("MOD:M1", 2), answer("MOD:M2", 2, m),
+        answer("DBIO:D1", 3, C), answer("TBL:T1", 4, C), answer("TBL:T2", 4), answer("COL:C1", 5, C),
     ],
-    expected_nodes=["DBIO:d", "DBIO:y", "DBIO:k", "TBL:o"],
+    distractor_nodes=["TBL:T9"],
 )
-# Agent 제시 경로
-PREDICTED = [
-    ["SCR:a", "TP:b", "TP:b2", "MOD:c", "DBIO:d", "TBL:t"],  # P1 정확 (중간 추가·끝 이후 연장 허용)
-    ["SCR:a", "TP:b", "TP:b2", "MOD:c", "DBIO:d", "TBL:t"],  # 중복 → 한 번만
-    ["SCR:a", "TP:x"],                                      # P2 부분 (2/3)
-    ["BAT:j", "DBIO:k"],                                    # P3 정확
-    ["SCR:m"],                                              # P4 초기
-    ["SCR:p", "TP:q"],                                      # P5 미확정 → 제외
-    ["SCR:z", "TP:z"],                                      # 오탐
-]
+OUTPUT = ["SCR:S1", "TP:TP1", "MOD:M1", "DBIO:D1", "TBL:T1", "MOD:M9", "TBL:T9"]
 
 
-def make_state(predicted, answer_key=KEY, complexity=Complexity.COMPLEX, tool_calls=3):
+def make_state(output, answer_key=KEY, complexity=Complexity.COMPLEX, tool_calls=3):
     state = AgentState(user_input=UserInput(request_text="r", sm_part=SmPart.PRODUCT), answer_key=answer_key)
     state.planner = PlannerOutput(
         structured_request=StructuredRequest(target="t", action="a", request_type=RequestType.CHANGE),
@@ -61,93 +67,155 @@ def make_state(predicted, answer_key=KEY, complexity=Complexity.COMPLEX, tool_ca
         items=[],
         plan=[],
     )
-    paths = [
-        ImpactPath(path_id=f"p{i}", hops=[PathHop(node=n, relation="r", impact="i", confidence=Confidence.CONFIRMED) for n in p])
-        for i, p in enumerate(predicted)
-    ]
-    if complexity is Complexity.COMPLEX:
-        report = ComplexReport(summary_conclusion="s", area_verdicts=[], schedule_factors=[], path_details=paths,
-                               analysis_limits=[], checklist=[])
-        state.composer = ComposerOutput(complexity=complexity, complex_report=report, markdown="m")
-    else:
-        answer = SimpleAnswer(conclusion_lines=["a", "b", "c"], impact_paths=paths, evidence_table=[])
-        state.composer = ComposerOutput(complexity=complexity, simple_answer=answer, markdown="m")
+    if output is not None and complexity is Complexity.COMPLEX:
+        hops = [PathHop(node=n, relation="r", impact="i", confidence=Confidence.CONFIRMED) for n in output]
+        state.simulation = SimulationOutput(area_impacts=[AreaImpact(
+            area=Area.DB, impact_type=ImpactType.MODIFY, paths=[ImpactPath(path_id="p", hops=hops)],
+            feasibility=Feasibility.FEASIBLE, difficulty=Difficulty.MINOR, difficulty_basis="b",
+            confidence=Confidence.CONFIRMED)])
+    elif output is not None:  # 단순: Retriever 결과 (앞 절반은 근거 있음, 나머지는 근거 없음)
+        half = len(output) // 2
+        state.retriever = RetrieverOutput(
+            evidence=[Evidence(node_id=n, file_path="f", summary="s", source_kind="source") for n in output[:half]],
+            nodes_without_evidence=output[half:],
+        )
     state.agent_runs = [AgentRunRecord(agent="explorer", latency_ms=10, tool_calls=tool_calls)]
     return state
 
 
 def metrics(out):
-    return {m.name: m.value for m in out.metrics}
+    return {x.name: x.value for x in out.metrics}
 
 
 @pytest.mark.parametrize("complexity", list(Complexity))
-def test_path_kpis(complexity):
-    out = KpiAgent().run(make_state(PREDICTED, complexity=complexity))
-    m = metrics(out)
-    assert m[KpiMetricName.PATH_RECALL] == 0.5                              # 정확 2 / 확정 4
-    assert m[KpiMetricName.CRITICAL_MISS_RATE] == pytest.approx(2 / 3)      # P2 부분 · P4 초기 = 미탐
-    assert m[KpiMetricName.PATH_PRECISION] == pytest.approx(2 / 5)          # 정확 2 / (정확 2 + 부분·초기 2 + 오탐 1)
-    assert m[KpiMetricName.PATH_PRECISION_EXCL_PARTIAL] == pytest.approx(2 / 3)  # 정확 2 / (정확 2 + 오탐 1)
-    assert (m[KpiMetricName.PARTIAL_PATHS], m[KpiMetricName.INITIAL_PATHS], m[KpiMetricName.PENDING_PATHS]) == (1, 1, 1)
-    assert out.false_positive_paths == [["SCR:z", "TP:z"]]
+def test_design_example(complexity):
+    out = KpiAgent().run(make_state(OUTPUT, complexity=complexity))
+    v = metrics(out)
+    assert v[KpiMetricName.NODE_RECALL] == pytest.approx(5 / 8)
+    assert v[KpiMetricName.NODE_MISS_RATE] == pytest.approx(3 / 8)
+    assert v[KpiMetricName.CRITICAL_MISS_RATE] == pytest.approx(1 / 3)   # C1
+    assert v[KpiMetricName.NODE_PRECISION] == pytest.approx(5 / 7)
+    assert out.missed_nodes == ["MOD:M2", "TBL:T2", "COL:C1"]
+    assert out.false_positive_nodes == ["MOD:M9", "TBL:T9"]
+    assert out.distractors_found == ["TBL:T9"]
+    recall = {g.key: (g.tp, g.tp + g.fn) for g in out.by_type}
+    assert recall == {"Screen": (1, 1), "TP": (1, 1), "Module": (1, 2), "DBIO": (1, 1), "Table": (1, 2), "Column": (0, 1)}
+    assert [g.key for g in out.by_type] == ["Screen", "TP", "Module", "DBIO", "Table", "Column"]
+    assert {g.key: g.recall for g in out.by_stage}["4"] == 0.5
 
 
-def test_path_results_show_how_far():
-    r = {x.path_id: x for x in KpiAgent().run(make_state(PREDICTED)).path_results}
-    assert r["P1"].detection is PathDetection.EXACT and r["P1"].reached_stage == "D"
-    assert r["P2"].detection is PathDetection.PARTIAL and (r["P2"].reached_node, r["P2"].reached_stage) == ("TP:x", "B")
-    assert r["P4"].detection is PathDetection.INITIAL and r["P4"].reached_stage == "A"
-    assert r["P5"].detection is PathDetection.PENDING
+def test_excluded_and_out_of_scope():
+    key = KEY.model_copy(update={
+        "excluded_nodes": [ExcludedNode(node_id="MOD:M9", reason="reference_only")],
+        "eval_target_labels": ["Screen", "TP", "Module", "DBIO", "Table"],   # Column 제외
+    })
+    out = KpiAgent().run(make_state(OUTPUT + ["COL:X"], answer_key=key))
+    verdict = {r.node_id: r.verdict for r in out.judgements}
+    assert verdict["MOD:M9"] is NodeVerdict.EXCLUDED                       # 출력돼도 오탐 아님
+    assert verdict["COL:C1"] is NodeVerdict.OUT_OF_SCOPE and verdict["COL:X"] is NodeVerdict.OUT_OF_SCOPE
+    v = metrics(out)
+    assert v[KpiMetricName.NODE_RECALL] == pytest.approx(5 / 7)            # C1 은 분모에서 빠짐
+    assert v[KpiMetricName.NODE_PRECISION] == pytest.approx(5 / 6)         # M9 제외, T9 만 오탐
+    assert (v[KpiMetricName.EXCLUDED_NODES], v[KpiMetricName.OUT_OF_SCOPE_NODES]) == (1, 2)
+    assert KpiMetricName.CRITICAL_MISS_RATE in v and v[KpiMetricName.CRITICAL_MISS_RATE] == 0  # 범위 안 Critical 2건 모두 탐지
 
 
-def test_missed_and_thresholds():
-    out = KpiAgent().run(make_state([["SCR:z"]], tool_calls=config.MAX_TOOL_CALLS + 1))
-    m = metrics(out)
-    assert m[KpiMetricName.PATH_RECALL] == 0 and m[KpiMetricName.CRITICAL_MISS_RATE] == 1
+def test_thresholds_and_warnings():
+    out = KpiAgent().run(make_state(["SCR:Z"], tool_calls=config.MAX_TOOL_CALLS + 1))
+    v = metrics(out)
+    assert v[KpiMetricName.NODE_RECALL] == 0 and v[KpiMetricName.CRITICAL_MISS_RATE] == 1
     failed = {x.name for x in out.metrics if x.passed is False}
-    assert failed == {KpiMetricName.PATH_RECALL, KpiMetricName.PATH_PRECISION, KpiMetricName.TOOL_CALLS}
+    assert failed == {KpiMetricName.NODE_RECALL, KpiMetricName.NODE_PRECISION, KpiMetricName.TOOL_CALLS}
     assert not out.all_passed and len(out.warnings) == 3
-    assert out.missed_nodes == sorted(KEY.expected_nodes)
+
+
+def test_zero_denominator_is_not_applicable():
+    key = AnswerKey(req_id="T-0", answer_nodes=[])
+    v = metrics(KpiAgent().run(make_state([], answer_key=key, complexity=Complexity.COMPLEX)))
+    assert KpiMetricName.NODE_RECALL not in v and KpiMetricName.NODE_PRECISION not in v
 
 
 def test_without_answer_key_only_performance():
-    out = KpiAgent().run(make_state(PREDICTED, answer_key=None))
-    m = metrics(out)
-    assert KpiMetricName.PATH_RECALL not in m and KpiMetricName.LATENCY_MS in m
-    assert out.req_id is None and out.path_results == []
+    out = KpiAgent().run(make_state(OUTPUT, answer_key=None))
+    v = metrics(out)
+    assert KpiMetricName.NODE_RECALL not in v and KpiMetricName.LATENCY_MS in v
+    assert out.req_id is None and not out.evaluable and out.judgements == [] and out.warnings == []
+
+
+@pytest.mark.parametrize("complexity", list(Complexity))
+def test_missing_final_nodes_is_not_evaluable(complexity):
+    out = KpiAgent().run(make_state(None, complexity=complexity))
+    assert not out.evaluable and out.req_id == "T-1" and "final_nodes" in out.skip_reason
+    assert out.warnings and KpiMetricName.NODE_RECALL not in metrics(out)
+
+
+def test_simple_final_nodes_from_retriever():
+    state = make_state(["SCR:S1", "TP:TP1", "TP:TP1", "MOD:M1"], complexity=Complexity.SIMPLE)
+    state.retriever.evidence.append(Evidence(node_id="SCR:S1", file_path="g", summary="s", source_kind="screen"))
+    state.retriever.evidence.append(Evidence(node_id=None, file_path="doc", summary="s", source_kind="ops_doc"))
+    # Explorer 결과가 아니라 Retriever 최종 결과 (근거 + 근거 없음), 중복·node_id 없는 근거 제외
+    state.explorer = ExplorerOutput(start_nodes=[], nodes=[], edges=[], paths=[
+        ExplorePath(item_id=1, nodes=["SCR:OTHER"], direction=Direction.FORWARD, stop_reason=StopReason.TARGET_REACHED)])
+    assert KpiAgent.final_nodes(state) == ["SCR:S1", "TP:TP1", "MOD:M1"]
+
+
+def test_complex_final_nodes_from_simulation_not_retriever():
+    state = make_state(["TBL:T1"], complexity=Complexity.COMPLEX)
+    state.retriever = RetrieverOutput(evidence=[], nodes_without_evidence=["TBL:R"])
+    assert KpiAgent.final_nodes(state) == ["TBL:T1"]
+
+
+def test_judge_order_and_output_flag():
+    key = AnswerKey(req_id="T-3", answer_nodes=[answer("TBL:A", 4)], excluded_nodes=[ExcludedNode(node_id="TBL:E", reason="x")])
+    rows = judge(key, ["TBL:B", "TBL:A", "TBL:B"])
+    assert [(r.node_id, r.verdict, r.in_output) for r in rows] == [
+        ("TBL:A", NodeVerdict.DETECTED, True), ("TBL:E", NodeVerdict.EXCLUDED, False), ("TBL:B", NodeVerdict.FALSE_POSITIVE, True)]
 
 
 def test_helpers():
-    assert matched_prefix_len(["a", "b", "c"], ["a", "x", "b"]) == 2
-    assert matched_prefix_len(["a", "b"], ["b", "a"]) == 1
-    assert stage_of(["BAT:x", "DBIO:y"], 1) == "C"   # Batch 직접 호출 DBIO
-    assert stage_of(["TP:x", "MOD:y", "DBIO:z", "TBL:t", "COL:c"], 2) == "D"  # Module 경유 DBIO
-    assert stage_of(["TBL:t", "COL:c"], 1) == "F"
+    assert stage_of(["BAT:x", "DBIO:y"], 1) == 2                          # Batch 직접 호출 DBIO
+    assert stage_of(["TP:x", "MOD:y", "DBIO:z", "TBL:t"], 2) == 3          # Module 경유 DBIO
+    assert stage_of(["TBL:t", "COL:c"], 1) == 5
+    assert node_type("SVC:a.b") == "Service" and node_type("XYZ:a") == "XYZ"
+    assert infer_system(["TP:a", "TBL:b"]) is Domain.SWING and infer_system(["SQL:a"]) is Domain.TOS
+    assert infer_system(["TBL:a"]) is None and infer_system(["TP:a", "SQL:b"]) is None
 
 
 def test_load_answer_key(tmp_path):
     gt = {
-        "req_id": "L-9",
+        "req_id": "L-9", "sm_part": "product", "complexity": "simple",
         "expected": {
-            "impacted": [{"node_id": "a", "must_find": True}, {"node_id": "b", "must_find": False}],
-            "reference_only": ["r"],
-            "paths": [{"path_id": "P1", "nodes": ["SCR:s", "a"], "critical": True}],
+            "impacted": [
+                {"node_id": "DBIO:a", "must_find": True, "severity": "Critical"},
+                {"node_id": "TBL:t", "must_find": True},
+                {"node_id": "TBL:b", "must_find": False},
+            ],
+            "reference_only": ["TBL:r", "TBL:b"],
+            "paths": [
+                {"path_id": "P1", "nodes": ["SCR:s", "MOD:m", "DBIO:a", "TBL:t"], "critical": True},
+                {"path_id": "P2", "nodes": ["SCR:s", "TP:p"], "status": "pending"},
+            ],
         },
-        "distractors": [{"node_id": "x", "why_confusing": "-"}],
+        "distractors": [{"node_id": "TBL:x", "why_confusing": "-"}],
     }
     path = tmp_path / "L-9.json"
     path.write_text(json.dumps(gt), encoding="utf-8")
     key = load_answer_key(path)
-    assert key.expected_nodes == ["a"] and key.optional_nodes == ["b", "r"] and key.distractor_nodes == ["x"]
-    assert key.paths[0].critical and key.paths[0].status is AnswerPathStatus.CONFIRMED
+    assert [(a.node_id, a.type, a.stage, a.severity) for a in key.answer_nodes] == [
+        ("DBIO:a", "DBIO", 3, C), ("TBL:t", "Table", 4, M)]
+    assert {e.node_id: e.reason for e in key.excluded_nodes} == {
+        "TBL:b": "must_find=false", "TBL:r": "reference_only",
+        "SCR:s": "정답 경로 노드 (impacted 아님)", "MOD:m": "정답 경로 노드 (impacted 아님)", "TP:p": "미확정 경로 노드"}
+    assert key.system is Domain.SWING and key.sm_part is SmPart.PRODUCT and key.complexity is Complexity.SIMPLE
+    assert key.distractor_nodes == ["TBL:x"] and key.eval_target_labels == []
 
 
-def test_shared_start_with_pending_still_counts_as_partial():
-    # P2 를 2노드 따라갔고, 미확정 P5 와는 무관 → 부분 (보류로 빠지면 안 됨)
-    key = AnswerKey(req_id="T-2", expected_nodes=[], paths=[
-        AnswerPath(path_id="C", nodes=["SCR:s", "TP:a", "DBIO:b"]),
-        AnswerPath(path_id="P", nodes=["SCR:s", "TP:z"], status=AnswerPathStatus.PENDING),
-    ])
-    m = metrics(KpiAgent().run(make_state([["SCR:s", "TP:a"]], answer_key=key)))
-    assert m[KpiMetricName.PATH_PRECISION] == 0.0  # 부분 1건이 분모에 포함
-    assert KpiMetricName.PATH_PRECISION_EXCL_PARTIAL in m
+def test_ground_truth_files_load():
+    from pathlib import Path
+
+    files = sorted((Path(__file__).resolve().parents[1] / "eval" / "ground_truth").glob("*.json"))
+    assert files
+    for f in files:
+        key = load_answer_key(f)
+        assert key.answer_nodes, f.name
+        assert not {a.node_id for a in key.answer_nodes} & {e.node_id for e in key.excluded_nodes}, f.name
