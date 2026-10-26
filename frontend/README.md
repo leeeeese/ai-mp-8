@@ -21,7 +21,7 @@ npm run build      # 타입 검사 + 빌드 → dist/
 ```
 src/
 ├── api/        types.ts (API 타입), client.ts (TanStack Query 훅), stream.ts (Agent 진행 SSE / mock 타이머)
-├── mocks/      MSW 핸들러·메모리 저장소, data/ (시나리오 결과, 그래프 샘플 = data/graph 의 tos·swing 노드·엣지, 원문 제외)
+├── mocks/      MSW 핸들러·메모리 저장소, fixtures/ (시나리오 결과, 그래프 샘플 = data/graph 의 tos·swing 노드·엣지, 원문 제외)
 ├── store/      theme (라이트/다크), auth (mock SSO·권한), ui
 ├── components/ 글라스·오로라 공통 요소, 사이드바, Agent 진행 패널, 답변 카드, 판정표, 그래프 미리보기
 ├── pages/      Home, Session, Report, Graph, Admin

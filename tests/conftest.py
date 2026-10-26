@@ -1,5 +1,8 @@
 import pytest
 
+# 작은 가짜 그래프·소스 fixture (test_explore.env) 를 다른 테스트 파일에서도 인자로 쓸 수 있게 등록
+pytest_plugins = ["test_explore"]
+
 
 @pytest.fixture(autouse=True)
 def _no_live_llm(monkeypatch):

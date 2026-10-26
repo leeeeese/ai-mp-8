@@ -18,8 +18,8 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from .. import config
-from ..rules import MENTION_LABELS, ROLE_RANK
 from ..llm import LLMClient, Usage, react_llm
+from ..rules import MENTION_LABELS, ROLE_RANK
 from ..schemas import (
     Direction,
     ExploreItem,

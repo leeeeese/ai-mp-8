@@ -9,7 +9,7 @@ import type {
   Session,
   User,
 } from '@/api/types';
-import { H1_ANSWER, SC001_ANSWER, SC006_ANSWER, reportFor } from './data/scenarios';
+import { H1_ANSWER, SC001_ANSWER, SC006_ANSWER, reportFor } from './fixtures/scenarios';
 
 const now = Date.now();
 const iso = (minAgo: number) => new Date(now - minAgo * 60_000).toISOString();

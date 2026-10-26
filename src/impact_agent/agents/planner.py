@@ -28,7 +28,6 @@ from ..schemas import (
 from ..state import AgentState
 from .base import BaseAgent
 
-
 # --- LLM 응답 형식 (Structured Outputs 호환: 기본값 없이 모든 필드 명시) ---------------------
 
 
