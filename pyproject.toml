@@ -4,11 +4,12 @@ version = "0.1.0"
 description = "요건/운영 문의에 대한 영향도 분석 멀티 에이전트"
 readme = "README.md"
 requires-python = ">=3.11"
-# 핵심 (스키마 · 흐름 제어 · 템플릿)
+# 핵심 (스키마 · 흐름 제어(LangGraph) · 템플릿)
 dependencies = [
     "pydantic>=2.7,<3",
     "jinja2>=3.1,<4",
     "python-dotenv>=1.0,<2",
+    "langgraph>=0.0.69,<2",  # Supervisor: 노드·조건부 엣지 라우팅, checkpointer
 ]
 
 # 기능별 묶음. 전부 설치: pip install -e ".[all,dev]"
@@ -33,6 +34,7 @@ packages = ["src/impact_agent"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+filterwarnings = ["ignore:The `__fields__` attribute is deprecated:DeprecationWarning"]
 
 [tool.ruff]
 line-length = 120

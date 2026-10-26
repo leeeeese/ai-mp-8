@@ -33,6 +33,8 @@ def make_state(complexity, nodes=4, missing=0, confirmed=2, inferred=0, verify=V
         structured_request=StructuredRequest(target="t", action="a", request_type=RequestType.CHANGE),
         complexity=complexity,
         complexity_reason="x",
+        domains=[],
+        items=[],
         plan=[],
     )
     state.explorer = ExplorerOutput(

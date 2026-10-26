@@ -1,0 +1,227 @@
+{
+  "req_id": "H-2",
+  "title": "요금제 개편에 따른 연령별 혜택 상품 신규 개발",
+  "difficulty": "Major",
+  "complexity": "complex",
+  "sm_part": "product",
+  "request_text": "요금제 개편에 따라 연령별 혜택 상품을 신규 개발해 주세요. 현재는 각 요금상품 기준으로 연령별 가입 가능한 상품을 제한하고 있습니다. 변경 후에는 요금별 가입 가능 연령은 만 19세 미만 / 만 14세 미만 / 만 65세 이상으로 제한하되, 연령별 혜택은 명의당 1회선에 한해 부가상품으로 정의하여 제한합니다. 예) 만 25세 이용자가 3회선 사용 중이면 3회선 모두 가입 가능 요금제에 가입하되, '청년 혜택' 상품은 1개 회선만 가입 가능. 혜택 구분: 청년 혜택 만 18~39세, 시니어 혜택 만 65세 이상.",
+  "expected": {
+    "feasibility": "feasible",
+    "start_keywords": [
+      "연령",
+      "요금제",
+      "혜택",
+      "부가상품",
+      "명의당 1회선",
+      "청년",
+      "시니어"
+    ],
+    "start_nodes": [
+      "MOD:ProdScrbSvc.checkAgeLimit",
+      "MOD:ProdScrbSvc.checkScrbAvail",
+      "TBL:TB_PROD"
+    ],
+    "areas": {
+      "screen": "modify",
+      "db": "modify",
+      "interface": "none",
+      "batch": "add"
+    },
+    "impacted": [
+      {
+        "node_id": "MOD:ProdScrbSvc.checkScrbAvail",
+        "area": "db",
+        "impact_type": "modify",
+        "reason": "혜택 부가상품 가입 시 '명의당 1회선' 검증 추가 (같은 명의의 다른 회선에 동일 혜택 가입중이면 불가)",
+        "must_find": true
+      },
+      {
+        "node_id": "MOD:ProdScrbSvc.checkAgeLimit",
+        "area": "db",
+        "impact_type": "modify",
+        "reason": "혜택 상품은 부가상품의 SCRB_AGE_MIN/MAX 로 재사용 가능하나, 연령 기준(명의자 vs 회선 실사용자)이 현재 실사용자 기준이라 정책에 따라 수정",
+        "must_find": true
+      },
+      {
+        "node_id": "TBL:TB_PROD",
+        "area": "db",
+        "impact_type": "modify",
+        "reason": "청년 혜택(18~39)·시니어 혜택(65+) 부가상품 신규 등록, 기존 연령 요금제(0청년 등) 연령 제한 재정의, 명의당 1회선 여부 속성(컬럼 또는 규칙) 필요",
+        "must_find": true
+      },
+      {
+        "node_id": "SCR:ZPRDSS0200010",
+        "area": "screen",
+        "impact_type": "modify",
+        "reason": "혜택 부가상품 노출 및 '다른 회선에 가입중' 안내",
+        "must_find": false
+      },
+      {
+        "node_id": "TP:ProdScrbSvc.changeFeeProd",
+        "area": "db",
+        "impact_type": "modify",
+        "reason": "요금제 변경 시 혜택 상품 유지/해지 조건 (요금제별 혜택 적용 가능 여부) 검토",
+        "must_find": false
+      },
+      {
+        "node_id": "COL:TB_PROD.SCRB_AGE_MIN",
+        "area": "db",
+        "impact_type": "modify",
+        "reason": "요금제 연령 제한 재정의 + 혜택 부가상품(청년 18) 데이터",
+        "must_find": false
+      },
+      {
+        "node_id": "COL:TB_PROD.SCRB_AGE_MAX",
+        "area": "db",
+        "impact_type": "modify",
+        "reason": "요금제 연령 제한 재정의 + 혜택 부가상품(청년 39) 데이터",
+        "must_find": false
+      }
+    ],
+    "paths": [
+      {
+        "path_id": "P1",
+        "nodes": [
+          "SCR:ZPRDSS0200010",
+          "TP:ProdScrbSvc.scrbProd",
+          "MOD:ProdScrbSvc.checkScrbAvail"
+        ],
+        "critical": true,
+        "status": "confirmed",
+        "note": "혜택 부가상품 명의당 1회선 검증 추가"
+      },
+      {
+        "path_id": "P2",
+        "nodes": [
+          "SCR:ZPRDSS0200010",
+          "TP:ProdScrbSvc.scrbProd",
+          "MOD:ProdScrbSvc.checkScrbAvail",
+          "MOD:ProdScrbSvc.checkAgeLimit"
+        ],
+        "critical": true,
+        "status": "confirmed",
+        "note": "혜택 연령(청년 18~39, 시니어 65+) 검증"
+      },
+      {
+        "path_id": "P3",
+        "nodes": [
+          "SCR:ZPRDSS0100010",
+          "TP:ProdScrbSvc.changeFeeProd",
+          "MOD:ProdScrbSvc.checkScrbAvail",
+          "MOD:ProdScrbSvc.checkAgeLimit"
+        ],
+        "critical": true,
+        "status": "confirmed",
+        "note": "요금제 연령 제한 재정의 (19세 미만/14세 미만/65세 이상)"
+      },
+      {
+        "path_id": "P4",
+        "nodes": [
+          "SCR:ZPRDSS0100010",
+          "TP:ProdScrbSvc.getFeeChgInfo",
+          "TP:ProdInfoSvc.getSaleProdList",
+          "DBIO:ProdSql.selectSaleProdList",
+          "TBL:TB_PROD",
+          "COL:TB_PROD.SCRB_AGE_MIN"
+        ],
+        "critical": false,
+        "status": "confirmed",
+        "note": "요금제·혜택 상품 연령 데이터"
+      },
+      {
+        "path_id": "P5",
+        "nodes": [
+          "SCR:ZPRDSS0200010",
+          "TP:ProdScrbSvc.scrbProd",
+          "MOD:ProdScrbSvc.checkScrbAvail",
+          "MOD:ProdScrbSvc.checkAgeLimit",
+          "DBIO:CustSql.selectCust",
+          "TBL:TB_CUST",
+          "COL:TB_CUST.BIRTH_DT"
+        ],
+        "critical": true,
+        "status": "pending",
+        "note": "연령 기준(명의자 vs 실사용자) 미확정"
+      }
+    ],
+    "new": [
+      {
+        "suggested_id": "DBIO:SvcProdSql.selectActiveProdCntByCust",
+        "area": "db",
+        "reason": "명의(CUST_NO) 기준 특정 상품 가입중 회선 수 조회 DBIO 신규 (현재 회선 단위 DBIO 만 존재)"
+      },
+      {
+        "suggested_id": "COL:TB_PROD.ONE_PER_CUST_YN",
+        "area": "db",
+        "reason": "명의당 1회선 제한 여부 컬럼 신규 (또는 TB_PROD_RELN 신규 관계유형)"
+      },
+      {
+        "suggested_id": "BAT:ZPRDBB0100010",
+        "area": "batch",
+        "reason": "연령 경과(만 40세 도달 등) 시 청년 혜택 자동 해지 배치 신규"
+      }
+    ],
+    "reference_only": [
+      "MOD:AgeCalcUtil.calcIntlAge",
+      "MOD:AgeCalcUtil.getUserBirthDt",
+      "TP:ProdScrbSvc.scrbProd",
+      "TBL:TB_SVC_PROD",
+      "TBL:TB_CUST",
+      "DBIO:SvcSql.selectSvcListByCust",
+      "DBIO:ProdSql.selectProd",
+      "SCR:ZPRDSS0100010",
+      "COL:TB_PROD.PROD_TYP_CD",
+      "TP:ProdScrbSvc.getFeeChgInfo",
+      "COL:TB_SVC.USER_BIRTH_DT",
+      "COL:TB_CUST.BIRTH_DT"
+    ],
+    "open_items": [
+      {
+        "owner": "business",
+        "question": "연령 기준: 명의자 생년월일 vs 회선 실사용자 생년월일 (현 요금제 검증은 실사용자 기준, '명의당 1회선'은 명의 기준)"
+      },
+      {
+        "owner": "business",
+        "question": "만 18세(미성년) 청년 혜택 가입 시 법정대리인 동의 필요 여부 / 법인·외국인 명의 적용 여부"
+      },
+      {
+        "owner": "business",
+        "question": "기존 연령 요금제(0청년, 시니어 등) 가입자 전환 정책과 시점"
+      },
+      {
+        "owner": "business",
+        "question": "연령 초과 시 혜택 해지 시점(생일 당일/익월 1일) 및 고객 안내"
+      },
+      {
+        "owner": "business",
+        "question": "혜택 적용 회선 선택 기준(고객 선택?), 혜택 회선 해지/명의변경 시 다른 회선으로 이관 여부"
+      },
+      {
+        "owner": "developer",
+        "question": "같은 명의 두 회선을 동시에 처리할 때 명의당 1회선 검증 동시성(락) 필요"
+      },
+      {
+        "owner": "developer",
+        "question": "혜택 내용(할인/데이터)의 과금 반영 방식 — 과금 시스템 연동은 Swing 범위 밖인지 확인"
+      }
+    ]
+  },
+  "distractors": [
+    {
+      "node_id": "MOD:AgeCalcUtil.isMinor",
+      "why_confusing": "만 19세 미만 판단 로직. 법정대리인/결제한도용이며 변경 대상 아님"
+    },
+    {
+      "node_id": "TP:PayLmtSvc.changeLmt",
+      "why_confusing": "만 19세 미만 휴대폰결제 한도 제한. 연령 키워드가 겹침"
+    },
+    {
+      "node_id": "MOD:CustGradeSvc.getLongCustBenefit",
+      "why_confusing": "'혜택' 키워드의 장기고객 혜택 등급. 연령 혜택과 무관"
+    },
+    {
+      "node_id": "BAT:ZDOCBB0100010",
+      "why_confusing": "법정대리인등록(미성년) 구비서류 배치. 연령 관련이지만 무관"
+    }
+  ]
+}

@@ -41,6 +41,8 @@ def make_supervisor(complexity, reexplore=False, verify=VerifyResult.PASS):
         structured_request=StructuredRequest(target="t", action="a", request_type=RequestType.CHANGE),
         complexity=complexity,
         complexity_reason="test",
+        domains=[],
+        items=[],
         plan=[PlanStep(agent=a, purpose="p") for a in agents],
     ))
     sup.explorer = Fake(lambda s: ExplorerOutput(start_nodes=[], nodes=[], edges=[], hops_used=1))
