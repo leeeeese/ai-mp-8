@@ -33,6 +33,7 @@ from impact_agent.schemas import (
     StopReason,
 )
 from test_simulator import P_BATCH, P_SCREEN, Fixed, make_state
+from test_simulator import area as sim_area
 from test_verifier import NO_IFACE
 
 SIMPLE_PATH = [(1, P_SCREEN, StopReason.TARGET_REACHED)]
@@ -147,8 +148,9 @@ def test_complex_rule_only_report():
     assert out.complexity is Complexity.COMPLEX and out.simple_answer is None and r.stage == "initial"
     assert [x.area for x in r.area_verdicts] == [Area.SCREEN, Area.DB, Area.INTERFACE, Area.BATCH]
     assert r.area_verdicts[1].alternative == "ADVT_YN 반전 사용" and r.area_verdicts[0].evidence_names[0] == "src/CMP01#L1-9"
-    # 변경 영역 4개 → 난이도 기준 "변경 영역 3개 이상" 으로 모두 Major
-    assert r.summary_conclusion.startswith("변경 영역: screen(modify·review·Major)") and "요건 전체 난이도 Major" in r.summary_conclusion
+    # 영역 난이도는 영역 기준만 (screen Minor), 요건 전체는 변경 영역 4개 → Major
+    assert r.summary_conclusion.startswith("변경 영역: screen(modify·review·Minor)")
+    assert "요건 전체 난이도 Major (변경 영역 4개 (3개 이상))" in r.summary_conclusion
     assert [p.path_id for p in r.path_details] == ["P1-1", "P2-1"]
     ids = {c.item_id: (c.owner, c.question) for c in r.checklist}
     assert ids["B-1"] == (ChecklistOwner.BUSINESS, "B 상품코드 분리 여부 (요건서에 없음)")
@@ -280,3 +282,14 @@ def test_supervisor_end_to_end_and_followup():
     state = sup.followup(sup.last_session_id, FollowupInput(type=FollowupType.BUSINESS_ANSWER, content="유지", target_item_ids=["B-1"]))
     assert state.composer.complex_report.stage == "updated"
     assert [r.agent for r in state.agent_runs].count("planner") == 1     # 답변은 Planner 를 거치지 않음
+
+
+def test_schedule_factors_capped():
+    state = complex_state()
+    llm = type("L", (), {"parse": lambda self, s, u, schema: (SimulatorDraft(hops=[], areas=[
+        sim_area(a, schedule_factors=[f"{a.value} 요인 {i}" for i in range(5)])
+        for a in (Area.SCREEN, Area.DB, Area.INTERFACE, Area.BATCH)], requested_vs_alternative=None, drop_paths=[]), Usage())})()
+    state.simulation = SimulatorAgent(llm=llm).run(state)
+    assert all(len(a.schedule_factors) == 3 for a in state.simulation.area_impacts)      # 영역당 3개
+    r = composer().run(state).complex_report
+    assert len(r.schedule_factors) == 9 and r.schedule_factors[-1] == "외 4건 (영역별 판정 참고)"  # 전체 8개 + 안내

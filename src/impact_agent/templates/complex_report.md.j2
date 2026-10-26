@@ -27,6 +27,8 @@
 ## 분석 한계
 {% for l in report.analysis_limits %}
 - {{ l }}
+{% else %}
+- 없음
 {% endfor %}
 {% if report.dropped_paths %}
 

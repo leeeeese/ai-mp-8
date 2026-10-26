@@ -3,7 +3,14 @@
 import pytest
 
 from impact_agent.agents import KpiAgent, SimulatorAgent, Supervisor
-from impact_agent.agents.simulator import DraftAlternative, DraftArea, DraftDrop, DraftHop, SimulatorDraft
+from impact_agent.agents.simulator import (
+    DraftAlternative,
+    DraftArea,
+    DraftDrop,
+    DraftHop,
+    SimulatorDraft,
+    requirement_difficulty,
+)
 from impact_agent.llm import LLMError, Usage
 from impact_agent.rules import build_impact_paths, path_areas
 from impact_agent.schemas import (
@@ -184,8 +191,24 @@ def test_rule_difficulty_by_area_count():
     out = SimulatorAgent(use_llm=False).run(make_state(paths=[(1, P_SCREEN[:2], StopReason.TARGET_REACHED)], items=items))
     a = by_area(out)
     assert a[Area.SCREEN].difficulty is Difficulty.MINOR and a[Area.DB].impact_type is ImpactType.NONE
+    assert requirement_difficulty(out.area_impacts) == (Difficulty.MINOR, "영역 중 최고 (screen: (규칙) 영역 기준 해당 없음 (상세 판단은 원문 확인 필요))")
     out = SimulatorAgent(use_llm=False).run(make_state(paths=[(1, P_SCREEN, StopReason.TARGET_REACHED)], items=items))
-    assert by_area(out)[Area.SCREEN].difficulty is Difficulty.MEDIUM   # screen + db
+    assert by_area(out)[Area.SCREEN].difficulty is Difficulty.MINOR                         # 영역 난이도에 영역 수를 넣지 않음
+    assert requirement_difficulty(out.area_impacts) == (Difficulty.MEDIUM, "변경 영역 2개")  # 요건 전체에서 반영
+
+
+def test_requirement_difficulty():
+    out = SimulatorAgent(use_llm=False).run(make_state())                 # 4개 영역 변경
+    assert requirement_difficulty(out.area_impacts) == (Difficulty.MAJOR, "변경 영역 4개 (3개 이상)")
+    for a in out.area_impacts:
+        if a.area in (Area.INTERFACE, Area.BATCH):
+            a.impact_type = ImpactType.NONE
+        else:
+            a.difficulty = Difficulty.MAJOR if a.area is Area.DB else Difficulty.MINOR
+    assert requirement_difficulty(out.area_impacts)[0] is Difficulty.MAJOR   # 2개 영역이지만 db 가 Major
+    for a in out.area_impacts:
+        a.impact_type = ImpactType.NONE
+    assert requirement_difficulty(out.area_impacts) == (Difficulty.MINOR, "변경 영역 없음")
 
 
 def test_empty_explorer():

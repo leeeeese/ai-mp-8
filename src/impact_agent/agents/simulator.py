@@ -36,6 +36,8 @@ MAX_CONTEXT_PATHS = 40  # LLM 입력에 보여 줄 경로 수
 CONTEXT_LINES_PER_EVIDENCE = 12  # 노드당 원문 줄 수
 MAX_CONTEXT_CHARS = 16000  # 원문 블록 전체 문자 수 상한
 SCHEMA_CHANGE_TYPES = {ChangeType.COLUMN_SPEC_CHANGE, ChangeType.DATA_ADD}
+MAX_SCHEDULE_FACTORS = 3  # 영역당 일정 영향 요인 수
+DIFFICULTY_RANK = [Difficulty.MINOR, Difficulty.MEDIUM, Difficulty.MAJOR]
 
 
 # --- LLM 응답 형식 (Structured Outputs 호환: 기본값 없이 모든 필드 명시) ---------------------
@@ -60,7 +62,7 @@ class DraftArea(BaseModel):
     feasibility: Feasibility
     difficulty: Difficulty
     difficulty_basis: str = Field(description="난이도 기준표에서 적용한 항목")
-    schedule_factors: list[str] = Field(description="일정에 영향을 주는 요인. 없으면 []")
+    schedule_factors: list[str] = Field(description="일정에 영향을 주는 요인 3개 이내, 짧게. 없으면 []")
     infeasible_reason: str | None = Field(description="feasibility=hard 일 때 사유. 아니면 null")
     alternatives: list[DraftAlternative] = Field(description="feasibility=hard 이거나 요청안보다 나은 방법이 있을 때. 없으면 []")
 
@@ -170,8 +172,8 @@ def drop_guarded(
     return any(s.item_id not in others for s in sources)  # 빼면 그 요건 항목의 경로가 없어짐
 
 
-def rule_difficulty(area: Area, paths: list[ImpactPath], changed: list[Area], state: AgentState) -> tuple[Difficulty, str]:
-    """난이도 기준표의 규칙 판정 (LLM 이 없을 때). 설계서 1장."""
+def rule_difficulty(area: Area, paths: list[ImpactPath], state: AgentState) -> tuple[Difficulty, str]:
+    """영역 난이도의 규칙 판정 (LLM 이 없을 때). 영역 기준만 본다 (영역 수·도메인 연계는 requirement_difficulty)."""
     if not paths:
         return Difficulty.MINOR, "변경 경로 없음"
     types = {it.change_type for it in state.planner.items} if state.planner else set()
@@ -179,13 +181,23 @@ def rule_difficulty(area: Area, paths: list[ImpactPath], changed: list[Area], st
         return Difficulty.MAJOR, "(규칙) DB 스키마 변경 가능 (컬럼 추가·길이·타입)"
     if area is Area.INTERFACE:
         return Difficulty.MAJOR, "(규칙) 인터페이스 연계 변경"
+    return Difficulty.MINOR, "(규칙) 영역 기준 해당 없음 (상세 판단은 원문 확인 필요)"
+
+
+def requirement_difficulty(areas: list[AreaImpact]) -> tuple[Difficulty, str]:
+    """요건 전체 난이도 = max(영역 난이도, 요건 기준). 요건 기준: 변경 영역 3개 이상·도메인 연계 → Major, 2개 → Medium 이상."""
+    changed = [a for a in areas if a.impact_type in (ImpactType.ADD, ImpactType.MODIFY)]
+    if not changed:
+        return Difficulty.MINOR, "변경 영역 없음"
+    top = max(changed, key=lambda a: DIFFICULTY_RANK.index(a.difficulty))
+    level, basis = top.difficulty, f"영역 중 최고 ({top.area.value}: {top.difficulty_basis})"
     if len(changed) >= 3:
-        return Difficulty.MAJOR, "(규칙) 변경 영역 3개 이상"
-    if any(p.cross_domain for p in paths):
-        return Difficulty.MAJOR, "(규칙) 도메인 간 연계"
-    if len(changed) == 2:
-        return Difficulty.MEDIUM, "(규칙) 변경 영역 2개"
-    return Difficulty.MINOR, "(규칙) 단일 영역 변경"
+        return Difficulty.MAJOR, f"변경 영역 {len(changed)}개 (3개 이상)"
+    if any(p.cross_domain for a in changed for p in a.paths):
+        return Difficulty.MAJOR, "도메인 간 연계"
+    if len(changed) == 2 and level is Difficulty.MINOR:
+        return Difficulty.MEDIUM, "변경 영역 2개"
+    return level, basis
 
 
 def judge_areas(
@@ -194,7 +206,6 @@ def judge_areas(
 ) -> list[AreaImpact]:
     """영역 4개의 판정. LLM 판정이 있으면 쓰고 규칙으로 보정, 없으면 규칙 판정."""
     by_area = {a: [p for p in paths if a in areas_of[p.path_id]] for a in AREA_ORDER}
-    changed = [a for a in AREA_ORDER if by_area[a]]
     drafts = {d.area: d for d in draft.areas} if draft else {}
     out = []
     for area in AREA_ORDER:
@@ -202,7 +213,7 @@ def judge_areas(
         hop_conf = [h.confidence for p in ps for h in p.hops]
         all_confirmed = bool(hop_conf) and all(c is Confidence.CONFIRMED for c in hop_conf)
         any_confirmed = Confidence.CONFIRMED in hop_conf
-        difficulty, basis = rule_difficulty(area, ps, changed, state)
+        difficulty, basis = rule_difficulty(area, ps, state)
         values = {
             "impact_type": ImpactType.MODIFY if ps else ImpactType.NONE, "feasibility": Feasibility.REVIEW,
             "difficulty": difficulty, "difficulty_basis": basis, "schedule_factors": [], "infeasible_reason": None,
@@ -211,7 +222,8 @@ def judge_areas(
         if (d := drafts.get(area)) is not None:
             values.update(
                 impact_type=d.impact_type, feasibility=d.feasibility, difficulty=d.difficulty,
-                difficulty_basis=d.difficulty_basis.strip() or basis, schedule_factors=d.schedule_factors,
+                difficulty_basis=d.difficulty_basis.strip() or basis,
+                schedule_factors=[f.strip() for f in d.schedule_factors if f.strip()][:MAX_SCHEDULE_FACTORS],
                 infeasible_reason=d.infeasible_reason,
                 alternatives=[Alternative(**a.model_dump()) for a in d.alternatives],
             )

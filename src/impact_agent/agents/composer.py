@@ -29,7 +29,6 @@ from ..schemas import (
     ComplexReport,
     ComposerOutput,
     Confidence,
-    Difficulty,
     Evidence,
     Feasibility,
     FollowupInput,
@@ -50,7 +49,7 @@ from ..state import AgentState
 from ..templates import render_complex, render_simple
 from ..tools import save_report
 from .base import BaseAgent
-from .simulator import DraftHop, apply_hop_impacts, unverified_segments
+from .simulator import DraftHop, apply_hop_impacts, requirement_difficulty, unverified_segments
 from .verifier import REPEATED, WARNING, unique_paths
 
 # Supervisor 가 Composer 로 바로 보내는 후속 입력 (supervisor.COMPOSER_FOLLOWUPS 와 같은 값)
@@ -58,7 +57,7 @@ ANSWER_FOLLOWUPS = {FollowupType.BUSINESS_ANSWER, FollowupType.DEVELOPER_OPINION
 DETAIL_CHANGE_TYPES = {ChangeType.DATA_ADD, ChangeType.COLUMN_SPEC_CHANGE, ChangeType.QUERY_FIELD_ADD,
                        ChangeType.INTERFACE_FIELD_ADD}
 WRITE_SQL = re.compile(r"\b(insert|update|delete|merge|drop|alter|truncate|create|grant|revoke|exec|execute|call)\b", re.IGNORECASE)
-DIFFICULTY_RANK = [Difficulty.MINOR, Difficulty.MEDIUM, Difficulty.MAJOR]
+MAX_SCHEDULE_FACTORS = 8  # 레포트 전체 일정 영향 요인 수
 MAX_PATH_SUMMARY = 3  # 판정표 한 칸에 보여 줄 경로 수
 MAX_EVIDENCE_NAMES = 5
 MAX_CONTEXT_EVIDENCE = 40
@@ -200,7 +199,7 @@ class ComposerAgent(BaseAgent[ComposerOutput]):
         report = ComplexReport(
             summary_conclusion=(draft.summary_conclusion.strip() if draft else "") or rule_summary(sim.area_impacts),
             area_verdicts=area_rows(sim.area_impacts),
-            schedule_factors=list(dict.fromkeys(f for a in sim.area_impacts for f in a.schedule_factors)),
+            schedule_factors=merge_schedule_factors(sim.area_impacts),
             path_details=unique_paths(state),
             analysis_limits=complex_limits(state) + self.notes,
             dropped_paths=sim.dropped_paths,
@@ -343,9 +342,16 @@ def rule_summary(areas: list[AreaImpact]) -> str:
     feas = {a.feasibility for a in changed}
     overall = (Feasibility.HARD if Feasibility.HARD in feas else Feasibility.REVIEW if Feasibility.REVIEW in feas
                else Feasibility.FEASIBLE)
-    level = max((a.difficulty for a in changed), key=DIFFICULTY_RANK.index)
+    level, basis = requirement_difficulty(areas)
     parts = ", ".join(f"{a.area.value}({a.impact_type.value}·{a.feasibility.value}·{a.difficulty.value})" for a in changed)
-    return f"변경 영역: {parts}. 요건 전체 난이도 {level.value}, 구현 가능 여부 {overall.value}."
+    return f"변경 영역: {parts}. 요건 전체 난이도 {level.value} ({basis}), 구현 가능 여부 {overall.value}."
+
+
+def merge_schedule_factors(areas: list[AreaImpact]) -> list[str]:
+    factors = list(dict.fromkeys(f for a in areas for f in a.schedule_factors))
+    if len(factors) <= MAX_SCHEDULE_FACTORS:
+        return factors
+    return factors[:MAX_SCHEDULE_FACTORS] + [f"외 {len(factors) - MAX_SCHEDULE_FACTORS}건 (영역별 판정 참고)"]
 
 
 def complex_limits(state: AgentState) -> list[str]:
@@ -446,6 +452,8 @@ def complex_message(state: AgentState, base_items: list[tuple[ChecklistOwner, st
         alts = " / ".join(x.description for x in a.alternatives) or "-"
         lines.append(f"- {a.area.value}: {a.impact_type.value} / {a.feasibility.value} / {a.difficulty.value} "
                      f"({a.difficulty_basis}) / 대안: {alts}")
+    level, basis = requirement_difficulty(sim.area_impacts)
+    lines += ["", f"[요건 전체 난이도] {level.value} ({basis}) - 요약에 이 값을 그대로 쓴다"]
     if sim.requested_vs_alternative:
         lines += ["", "[요청안 / 대안 비교]", sim.requested_vs_alternative]
     lines += ["", "[경로 상세] path_id: 노드(영향) → …"]

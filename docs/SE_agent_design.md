@@ -1,4 +1,4 @@
-# Agent 설계서: Simulator · Verifier · Composer (v0.2 초안)
+# Agent 설계서: Simulator · Verifier · Composer (v0.3 초안)
 
 > 담당: **2-3 Simulator · 2-4 Verifier · 3 Composer · KPI Agent** (SE) / Supervisor · Planner · Explorer · Retriever ([YJ_agent_design.md](YJ_agent_design.md))
 > 기준: [agent_workflow_diagram.png](agent_workflow_diagram.png) (최신 Agent Workflow), [data_structure_neo4j.svg](data_structure_neo4j.svg) (그래프 노드 구조 0~5단계). 작성일 2026-10-26. 미결 항목은 10장.
@@ -8,6 +8,7 @@
 | 버전 | 변경 내용 |
 |---|---|
 | v0.1 | 최초 초안 |
+| v0.3 | 난이도 기준을 영역 / 요건 전체로 분리, 일정 요인 개수 상한 (실제 LLM 검증 결과 반영) |
 | v0.2 | 난이도 기준 1차 확정(그래프 단계 반영), 근거 검증(`evidence_missing`) 확정, 경로 제외(`dropped_paths`) 가드 규칙, 영역 분류를 역할 라벨(`NodeRole`) 기준으로 변경, 재분석은 기존 후속 입력 흐름 사용, tos·swing 대응(8장) 추가 |
 
 ## 0. 한눈에 보기
@@ -105,17 +106,21 @@ Simulator·Verifier·Composer 가 같은 함수(`rules.py`)를 쓴다. 판단 �
 
 **경로 제외를 허용하는 이유**: Explorer 경로에는 요건과 무관한 분기가 섞인다 (yj 시나리오 기준 노드 정밀도 0.2 수준). 모두 레포트에 올리면 검토 부담이 커진다. 대신 KPI 의 최우선 목표가 Critical 미탐 0건이므로 가드 규칙으로 미탐 위험을 막고, 제외 내역은 사람이 볼 수 있게 남긴다.
 
-**난이도 판단 기준 (1차 확정, `difficulty_basis` 에 적용 항목을 쓴다)**
+**난이도 판단 기준 (1차 확정, v0.3 에서 영역 / 요건 전체로 분리)**
 
-변경(`impact_type` = add / modify)이 닿는 노드의 그래프 단계([data_structure_neo4j.svg](data_structure_neo4j.svg))와 영역 수로 판단한다.
+변경(`impact_type` = add / modify)이 닿는 노드의 그래프 단계([data_structure_neo4j.svg](data_structure_neo4j.svg))로 영역 난이도를 정하고, 영역 수·도메인 연계는 요건 전체 난이도에만 반영한다.
+
+영역 난이도 (`AreaImpact.difficulty`, `difficulty_basis` 에 적용 항목):
 
 | 난이도 | 기준 (하나라도 해당) | 그래프 단계 |
 |---|---|---|
-| Major | DB 스키마 변경(컬럼 추가·길이·타입) · 인터페이스 전문 레이아웃 변경 · 변경 영역 3개 이상 · 도메인 간 연계(`cross_domain`) | 5 Column 구조 변경, interface |
-| Medium | 업무 로직 변경이 2개 이상 노드에 걸침 · 화면 항목 추가 + 저장 로직 변경 · 변경 영역 2개 | 2~3 Logic·DataAccess 다수 |
-| Minor | 데이터·설정값·문구·이미지 변경 · 단일 영역의 단일 노드 변경 | 0~1 Entry·EntryHandler, 4 Table 데이터만 |
+| Major | DB 스키마 변경(컬럼 추가·길이·타입) · 인터페이스 전문 레이아웃 변경 | 5 Column 구조 변경, interface |
+| Medium | 업무 로직 변경이 2개 이상 노드에 걸침 · 화면 항목 추가 + 저장 로직 변경 | 2~3 Logic·DataAccess 다수 |
+| Minor | 데이터·설정값·문구·이미지 변경 · 단일 노드 변경 | 0~1 Entry·EntryHandler, 4 Table 데이터만 |
 
-- 요건 전체 난이도 = 영역 난이도 중 가장 높은 값 (Composer 요약, 정답셋 `difficulty` 비교).
+요건 전체 난이도 (`simulator.requirement_difficulty`, Composer 요약·정답셋 `difficulty` 비교): 영역 난이도 중 최고. 단 변경 영역 3개 이상 · 도메인 간 연계 → Major, 변경 영역 2개 → Medium 이상.
+
+일정 영향 요인: 영역당 3개 이내 (Simulator), 레포트 전체 8개 + "외 n건" (Composer).
 
 **출력 `SimulationOutput`**: `area_impacts[AreaImpact]`, `requested_vs_alternative`, `unverified_segments`, `dropped_paths` (신규)
 
