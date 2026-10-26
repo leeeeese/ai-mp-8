@@ -5,6 +5,8 @@
     "MAX_EXPLORE_LOOP": 3,
     "MAX_REPLAN": 2,
     "MAX_TOOL_CALLS": 20,
+    "MAX_HOPS_FORWARD": 5,
+    "MAX_HOPS_BIDIRECTIONAL": 10,
     "MEMORY_WINDOW_N": 5,
     "KPI_MIN_EVIDENCE_COVERAGE": 0.8,
     "KPI_MIN_CONFIRMED_RATIO": 0.5
@@ -72,44 +74,6 @@
       "title": "Confidence",
       "type": "string"
     },
-    "ImpactPath": {
-      "properties": {
-        "path_id": {
-          "title": "Path Id",
-          "type": "string"
-        },
-        "hops": {
-          "description": "A→C→X 순서",
-          "items": {
-            "$ref": "#/$defs/PathHop"
-          },
-          "title": "Hops",
-          "type": "array"
-        },
-        "cross_domain": {
-          "default": false,
-          "description": "상품↔마케팅 도메인 간 연계 여부",
-          "title": "Cross Domain",
-          "type": "boolean"
-        }
-      },
-      "required": [
-        "path_id",
-        "hops"
-      ],
-      "title": "ImpactPath",
-      "type": "object"
-    },
-    "ImpactType": {
-      "enum": [
-        "add",
-        "modify",
-        "reference_only",
-        "none"
-      ],
-      "title": "ImpactType",
-      "type": "string"
-    },
     "PathHop": {
       "description": "'노드 → 관계 → 영향 → 근거' 한 hop.",
       "properties": {
@@ -150,6 +114,44 @@
       ],
       "title": "PathHop",
       "type": "object"
+    },
+    "ImpactPath": {
+      "properties": {
+        "path_id": {
+          "title": "Path Id",
+          "type": "string"
+        },
+        "hops": {
+          "description": "A→C→X 순서",
+          "items": {
+            "$ref": "#/$defs/PathHop"
+          },
+          "title": "Hops",
+          "type": "array"
+        },
+        "cross_domain": {
+          "default": false,
+          "description": "상품↔마케팅 도메인 간 연계 여부",
+          "title": "Cross Domain",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "path_id",
+        "hops"
+      ],
+      "title": "ImpactPath",
+      "type": "object"
+    },
+    "ImpactType": {
+      "enum": [
+        "add",
+        "modify",
+        "reference_only",
+        "none"
+      ],
+      "title": "ImpactType",
+      "type": "string"
     },
     "AreaImpact": {
       "properties": {
@@ -312,7 +314,11 @@
           "title": "Answer"
         },
         "status": {
-          "$ref": "#/$defs/ChecklistStatus",
+          "allOf": [
+            {
+              "$ref": "#/$defs/ChecklistStatus"
+            }
+          ],
           "default": "unconfirmed"
         },
         "related_area": {
@@ -475,6 +481,40 @@
       "title": "ReanalysisRequest",
       "type": "object"
     },
+    "SimpleEvidenceRow": {
+      "properties": {
+        "claim": {
+          "title": "Claim",
+          "type": "string"
+        },
+        "evidence": {
+          "title": "Evidence",
+          "type": "string"
+        },
+        "location": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Location"
+        },
+        "confidence": {
+          "$ref": "#/$defs/Confidence"
+        }
+      },
+      "required": [
+        "claim",
+        "evidence",
+        "confidence"
+      ],
+      "title": "SimpleEvidenceRow",
+      "type": "object"
+    },
     "SimpleAnswer": {
       "properties": {
         "conclusion_lines": {
@@ -539,38 +579,30 @@
       "title": "SimpleAnswer",
       "type": "object"
     },
-    "SimpleEvidenceRow": {
+    "MailDraft": {
+      "description": "회신 메일 초안 (요청 시).",
       "properties": {
-        "claim": {
-          "title": "Claim",
+        "to": {
+          "items": {
+            "type": "string"
+          },
+          "title": "To",
+          "type": "array"
+        },
+        "subject": {
+          "title": "Subject",
           "type": "string"
         },
-        "evidence": {
-          "title": "Evidence",
+        "body": {
+          "title": "Body",
           "type": "string"
-        },
-        "location": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Location"
-        },
-        "confidence": {
-          "$ref": "#/$defs/Confidence"
         }
       },
       "required": [
-        "claim",
-        "evidence",
-        "confidence"
+        "subject",
+        "body"
       ],
-      "title": "SimpleEvidenceRow",
+      "title": "MailDraft",
       "type": "object"
     },
     "ComposerOutput": {
@@ -696,7 +728,7 @@
             }
           ],
           "default": null,
-          "description": "라인/화면 ID 등",
+          "description": "라인 범위 (예: L83-92)",
           "title": "Location"
         },
         "summary": {
@@ -725,17 +757,18 @@
           ],
           "default": null
         },
-        "score": {
+        "content": {
           "anyOf": [
             {
-              "type": "number"
+              "type": "string"
             },
             {
               "type": "null"
             }
           ],
           "default": null,
-          "title": "Score"
+          "description": "소스·문서 원문 (Simulator 가 판단에 사용)",
+          "title": "Content"
         }
       },
       "required": [
@@ -744,44 +777,6 @@
         "source_kind"
       ],
       "title": "Evidence",
-      "type": "object"
-    },
-    "ExpandGraphInput": {
-      "properties": {
-        "node_ids": {
-          "items": {
-            "type": "string"
-          },
-          "title": "Node Ids",
-          "type": "array"
-        },
-        "hops": {
-          "default": 1,
-          "maximum": 2,
-          "minimum": 1,
-          "title": "Hops",
-          "type": "integer"
-        },
-        "rel_types": {
-          "anyOf": [
-            {
-              "items": {
-                "type": "string"
-              },
-              "type": "array"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Rel Types"
-        }
-      },
-      "required": [
-        "node_ids"
-      ],
-      "title": "ExpandGraphInput",
       "type": "object"
     },
     "GraphEdge": {
@@ -795,9 +790,14 @@
           "type": "string"
         },
         "type": {
-          "description": "CALLS / REFERENCES / UPDATES / FLOWS_TO 등",
+          "description": "CALLS / OPENS / INVOKES / EXECUTES / READS / WRITES / REFERENCES / HAS_COLUMN",
           "title": "Type",
           "type": "string"
+        },
+        "properties": {
+          "type": "object",
+          "description": "event, note, via, columns",
+          "title": "Properties"
         }
       },
       "required": [
@@ -807,6 +807,19 @@
       ],
       "title": "GraphEdge",
       "type": "object"
+    },
+    "NodeRole": {
+      "description": "공통 역할 라벨. 영역별 라벨(tos Controller / swing TP 등)과 무관하게 탐색 목표를 가리킨다.",
+      "enum": [
+        "Entry",
+        "EntryHandler",
+        "Logic",
+        "DataAccess",
+        "Table",
+        "Column"
+      ],
+      "title": "NodeRole",
+      "type": "string"
     },
     "GraphNode": {
       "properties": {
@@ -819,9 +832,21 @@
           "type": "string"
         },
         "label": {
-          "description": "노드 유형 (Program/Method/SQL/Table/Batch/Interface/Screen 등)",
+          "description": "영역별 노드 유형 (Screen/Controller/Service/SQL/TP/Module/Batch/DBIO/Table/Column)",
           "title": "Label",
           "type": "string"
+        },
+        "role": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeRole"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "공통 역할 라벨"
         },
         "domain": {
           "anyOf": [
@@ -844,6 +869,7 @@
             }
           ],
           "default": null,
+          "description": "영역 소스 루트 기준 상대경로",
           "title": "Source File"
         },
         "source_line": {
@@ -860,7 +886,6 @@
         },
         "properties": {
           "type": "object",
-          "additionalProperties": true,
           "title": "Properties"
         }
       },
@@ -872,39 +897,57 @@
       "title": "GraphNode",
       "type": "object"
     },
-    "ExpandGraphOutput": {
-      "properties": {
-        "nodes": {
-          "items": {
-            "$ref": "#/$defs/GraphNode"
-          },
-          "title": "Nodes",
-          "type": "array"
-        },
-        "edges": {
-          "items": {
-            "$ref": "#/$defs/GraphEdge"
-          },
-          "title": "Edges",
-          "type": "array"
-        }
-      },
-      "required": [
-        "nodes",
-        "edges"
+    "MatchSource": {
+      "enum": [
+        "confirmed",
+        "glossary",
+        "text"
       ],
-      "title": "ExpandGraphOutput",
-      "type": "object"
+      "title": "MatchSource",
+      "type": "string"
     },
     "StartNodeChoice": {
       "properties": {
+        "item_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Item Id"
+        },
         "node_id": {
           "title": "Node Id",
           "type": "string"
         },
         "matched_keyword": {
+          "description": "일치한 표현 (phrase 또는 synonym)",
           "title": "Matched Keyword",
           "type": "string"
+        },
+        "match_source": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/MatchSource"
+            }
+          ],
+          "default": "text"
+        },
+        "score": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Score"
         },
         "reason": {
           "title": "Reason",
@@ -917,6 +960,165 @@
         "reason"
       ],
       "title": "StartNodeChoice",
+      "type": "object"
+    },
+    "Direction": {
+      "enum": [
+        "forward",
+        "reverse",
+        "forward_then_reverse"
+      ],
+      "title": "Direction",
+      "type": "string"
+    },
+    "StopReason": {
+      "enum": [
+        "target_reached",
+        "nearest_role",
+        "hop_cap",
+        "dead_end",
+        "excluded_common",
+        "no_start_node"
+      ],
+      "title": "StopReason",
+      "type": "string"
+    },
+    "ExplorePath": {
+      "description": "탐색 경로 1개. nodes 는 탐색 방향과 관계없이 진입 → DB (호출되는 쪽) 순서.",
+      "properties": {
+        "item_id": {
+          "title": "Item Id",
+          "type": "integer"
+        },
+        "nodes": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Nodes",
+          "type": "array"
+        },
+        "direction": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/Direction"
+            }
+          ],
+          "description": "이 경로를 찾은 탐색 방향 (forward / reverse)"
+        },
+        "reached_role": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeRole"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "탐색이 멈춘 노드의 역할"
+        },
+        "stop_reason": {
+          "$ref": "#/$defs/StopReason"
+        }
+      },
+      "required": [
+        "item_id",
+        "nodes",
+        "direction",
+        "stop_reason"
+      ],
+      "title": "ExplorePath",
+      "type": "object"
+    },
+    "ItemExploreResult": {
+      "properties": {
+        "item_id": {
+          "title": "Item Id",
+          "type": "integer"
+        },
+        "start_node_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Start Node Ids",
+          "type": "array"
+        },
+        "target_role": {
+          "$ref": "#/$defs/NodeRole"
+        },
+        "direction": {
+          "$ref": "#/$defs/Direction"
+        },
+        "reached": {
+          "description": "목표 역할에 닿은 경로가 하나 이상 있는지",
+          "title": "Reached",
+          "type": "boolean"
+        },
+        "hops_used": {
+          "default": 0,
+          "title": "Hops Used",
+          "type": "integer"
+        },
+        "frontier": {
+          "description": "hop 상한에 걸려 더 확장하지 못한 노드",
+          "items": {
+            "type": "string"
+          },
+          "title": "Frontier",
+          "type": "array"
+        },
+        "unmatched_mentions": {
+          "description": "노드를 찾지 못한 언급 표현",
+          "items": {
+            "type": "string"
+          },
+          "title": "Unmatched Mentions",
+          "type": "array"
+        }
+      },
+      "required": [
+        "item_id",
+        "target_role",
+        "direction",
+        "reached"
+      ],
+      "title": "ItemExploreResult",
+      "type": "object"
+    },
+    "ReactStep": {
+      "properties": {
+        "step": {
+          "title": "Step",
+          "type": "integer"
+        },
+        "thought": {
+          "description": "조회 결과를 근거로 한 판단",
+          "title": "Thought",
+          "type": "string"
+        },
+        "action": {
+          "description": "호출한 tool 이름 또는 finish",
+          "title": "Action",
+          "type": "string"
+        },
+        "args": {
+          "title": "Args",
+          "type": "object"
+        },
+        "observation": {
+          "description": "tool 결과 요약 (finish 면 종료 사유)",
+          "title": "Observation",
+          "type": "string"
+        }
+      },
+      "required": [
+        "step",
+        "thought",
+        "action",
+        "observation"
+      ],
+      "title": "ReactStep",
       "type": "object"
     },
     "ExplorerOutput": {
@@ -942,36 +1144,61 @@
           "title": "Edges",
           "type": "array"
         },
+        "paths": {
+          "items": {
+            "$ref": "#/$defs/ExplorePath"
+          },
+          "title": "Paths",
+          "type": "array"
+        },
+        "item_results": {
+          "items": {
+            "$ref": "#/$defs/ItemExploreResult"
+          },
+          "title": "Item Results",
+          "type": "array"
+        },
+        "excluded_common": {
+          "description": "공통이라 확장하지 않은 노드",
+          "items": {
+            "type": "string"
+          },
+          "title": "Excluded Common",
+          "type": "array"
+        },
+        "unresolved": {
+          "description": "그래프 밖 영역·신규 후보·매칭 실패 (보고서에서 분석 완료처럼 쓰지 않음)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Unresolved",
+          "type": "array"
+        },
         "hops_used": {
-          "maximum": 2,
-          "minimum": 1,
+          "default": 0,
+          "description": "경로 중 가장 긴 hop 수",
+          "minimum": 0,
           "title": "Hops Used",
           "type": "integer"
-        },
-        "hop_extension_reason": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "description": "2hop 확장 시 근거",
-          "title": "Hop Extension Reason"
         },
         "tool_call_count": {
           "default": 0,
           "title": "Tool Call Count",
           "type": "integer"
+        },
+        "react_trace": {
+          "description": "규칙 탐색 뒤 ReAct 보완 탐색 기록",
+          "items": {
+            "$ref": "#/$defs/ReactStep"
+          },
+          "title": "React Trace",
+          "type": "array"
         }
       },
       "required": [
         "start_nodes",
         "nodes",
-        "edges",
-        "hops_used"
+        "edges"
       ],
       "title": "ExplorerOutput",
       "type": "object"
@@ -1202,6 +1429,181 @@
       "title": "StructuredRequest",
       "type": "object"
     },
+    "ChangeType": {
+      "description": "요건 항목 유형. 목표 역할·방향·hop 상한은 config.CHANGE_TYPE_RULES 로 정한다.",
+      "enum": [
+        "screen_change",
+        "logic_change",
+        "query_field_add",
+        "data_add",
+        "column_spec_change",
+        "batch_change",
+        "interface_field_add",
+        "ops_cause",
+        "structure_query"
+      ],
+      "title": "ChangeType",
+      "type": "string"
+    },
+    "ExcludeOption": {
+      "properties": {
+        "is_common": {
+          "default": true,
+          "description": "공통 모듈·공통 SQL 을 탐색에서 제외 (제외 사실은 결과에 남김)",
+          "title": "Is Common",
+          "type": "boolean"
+        }
+      },
+      "title": "ExcludeOption",
+      "type": "object"
+    },
+    "Mention": {
+      "description": "요건에서 \"무엇을 말했는지\". Planner 는 그래프를 모르므로 노드 ID 가 아니라 표현과 힌트만 넘긴다.",
+      "properties": {
+        "kind": {
+          "$ref": "#/$defs/MentionKind"
+        },
+        "phrase": {
+          "description": "요건에 나온 표현 그대로 (예: 캠페인 화면, 비마케팅 여부)",
+          "title": "Phrase",
+          "type": "string"
+        },
+        "maybe_new": {
+          "default": false,
+          "description": "아직 시스템에 없을 수 있는 대상 (신규 항목 요청)",
+          "title": "Maybe New",
+          "type": "boolean"
+        },
+        "synonyms": {
+          "description": "같은 뜻의 다른 표현 (현업·시스템 용어)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Synonyms",
+          "type": "array"
+        },
+        "meaning": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "의미 힌트 (예: 메시지가 광고 목적인지 구분하는 Y/N 값)",
+          "title": "Meaning"
+        },
+        "area": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "업무 영역 힌트 (예: 캠페인, 권한)",
+          "title": "Area"
+        },
+        "confirmed_node": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "사용자가 확정한 노드 ID. Supervisor 가 채우고 Planner 는 비워 둔다",
+          "title": "Confirmed Node"
+        }
+      },
+      "required": [
+        "kind",
+        "phrase"
+      ],
+      "title": "Mention",
+      "type": "object"
+    },
+    "MentionKind": {
+      "description": "요건에서 언급한 대상의 종류 (Planner 가 그래프를 모르는 상태에서 고른다).",
+      "enum": [
+        "Screen",
+        "Batch",
+        "Function",
+        "Table",
+        "Column",
+        "Interface",
+        "Term"
+      ],
+      "title": "MentionKind",
+      "type": "string"
+    },
+    "ExploreItem": {
+      "description": "Explorer 에 넘기는 탐색 명세 1건 (요건 항목 단위).",
+      "properties": {
+        "item_id": {
+          "title": "Item Id",
+          "type": "integer"
+        },
+        "text": {
+          "description": "요건 항목 문장",
+          "title": "Text",
+          "type": "string"
+        },
+        "change_type": {
+          "$ref": "#/$defs/ChangeType"
+        },
+        "mentions": {
+          "items": {
+            "$ref": "#/$defs/Mention"
+          },
+          "title": "Mentions",
+          "type": "array"
+        },
+        "target_role": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/NodeRole"
+            }
+          ],
+          "description": "여기에 닿으면 멈춤 (config.CHANGE_TYPE_RULES)"
+        },
+        "direction": {
+          "$ref": "#/$defs/Direction"
+        },
+        "hop_cap": {
+          "description": "안전장치. 목표 판정이 우선",
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Hop Cap",
+          "type": "integer"
+        },
+        "out_of_graph": {
+          "description": "그래프 밖 영역 (예: 채널 전문). 탐색하지 않고 unresolved 로 넘김",
+          "items": {
+            "type": "string"
+          },
+          "title": "Out Of Graph",
+          "type": "array"
+        }
+      },
+      "required": [
+        "item_id",
+        "text",
+        "change_type",
+        "mentions",
+        "target_role",
+        "direction",
+        "hop_cap"
+      ],
+      "title": "ExploreItem",
+      "type": "object"
+    },
     "PlannerOutput": {
       "properties": {
         "structured_request": {
@@ -1214,6 +1616,25 @@
           "description": "판정 근거 (필수)",
           "title": "Complexity Reason",
           "type": "string"
+        },
+        "domains": {
+          "description": "탐색 영역 (SM 선택 → config.SM_PART_DOMAINS)",
+          "items": {
+            "$ref": "#/$defs/Domain"
+          },
+          "title": "Domains",
+          "type": "array"
+        },
+        "items": {
+          "description": "Explorer 탐색 명세",
+          "items": {
+            "$ref": "#/$defs/ExploreItem"
+          },
+          "title": "Items",
+          "type": "array"
+        },
+        "exclude": {
+          "$ref": "#/$defs/ExcludeOption"
         },
         "plan": {
           "description": "simple: explorer, retriever / complex: explorer, retriever, simulator, verifier (KPI Agent·Composer 는 Supervisor 가 항상 실행)",
@@ -1228,22 +1649,79 @@
         "structured_request",
         "complexity",
         "complexity_reason",
+        "domains",
+        "items",
         "plan"
       ],
       "title": "PlannerOutput",
       "type": "object"
     },
+    "ReexploreMode": {
+      "enum": [
+        "continue",
+        "reverse",
+        "next_target"
+      ],
+      "title": "ReexploreMode",
+      "type": "string"
+    },
     "ReexploreRequest": {
       "properties": {
+        "item_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "대상 탐색 명세 항목",
+          "title": "Item Id"
+        },
+        "mode": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/ReexploreMode"
+            }
+          ],
+          "default": "continue"
+        },
         "node_ids": {
+          "description": "여기서부터 다시 탐색",
           "items": {
             "type": "string"
           },
           "title": "Node Ids",
           "type": "array"
         },
+        "target_role": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeRole"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "비우면 항목의 목표 역할"
+        },
+        "direction": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Direction"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "비우면 mode 기준 (reverse → reverse, 그 외 forward)"
+        },
         "reason": {
-          "description": "새로 발견된 연결과 재탐색 사유",
+          "description": "재탐색 사유",
           "title": "Reason",
           "type": "string"
         }
@@ -1304,6 +1782,19 @@
           },
           "title": "Reexplore Request",
           "type": "array"
+        },
+        "tool_call_count": {
+          "default": 0,
+          "title": "Tool Call Count",
+          "type": "integer"
+        },
+        "react_trace": {
+          "description": "원문 확인 뒤 ReAct 근거 보완 기록",
+          "items": {
+            "$ref": "#/$defs/ReactStep"
+          },
+          "title": "React Trace",
+          "type": "array"
         }
       },
       "required": [
@@ -1357,12 +1848,38 @@
     },
     "SearchGraphNodesInput": {
       "properties": {
-        "keyword": {
-          "title": "Keyword",
-          "type": "string"
+        "terms": {
+          "description": "찾을 표현 (phrase + synonyms). 하나라도 맞으면 후보",
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Terms",
+          "type": "array"
         },
-        "sm_part": {
-          "$ref": "#/$defs/SmPart"
+        "domains": {
+          "description": "비우면 전체 영역",
+          "items": {
+            "$ref": "#/$defs/Domain"
+          },
+          "title": "Domains",
+          "type": "array"
+        },
+        "labels": {
+          "anyOf": [
+            {
+              "items": {
+                "type": "string"
+              },
+              "type": "array"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "영역별 노드 유형 제한 (예: Screen, Column)",
+          "title": "Labels"
         },
         "top_k": {
           "default": 5,
@@ -1371,8 +1888,7 @@
         }
       },
       "required": [
-        "keyword",
-        "sm_part"
+        "terms"
       ],
       "title": "SearchGraphNodesInput",
       "type": "object"
@@ -1391,87 +1907,53 @@
           "title": "Label",
           "type": "string"
         },
+        "role": {
+          "$ref": "#/$defs/NodeRole"
+        },
+        "domain": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Domain"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
         "score": {
           "title": "Score",
           "type": "number"
+        },
+        "matched_term": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Matched Term"
+        },
+        "match_source": {
+          "allOf": [
+            {
+              "$ref": "#/$defs/MatchSource"
+            }
+          ],
+          "default": "text"
         }
       },
       "required": [
         "node_id",
         "name",
         "label",
+        "role",
         "score"
       ],
       "title": "SearchGraphNodesItem",
-      "type": "object"
-    },
-    "SearchSourceInput": {
-      "properties": {
-        "query": {
-          "title": "Query",
-          "type": "string"
-        },
-        "domain": {
-          "$ref": "#/$defs/Domain"
-        },
-        "node_id": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Node Id"
-        },
-        "top_k": {
-          "default": 5,
-          "title": "Top K",
-          "type": "integer"
-        }
-      },
-      "required": [
-        "query",
-        "domain"
-      ],
-      "title": "SearchSourceInput",
-      "type": "object"
-    },
-    "SearchSourceItem": {
-      "properties": {
-        "file_path": {
-          "title": "File Path",
-          "type": "string"
-        },
-        "symbol": {
-          "anyOf": [
-            {
-              "type": "string"
-            },
-            {
-              "type": "null"
-            }
-          ],
-          "default": null,
-          "title": "Symbol"
-        },
-        "snippet": {
-          "title": "Snippet",
-          "type": "string"
-        },
-        "score": {
-          "title": "Score",
-          "type": "number"
-        }
-      },
-      "required": [
-        "file_path",
-        "snippet",
-        "score"
-      ],
-      "title": "SearchSourceItem",
       "type": "object"
     },
     "SimulationOutput": {
@@ -1511,6 +1993,25 @@
       "title": "SimulationOutput",
       "type": "object"
     },
+    "ConfirmedNode": {
+      "description": "사용자가 확정한 언급 표현 → 노드 매핑. Supervisor 가 탐색 명세의 Mention.confirmed_node 에 반영한다.",
+      "properties": {
+        "phrase": {
+          "title": "Phrase",
+          "type": "string"
+        },
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "phrase",
+        "node_id"
+      ],
+      "title": "ConfirmedNode",
+      "type": "object"
+    },
     "UserInput": {
       "description": "Supervisor가 받는 최초 입력.",
       "properties": {
@@ -1520,6 +2021,14 @@
         },
         "sm_part": {
           "$ref": "#/$defs/SmPart"
+        },
+        "confirmed_nodes": {
+          "description": "사용자가 확정한 노드 매핑",
+          "items": {
+            "$ref": "#/$defs/ConfirmedNode"
+          },
+          "title": "Confirmed Nodes",
+          "type": "array"
         },
         "output_options": {
           "description": "추가 산출물 요청",
@@ -1540,6 +2049,14 @@
       ],
       "title": "UserInput",
       "type": "object"
+    },
+    "VerifyResult": {
+      "enum": [
+        "pass",
+        "needs_supplement"
+      ],
+      "title": "VerifyResult",
+      "type": "string"
     },
     "VerifyCheck": {
       "properties": {
@@ -1579,14 +2096,6 @@
       ],
       "title": "VerifyCheck",
       "type": "object"
-    },
-    "VerifyResult": {
-      "enum": [
-        "pass",
-        "needs_supplement"
-      ],
-      "title": "VerifyResult",
-      "type": "string"
     },
     "VerifierOutput": {
       "properties": {
@@ -1638,7 +2147,6 @@
       "type": "string"
     },
     "KpiMetricName": {
-      "description": "quality: evidence_coverage(근거 확보 노드/탐색 노드), confirmed_ratio(confirmed 판정/전체 판정), area_coverage(판정 영역/4, complex만), unverified_segments(미확인 구간 수), verify_passed(1=pass, complex만) / performance: latency_ms, tool_calls, explore_loops, replans, total_tokens",
       "enum": [
         "evidence_coverage",
         "confirmed_ratio",
@@ -1806,30 +2314,233 @@
       "title": "KpiOutput",
       "type": "object"
     },
-    "MailDraft": {
-      "description": "회신 메일 초안 (요청 시).",
+    "ReadSourceInput": {
       "properties": {
-        "to": {
+        "node_ids": {
           "items": {
             "type": "string"
           },
-          "title": "To",
+          "minItems": 1,
+          "title": "Node Ids",
           "type": "array"
         },
-        "subject": {
-          "title": "Subject",
-          "type": "string"
-        },
-        "body": {
-          "title": "Body",
-          "type": "string"
+        "context_lines": {
+          "default": 0,
+          "description": "노드 범위 앞뒤로 더 읽을 줄 수",
+          "minimum": 0,
+          "title": "Context Lines",
+          "type": "integer"
         }
       },
       "required": [
-        "subject",
-        "body"
+        "node_ids"
       ],
-      "title": "MailDraft",
+      "title": "ReadSourceInput",
+      "type": "object"
+    },
+    "ReadSourceItem": {
+      "properties": {
+        "node_id": {
+          "title": "Node Id",
+          "type": "string"
+        },
+        "source_kind": {
+          "enum": [
+            "source",
+            "screen",
+            "interface_spec",
+            "common_code",
+            "ops_doc"
+          ],
+          "title": "Source Kind",
+          "type": "string"
+        },
+        "file_path": {
+          "description": "데이터 루트(data/) 기준 경로",
+          "title": "File Path",
+          "type": "string"
+        },
+        "start_line": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Start Line"
+        },
+        "end_line": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "End Line"
+        },
+        "content": {
+          "title": "Content",
+          "type": "string"
+        },
+        "found": {
+          "default": true,
+          "title": "Found",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "node_id",
+        "source_kind",
+        "file_path",
+        "content"
+      ],
+      "title": "ReadSourceItem",
+      "type": "object"
+    },
+    "TraverseGraphInput": {
+      "properties": {
+        "start_ids": {
+          "items": {
+            "type": "string"
+          },
+          "minItems": 1,
+          "title": "Start Ids",
+          "type": "array"
+        },
+        "direction": {
+          "enum": [
+            "forward",
+            "reverse"
+          ],
+          "title": "Direction",
+          "type": "string"
+        },
+        "target_role": {
+          "$ref": "#/$defs/NodeRole"
+        },
+        "hop_cap": {
+          "maximum": 10,
+          "minimum": 1,
+          "title": "Hop Cap",
+          "type": "integer"
+        },
+        "exclude_common": {
+          "default": true,
+          "title": "Exclude Common",
+          "type": "boolean"
+        },
+        "focus_ids": {
+          "description": "Column 까지 갈 때 확장할 컬럼 (비우면 접근 컬럼 전체)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Focus Ids",
+          "type": "array"
+        },
+        "writes_only": {
+          "default": false,
+          "description": "역방향 Table → 데이터 접근에서 WRITES 만 따라감 (저장 진입점 찾기)",
+          "title": "Writes Only",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "start_ids",
+        "direction",
+        "target_role",
+        "hop_cap"
+      ],
+      "title": "TraverseGraphInput",
+      "type": "object"
+    },
+    "TraversePath": {
+      "properties": {
+        "nodes": {
+          "description": "진입 → DB 순서",
+          "items": {
+            "type": "string"
+          },
+          "title": "Nodes",
+          "type": "array"
+        },
+        "reached_role": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/NodeRole"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "stop_reason": {
+          "$ref": "#/$defs/StopReason"
+        }
+      },
+      "required": [
+        "nodes",
+        "stop_reason"
+      ],
+      "title": "TraversePath",
+      "type": "object"
+    },
+    "TraverseGraphOutput": {
+      "properties": {
+        "nodes": {
+          "items": {
+            "$ref": "#/$defs/GraphNode"
+          },
+          "title": "Nodes",
+          "type": "array"
+        },
+        "edges": {
+          "items": {
+            "$ref": "#/$defs/GraphEdge"
+          },
+          "title": "Edges",
+          "type": "array"
+        },
+        "paths": {
+          "items": {
+            "$ref": "#/$defs/TraversePath"
+          },
+          "title": "Paths",
+          "type": "array"
+        },
+        "excluded_common": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Excluded Common",
+          "type": "array"
+        },
+        "frontier": {
+          "description": "hop 상한에 걸린 노드",
+          "items": {
+            "type": "string"
+          },
+          "title": "Frontier",
+          "type": "array"
+        },
+        "hops_used": {
+          "default": 0,
+          "title": "Hops Used",
+          "type": "integer"
+        }
+      },
+      "required": [
+        "nodes",
+        "edges",
+        "paths"
+      ],
+      "title": "TraverseGraphOutput",
       "type": "object"
     }
   }

@@ -1,0 +1,213 @@
+{
+  "req_id": "SC-001",
+  "title": "캠페인 비마케팅 여부 T world 전송",
+  "difficulty": "Major",
+  "complexity": "complex",
+  "sm_part": "marketing",
+  "domain": "tos",
+  "input_type": "requirement",
+  "request_text": "캠페인 등록 화면에서 비마케팅 여부를 입력받을 수 있게 하고, 이 값을 T world에 같이 전송해 주세요.",
+  "expected": {
+    "feasibility": "feasible",
+    "start_keywords": [
+      "캠페인 등록",
+      "비마케팅",
+      "T world",
+      "광고"
+    ],
+    "start_nodes": [
+      "SCR:TOSCP0110M",
+      "BAT:TBTW1010",
+      "BAT:TBCH1010"
+    ],
+    "areas": {
+      "screen": "reference_only",
+      "db": "reference_only",
+      "interface": "modify",
+      "batch": "modify"
+    },
+    "impacted": [
+      {
+        "node_id": "DBIO:DCP_MSGSCRT_S02",
+        "area": "batch",
+        "impact_type": "modify",
+        "reason": "T world 노출대상 조회 DBIO. output·SELECT 에 ADVT_YN 추가 (구조체 헤더 재생성)",
+        "must_find": true
+      },
+      {
+        "node_id": "BAT:TBTW1010",
+        "area": "interface",
+        "impact_type": "modify",
+        "reason": "tbtw1010.pc write_data_rec() 에 비마케팅여부 1 byte 매핑 (광고여부 Y → N, MMS 와 같은 반전 규칙), REC_LEN 500 → 501, Header/Trailer 공백 조정. IF-TOS-TWD-021 Data 항목 추가 (예비 필드 없음)",
+        "must_find": true,
+        "detail": [
+          "tbtw1010.write_data_rec",
+          "tbtw1010 REC_LEN 500 → 501",
+          "interfaces: IF-TOS-TWD-021 Data 레이아웃"
+        ],
+        "detail_exclude": [
+          "tbtw1010.cnv_non_mktg_yn - 유일한 호출부가 주석 안에 있어 현재 전송하지 않음 (이미 보낸다고 판단하면 오답)",
+          "STEP02 EAI 파일송신 - 변경 없음, 수신측(TWORLD-CMPN) 레이아웃 반영만 확인"
+        ]
+      },
+      {
+        "node_id": "SQL:tbch1010.make_snd_tgt#2",
+        "area": "batch",
+        "impact_type": "reference_only",
+        "reason": "MMS 는 DECODE(S.ADVT_YN, 'Y', 'N', 'Y') 로 광고여부를 반전해 비마케팅여부로 이미 적재. 신규 컬럼·화면 항목이 필요 없다는 판단 근거 (W1 과 갈리는 지점)",
+        "must_find": true
+      },
+      {
+        "node_id": "COL:TCP_MSG_SCRT.ADVT_YN",
+        "area": "db",
+        "impact_type": "reference_only",
+        "reason": "화면 '광고성 메시지' 체크값이 저장되는 광고여부. 비마케팅 = 광고여부 N",
+        "must_find": true
+      }
+    ],
+    "paths": [
+      {
+        "path_id": "P1",
+        "nodes": [
+          "SCR:TOSCP0110M",
+          "CTL:CmpnController.saveCmpn",
+          "SVC:CmpnService.saveCmpn",
+          "SVC:CmpnService.saveMsgScrt",
+          "SQL:MsgScrtMapper.insertMsgScrt",
+          "TBL:TCP_MSG_SCRT",
+          "COL:TCP_MSG_SCRT.ADVT_YN"
+        ],
+        "critical": false,
+        "status": "confirmed",
+        "note": "확인 경로(변경 없음): 캠페인 등록 화면에서 광고여부를 이미 입력·저장"
+      },
+      {
+        "path_id": "P2",
+        "nodes": [
+          "BAT:TBCH1010",
+          "SQL:tbch1010.make_snd_tgt#2",
+          "TBL:TCH_MMS_SND_TGT",
+          "COL:TCH_MMS_SND_TGT.NON_MKTG_YN"
+        ],
+        "critical": true,
+        "status": "confirmed",
+        "note": "확인 경로(변경 없음): MMS 는 make_snd_tgt 에서 광고여부를 반전해 비마케팅여부로 이미 전송"
+      },
+      {
+        "path_id": "P3",
+        "nodes": [
+          "BAT:TBTW1010",
+          "DBIO:DCP_MSGSCRT_S02",
+          "TBL:TCP_MSG_SCRT",
+          "COL:TCP_MSG_SCRT.ADVT_YN"
+        ],
+        "critical": true,
+        "status": "confirmed",
+        "note": "수정 경로: DBIO 에 ADVT_YN 조회 추가 → tbtw1010 매핑 → IF-TOS-TWD-021 (레코드 500 → 501)"
+      }
+    ],
+    "new": [],
+    "reference_only": [
+      "SCR:TOSCP0110M",
+      "CTL:CmpnController.saveCmpn",
+      "SVC:CmpnService.saveCmpn",
+      "SVC:CmpnService.saveMsgScrt",
+      "SQL:MsgScrtMapper.insertMsgScrt",
+      "SQL:MsgScrtMapper.updateMsgScrt",
+      "SQL:MsgScrtMapper.insertMsgScrtHst",
+      "TBL:TCP_MSG_SCRT",
+      "BAT:TBCH1010",
+      "TBL:TCH_MMS_SND_TGT",
+      "COL:TCH_MMS_SND_TGT.NON_MKTG_YN"
+    ],
+    "open_items": [
+      {
+        "owner": "business",
+        "question": "광고여부 N 을 비마케팅으로 보는 MMS 기준을 T world 에도 그대로 적용해도 되는가"
+      },
+      {
+        "owner": "business",
+        "question": "기존 등록 캠페인에도 적용하는가, 적용 시점은 언제인가 (ADVT_YN 기본값 'N' → 2020.07 이전 스크립트는 비마케팅 Y 로 전송됨)"
+      },
+      {
+        "owner": "business",
+        "question": "화면에서 별도로 비마케팅 여부를 입력받아야 하는 다른 사유가 있는가 (있으면 요청안 기준으로 재검토)"
+      },
+      {
+        "owner": "developer",
+        "question": "T world 레코드 500 → 501 byte 변경 시 수신측(TWORLD-CMPN) 반영 일정 (2020.09 400 → 500 변경 선례)"
+      },
+      {
+        "owner": "developer",
+        "question": "Header/Trailer 공백 길이 조정 및 수신측 길이 검증 방식"
+      },
+      {
+        "owner": "developer",
+        "question": "DBIO DCP_MSGSCRT_S02 출력 구조체 헤더 재생성과 tbtw1010 재컴파일"
+      },
+      {
+        "owner": "developer",
+        "question": "기존 주석 코드(cnv_non_mktg_yn) 재사용 여부와 변환 규칙의 MMS(DECODE) 일치"
+      }
+    ]
+  },
+  "distractors": [
+    {
+      "node_id": "SVC:CmpnService.saveMsgScrtTmp",
+      "why_confusing": "이름이 비슷한 메서드. 저장 흐름(saveCmpn → saveMsgScrt)에서 호출되지 않음"
+    },
+    {
+      "node_id": "SVC:CmpnService.selectMsgScrt(MsgScrtVO)",
+      "why_confusing": "오버로딩된 조회 메서드(미리보기). 저장·전송 흐름과 무관"
+    },
+    {
+      "node_id": "SQL:MsgScrtBkMapper.insertMsgScrt",
+      "why_confusing": "다른 namespace 의 같은 SQL id. 주입받는 Service 가 없고 백업 테이블 대상"
+    },
+    {
+      "node_id": "SCR:TOSCP0111P",
+      "why_confusing": "비슷한 화면 ID 의 미리보기 팝업. 광고 표시만 하고 저장 흐름을 타지 않음"
+    },
+    {
+      "node_id": "COL:TCU_CUST_BAS.MKTG_RCV_AGR_YN",
+      "why_confusing": "고객 단위 마케팅수신동의. 캠페인·메시지 단위 요건과 무관"
+    },
+    {
+      "node_id": "COL:TCP_MSG_SCRT_BK230715.ADVT_YN",
+      "why_confusing": "백업 테이블의 광고여부. 어떤 Service·배치에서도 사용하지 않음"
+    }
+  ],
+  "wrong_paths": [
+    {
+      "path_id": "W1",
+      "nodes": [
+        "BAT:TBCH1010",
+        "SQL:tbch1010.C_SND",
+        "TBL:TCH_MMS_SND_TGT",
+        "COL:TCH_MMS_SND_TGT.NON_MKTG_YN"
+      ],
+      "looks_like": "P2",
+      "why_wrong": "MMS 가 비마케팅여부 컬럼을 따로 두고 파일에 쓰는 것만 보면 신규 컬럼·화면 항목을 추가하게 됨. 값은 make_snd_tgt 에서 ADVT_YN 을 반전해 채우므로 신규 컬럼·화면 항목·DBA 요청이 필요 없고 MMS 도 수정 대상이 아님"
+    }
+  ],
+  "conclusion": {
+    "correct": "기존 광고여부(TCP_MSG_SCRT.ADVT_YN)를 MMS와 같은 규칙(광고여부 Y → 비마케팅여부 N)으로 변환해 T world 노출파일(IF-TOS-TWD-021)에 실어 보내는 대안. 화면·DB·MMS 변경 없음. 수정은 DBIO DCP_MSGSCRT_S02, tbtw1010.pc, T world 명세서(레코드 500 → 501 byte).",
+    "wrong": "MMS 선례(TCH_MMS_SND_TGT.NON_MKTG_YN)를 따라 T world용 비마케팅여부 컬럼과 캠페인 등록 화면 입력 항목을 신규 추가."
+  },
+  "evidence": [
+    {
+      "kind": "doc",
+      "file": "docs/tos/interface/IF-TOS-TWD-021.md",
+      "note": "Data 레이아웃 500 byte, 예비 필드 없음 → 항목 추가"
+    },
+    {
+      "kind": "doc",
+      "file": "docs/tos/interface/IF-TOS-MMS-011.md",
+      "note": "MMS 전문 NON_MKTG_YN (2021.06 추가)"
+    }
+  ],
+  "analysis_limits": [
+    "T world 수신측(TWORLD-CMPN) 처리 소스는 적재 범위 밖",
+    "공통 프레임워크(tmkcom.h, tmkdbio.h, DBIO 생성 헤더, EAI 송신 모듈)는 적재 범위 밖"
+  ]
+}

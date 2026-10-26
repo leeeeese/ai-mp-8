@@ -19,7 +19,9 @@ class BaseAgent(ABC, Generic[OutputT]):
 
     @property
     def system_prompt(self) -> str:
-        return (PROMPT_DIR / f"{self.name}.md").read_text(encoding="utf-8")
+        """시스템 공통 페르소나(_common.md) + 에이전트별 프롬프트."""
+        common = (PROMPT_DIR / "_common.md").read_text(encoding="utf-8")
+        return common + "\n" + (PROMPT_DIR / f"{self.name}.md").read_text(encoding="utf-8")
 
     @abstractmethod
     def run(self, state: AgentState) -> OutputT:

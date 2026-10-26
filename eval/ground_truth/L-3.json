@@ -1,0 +1,90 @@
+{
+  "req_id": "L-3",
+  "title": "I/B 로밍업무처리내역조회 - 추천인 그리드 추가 요청",
+  "difficulty": "Minor",
+  "complexity": "simple",
+  "sm_part": "product",
+  "request_text": "추천인별로 제공업체가 나뉘어 있어 판촉물 검수를 위해 I/B 로밍업무처리내역조회 화면에서 업무구분 '전체', '정보변경'으로 조회할 때도 추천인을 확인할 수 있게 해주세요. 현재는 '신청'으로 조회할 때만 추천인 정보가 보입니다.",
+  "expected": {
+    "feasibility": "feasible",
+    "start_keywords": [
+      "I/B 로밍업무처리내역조회",
+      "추천인",
+      "업무구분"
+    ],
+    "start_nodes": [
+      "SCR:ZROMSS0200010"
+    ],
+    "areas": {
+      "screen": "modify",
+      "db": "modify",
+      "interface": "none",
+      "batch": "none"
+    },
+    "impacted": [
+      {
+        "node_id": "DBIO:RomProcHstSql.selectProcHstList",
+        "area": "db",
+        "impact_type": "modify",
+        "reason": "<if test=\"procTypCd == '01'\"> 조건 제거 → 업무구분과 무관하게 R.RCMD_ID 조회",
+        "must_find": true
+      },
+      {
+        "node_id": "SCR:ZROMSS0200010",
+        "area": "screen",
+        "impact_type": "modify",
+        "reason": "rcmdId 컬럼 visible = (cboProcTyp == '01') 조건 제거 (전체/신청/정보변경 모두 노출) / 그리드 rcmdId 컬럼 기본 VISIBLE 변경",
+        "detail": [
+          "event btnSearch_onClick"
+        ],
+        "must_find": true
+      }
+    ],
+    "paths": [
+      {
+        "path_id": "P1",
+        "nodes": [
+          "SCR:ZROMSS0200010",
+          "TP:RomProcHstSvc.getProcHstList",
+          "DBIO:RomProcHstSql.selectProcHstList",
+          "TBL:TB_ROM_RENT",
+          "COL:TB_ROM_RENT.RCMD_ID"
+        ],
+        "critical": false,
+        "status": "confirmed",
+        "note": "업무구분 전체/정보변경에서도 추천인 조회·노출"
+      }
+    ],
+    "new": [],
+    "reference_only": [
+      "TP:RomProcHstSvc.getProcHstList",
+      "TBL:TB_ROM_RENT",
+      "TBL:TB_ROM_PROC_HST",
+      "COL:TB_ROM_RENT.RCMD_ID"
+    ],
+    "open_items": [
+      {
+        "owner": "business",
+        "question": "정보변경 행에 표시되는 추천인은 '현재' 추천인(TB_ROM_RENT.RCMD_ID)임. 정보변경으로 추천인이 바뀐 경우 변경 전 추천인이 필요한지 (변경 이력 컬럼 없음)"
+      },
+      {
+        "owner": "developer",
+        "question": "엑셀 다운로드는 보이는 컬럼만 내보내므로 화면 변경으로 자동 반영됨 (별도 수정 불필요) 확인"
+      }
+    ]
+  },
+  "distractors": [
+    {
+      "node_id": "DBIO:RomCustReqSql.selectMonthlyCustReq",
+      "why_confusing": "RCMD_ID 를 조회하는 다른 로밍 SQL (월별 CDTS 추출). 처리내역조회 화면과 무관"
+    },
+    {
+      "node_id": "BAT:ZROMBB0100010",
+      "why_confusing": "로밍 판촉 검수 관련 월별 추출 배치. 화면 조회 조건 변경과 무관"
+    },
+    {
+      "node_id": "SCR:ZROMSS0100010",
+      "why_confusing": "추천인 입력 화면(IB로밍서비스관리). 입력은 이미 가능하며 변경 대상 아님"
+    }
+  ]
+}

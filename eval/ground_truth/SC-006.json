@@ -1,0 +1,163 @@
+{
+  "req_id": "SC-006",
+  "title": "캠페인 발송 실패 사유 확인 (운영 문의)",
+  "difficulty": "Minor",
+  "complexity": "simple",
+  "sm_part": "marketing",
+  "domain": "tos",
+  "input_type": "ops_inquiry",
+  "request_text": "기프티콘 비마케팅 캠페인을 발송하고 실패 고객 대상으로 3차 재발송까지 했습니다. 자사(C260900301) 309명 중 111명 성공·198명 실패, 타사(C260900302) 444명 중 29명 성공·415명 실패입니다. 실패 고객의 사유를 알고 싶습니다. 자사는 IT 요청서를 보내면 되는지, 타사는 어디로 문의하면 되는지 알려 주세요.",
+  "expected": {
+    "feasibility": "feasible",
+    "start_keywords": [
+      "발송 실패",
+      "실패 사유",
+      "자사",
+      "타사",
+      "재발송"
+    ],
+    "start_nodes": [
+      "TBL:TCH_MMS_SND_TGT",
+      "TBL:TCH_EXT_SND_TGT",
+      "TBL:TCP_CMM_CD"
+    ],
+    "areas": {
+      "screen": "none",
+      "db": "reference_only",
+      "interface": "none",
+      "batch": "reference_only"
+    },
+    "impacted": [
+      {
+        "node_id": "COL:TCH_MMS_SND_TGT.FAIL_CD",
+        "area": "db",
+        "impact_type": "reference_only",
+        "reason": "자사 실패 사유: SND_STAT_CD='90' 건의 FAIL_CD × TCP_CMM_CD(CD_CAMP_ERR_01) 코드별 건수",
+        "must_find": true
+      },
+      {
+        "node_id": "COL:TCH_EXT_SND_TGT.EXT_RSLT_CD",
+        "area": "db",
+        "impact_type": "reference_only",
+        "reason": "타사 실패 사유: SND_STAT_CD='F2'(수신 실패) 건의 EXT_RSLT_CD·EXT_RSLT_MSG 별 건수 (CD_EXT_RSLT_01)",
+        "must_find": true
+      },
+      {
+        "node_id": "TBL:TCP_CMM_CD",
+        "area": "db",
+        "impact_type": "reference_only",
+        "reason": "코드 의미 조회. 자사는 CD_CAMP_ERR_01 (CD_CAMP_ERR_02 는 RCS 용이라 같은 E301 이 다른 의미)",
+        "must_find": true
+      }
+    ],
+    "paths": [
+      {
+        "path_id": "P1",
+        "nodes": [
+          "TBL:TCH_MMS_SND_TGT",
+          "COL:TCH_MMS_SND_TGT.FAIL_CD"
+        ],
+        "critical": true,
+        "status": "confirmed",
+        "note": "자사 실패 사유 저장 위치"
+      },
+      {
+        "path_id": "P2",
+        "nodes": [
+          "TBL:TCH_EXT_SND_TGT",
+          "COL:TCH_EXT_SND_TGT.EXT_RSLT_CD"
+        ],
+        "critical": true,
+        "status": "confirmed",
+        "note": "타사 실패 사유 저장 위치 (F2 = 수신 실패)"
+      },
+      {
+        "path_id": "P3",
+        "nodes": [
+          "TBL:TCP_CMM_CD",
+          "COL:TCP_CMM_CD.CD_NM"
+        ],
+        "critical": true,
+        "status": "confirmed",
+        "note": "코드 의미 (그룹을 틀리면 사유가 바뀜)"
+      }
+    ],
+    "new": [],
+    "reference_only": [
+      "BAT:TBCH1020",
+      "BAT:TBCH4020",
+      "COL:TCH_MMS_SND_TGT.SND_STAT_CD",
+      "COL:TCH_EXT_SND_TGT.SND_STAT_CD",
+      "COL:TCH_EXT_SND_TGT.EXT_RSLT_MSG"
+    ],
+    "open_items": [
+      {
+        "owner": "business",
+        "question": "발송결과 반영 배치의 기준 시점 (배치 정의 D 23:30 / D-1 06:00 vs 운영 가이드 익일 06:00)"
+      },
+      {
+        "owner": "business",
+        "question": "자사 E301 138건과 IT 요청서 Blank 141건의 관계"
+      },
+      {
+        "owner": "business",
+        "question": "타사 R510 원인 (중개사 확인)"
+      },
+      {
+        "owner": "business",
+        "question": "재발송 조건 변경 여부 (필요 시 별도 변경 분석)"
+      }
+    ]
+  },
+  "distractors": [
+    {
+      "node_id": "TBL:TCP_CMPN_TGT",
+      "why_confusing": "이름이 비슷한 캠페인 대상 원장. 발송 결과 컬럼 없음"
+    },
+    {
+      "node_id": "TBL:TCH_EXT_SND_HIST",
+      "why_confusing": "같은 컬럼이 있는 차수별 이력 테이블. 집계 시 고객 수 중복"
+    }
+  ],
+  "wrong_paths": [
+    {
+      "path_id": "W1",
+      "nodes": [
+        "TBL:TCH_EXT_SND_HIST",
+        "COL:TCH_EXT_SND_HIST.EXT_RSLT_CD"
+      ],
+      "looks_like": "P2",
+      "why_wrong": "3차 재발송까지 차수별로 쌓여 고객 수가 중복 집계됨"
+    }
+  ],
+  "conclusion": {
+    "correct": "수정 소스 없음. 1차: 자사는 TCH_MMS_SND_TGT(SND_STAT_CD='90') FAIL_CD × TCP_CMM_CD(CD_CAMP_ERR_01), 타사는 TCH_EXT_SND_TGT(SND_STAT_CD='F2') EXT_RSLT_CD·EXT_RSLT_MSG 별 건수 조회 안내, 문의처(MMS G/W 운영, 중개사 고객지원), 고객 목록은 데이터 추출 IT 요청서. 2차(결과 입력 후): 자사 E301 138건(70%), E205 55건 원출처 확인 / 타사 R510 370건(89%) 중개사 문의 1순위, R501 재발송 회복 가능. 코드 의미는 추정으로 표시.",
+    "wrong": "같은 테이블·코드 조회, 이력 테이블 집계, CD_CAMP_ERR_02 조인, 코드 의미 확정, 읽음·버튼 근거, 변경 분석 제시"
+  },
+  "evidence": [
+    {
+      "kind": "data",
+      "file": "snapshot/tos/20261021/TCP_CMM_CD.csv",
+      "note": "CD_CAMP_ERR_01 / CD_CAMP_ERR_02(RCS) / CD_EXT_RSLT_01, 범위 밖 읽음·버튼 코드"
+    },
+    {
+      "kind": "doc",
+      "file": "docs/tos/ops/send_result_ops_guide.md",
+      "note": "원출처·문의처, IT 요청서, 데이터 발생 규칙"
+    },
+    {
+      "kind": "doc",
+      "file": "docs/tos/batch/tos_batch_def.md",
+      "note": "발송결과 반영 배치 (운영 가이드와 기준 시점 표현이 다름)"
+    },
+    {
+      "kind": "user_input",
+      "file": "eval/inputs/SC-006",
+      "note": "2차 답변용 조회 결과 (198/415/Blank 141)"
+    }
+  ],
+  "analysis_limits": [
+    "결과 반영 프로그램(tbch1020, tbch4020) 소스는 적재 범위 밖",
+    "실제 고객 데이터는 조회하지 않음 (사용자 입력 조회 결과: eval/inputs/SC-006)"
+  ]
+}

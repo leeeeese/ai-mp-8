@@ -1,7 +1,7 @@
 # Impact Analysis Agent
 
 요건(ITSD/메일 등)이나 운영 문의를 받아 **화면 · DB · 인터페이스 · 배치** 영역의 영향도를 분석하는 멀티 에이전트입니다.
-모든 에이전트의 입출력은 [`schemas/schemas.json`](schemas/schemas.json)(JSON Schema 2020-12)을 기준으로 정의합니다.
+모든 에이전트의 입출력은 [`schemas/schemas.json`](schemas/schemas.json)(JSON Schema 2026-10) 기준으로 정의합니다.
 
 ## 흐름
 
@@ -134,6 +134,7 @@ Neo4j 가입이나 별도 설치는 필요 없습니다. `docker compose up` 시
 | 완전 초기화 (비밀번호 재설정 포함) | `docker compose down` 후 `rm -rf data/neo4j` |
 
 - 데이터는 `./data/neo4j`에 저장되며 `.gitignore` 대상입니다.
+- 목업 데이터(`data/`) 받기, 그래프 적재(`scripts/build_graph.py --load`), 브라우저에서 노드 종류별 색으로 전체 그래프 보기는 [docs/neo4j_guide.md](docs/neo4j_guide.md) 참고. `data/` 는 git 에 없으므로 필요하면 관리자(파트너 모두 해당)에게 zip 을 요청합니다.
 - 최초 실행 이후에는 `.env` 비밀번호를 바꿔도 반영되지 않습니다. 브라우저 UI에서 `ALTER CURRENT USER SET PASSWORD FROM '기존' TO '새것'`으로 바꾸거나, 위의 완전 초기화를 하세요.
 - APOC 플러그인이 필요하면 `docker-compose.yml`의 `NEO4J_PLUGINS` 주석을 해제합니다.
 
@@ -158,8 +159,14 @@ source .venv/bin/activate
 pytest                                    # 테스트
 docker compose up -d                      # Neo4j 실행
 ruff check src tests                      # 린트
-python -m impact_agent "요청 문장" --sm-part product   # 실행 (에이전트 구현 후)
+python -m impact_agent "요청 문장" --sm-part product   # 실행 (Composer 구현 후)
+python -m impact_agent --case SC-001 --until retriever  # 정답셋 요청으로 Planner→Explorer→Retriever 까지 (설계: docs/YJ_agent_design.md)
 ```
+
+## 웹 UI
+
+`frontend/` (React 18 + TypeScript + Vite, API 는 MSW mock). 실행: `cd frontend && npm install && npm run dev` → http://localhost:5173
+화면 설계서: [docs/ui_design.md](docs/ui_design.md), Agent 설계서: [docs/YJ_agent_design.md](docs/YJ_agent_design.md)
 
 ## 스키마 변경 절차
 

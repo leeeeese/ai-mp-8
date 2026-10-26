@@ -1,0 +1,219 @@
+{
+  "req_id": "M-3",
+  "title": "IB SIM렌탈 대상 T머니 지급 관련 전산 체크 로직 추가",
+  "difficulty": "Medium",
+  "complexity": "complex",
+  "sm_part": "product",
+  "request_text": "SIM렌탈 구매고객 대상 T머니 지급 시 현재 [고객요구사항]에 '티', '티거부' 등으로 메모하고 있어 일 단위 T머니 실재고 마감이 불가하고, 메모가 여권번호 기준이라 벌크/복수 건의 정확한 지급 확인이 불가합니다. T머니 지급건에 대한 전산처리를 의무화(신청/정보변경)하고, IB로밍서비스관리 > 상세정보(렌탈테이블) 내 예약바우처번호 옆에 판촉품 지급 Y/N 체크박스를 추가해 벌크건도 개별 지급 확인이 가능하게 해주세요. 변경 내용은 IB로밍업무처리내역조회 화면에서 체크할 수 있어야 합니다.",
+  "expected": {
+    "feasibility": "feasible",
+    "start_keywords": [
+      "IB로밍서비스관리",
+      "렌탈테이블",
+      "예약바우처번호",
+      "판촉품",
+      "T머니",
+      "고객요구사항",
+      "로밍업무처리내역조회"
+    ],
+    "start_nodes": [
+      "SCR:ZROMSS0100010",
+      "TBL:TB_ROM_RENT_EQP",
+      "SCR:ZROMSS0200010"
+    ],
+    "areas": {
+      "screen": "modify",
+      "db": "modify",
+      "interface": "none",
+      "batch": "reference_only"
+    },
+    "impacted": [
+      {
+        "node_id": "TBL:TB_ROM_RENT_EQP",
+        "area": "db",
+        "impact_type": "modify",
+        "reason": "판촉품 지급여부 컬럼 추가 대상 테이블. 장비 행 단위라 벌크 개별 확인 가능",
+        "must_find": true
+      },
+      {
+        "node_id": "DBIO:RomRentSql.insertRentEqp",
+        "area": "db",
+        "impact_type": "modify",
+        "reason": "판촉품 컬럼 저장",
+        "must_find": true
+      },
+      {
+        "node_id": "DBIO:RomRentSql.updateRentEqp",
+        "area": "db",
+        "impact_type": "modify",
+        "reason": "판촉품 컬럼 변경",
+        "must_find": true
+      },
+      {
+        "node_id": "DBIO:RomRentSql.selectRentEqpList",
+        "area": "db",
+        "impact_type": "modify",
+        "reason": "판촉품 컬럼 조회",
+        "must_find": true
+      },
+      {
+        "node_id": "SCR:ZROMSS0100010",
+        "area": "screen",
+        "impact_type": "modify",
+        "reason": "상세정보 > 렌탈테이블 그리드 예약바우처번호 옆 판촉품 Y/N 체크박스 컬럼 추가 / 신청 시 판촉품 입력 필수 검증 (의무화) / 정보변경 시 판촉품 입력 필수 검증 (의무화)",
+        "detail": [
+          "event btnReg_onClick",
+          "event btnChg_onClick"
+        ],
+        "must_find": true
+      },
+      {
+        "node_id": "TP:RomRentSvc.regRent",
+        "area": "screen",
+        "impact_type": "modify",
+        "reason": "서버 측 필수 검증 + 처리내역에 판촉품 지급 기록",
+        "must_find": true
+      },
+      {
+        "node_id": "TP:RomRentSvc.changeRentInfo",
+        "area": "screen",
+        "impact_type": "modify",
+        "reason": "서버 측 필수 검증 + 변경 이력(PROC_CTT)에 판촉품 변경 기록",
+        "must_find": true
+      },
+      {
+        "node_id": "DBIO:RomProcHstSql.selectProcHstList",
+        "area": "db",
+        "impact_type": "modify",
+        "reason": "장비별 판촉품 지급여부 조회 추가",
+        "must_find": true
+      },
+      {
+        "node_id": "SCR:ZROMSS0200010",
+        "area": "screen",
+        "impact_type": "modify",
+        "reason": "처리내역 그리드에 판촉품 컬럼 + 미입력/지급 체크 로직(필터/표시) 추가 / 판촉품 체크 로직 반영",
+        "detail": [
+          "event btnSearch_onClick"
+        ],
+        "must_find": true
+      }
+    ],
+    "paths": [
+      {
+        "path_id": "P1",
+        "nodes": [
+          "SCR:ZROMSS0100010",
+          "TP:RomRentSvc.regRent",
+          "DBIO:RomRentSql.insertRentEqp",
+          "TBL:TB_ROM_RENT_EQP"
+        ],
+        "critical": false,
+        "status": "confirmed",
+        "note": "신청 시 판촉품 지급여부 저장·필수 검증"
+      },
+      {
+        "path_id": "P2",
+        "nodes": [
+          "SCR:ZROMSS0100010",
+          "TP:RomRentSvc.changeRentInfo",
+          "DBIO:RomRentSql.updateRentEqp",
+          "TBL:TB_ROM_RENT_EQP"
+        ],
+        "critical": false,
+        "status": "confirmed",
+        "note": "정보변경 시 판촉품 지급여부 저장·필수 검증"
+      },
+      {
+        "path_id": "P3",
+        "nodes": [
+          "SCR:ZROMSS0100010",
+          "TP:RomRentSvc.getRentDtl",
+          "DBIO:RomRentSql.selectRentEqpList",
+          "TBL:TB_ROM_RENT_EQP"
+        ],
+        "critical": false,
+        "status": "confirmed",
+        "note": "렌탈테이블 그리드 판촉품 체크박스 조회"
+      },
+      {
+        "path_id": "P4",
+        "nodes": [
+          "SCR:ZROMSS0200010",
+          "TP:RomProcHstSvc.getProcHstList",
+          "DBIO:RomProcHstSql.selectProcHstList",
+          "TBL:TB_ROM_RENT_EQP"
+        ],
+        "critical": false,
+        "status": "confirmed",
+        "note": "처리내역조회 판촉품 체크 로직"
+      },
+      {
+        "path_id": "P5",
+        "nodes": [
+          "BAT:ZROMBB0100010",
+          "DBIO:RomCustReqSql.selectMonthlyCustReq",
+          "TBL:TB_ROM_RENT"
+        ],
+        "critical": false,
+        "status": "pending",
+        "note": "CDTS 월별 추출에 판촉품 컬럼 추가 여부 미확정"
+      }
+    ],
+    "new": [
+      {
+        "suggested_id": "COL:TB_ROM_RENT_EQP.PRMT_GIFT_YN",
+        "area": "db",
+        "reason": "장비(SIM) 단위 판촉품 지급여부 컬럼 신규 (예약바우처번호 옆 체크박스의 원천)"
+      }
+    ],
+    "reference_only": [
+      "TBL:TB_ROM_CUST_REQ",
+      "MOD:RomRentSvc.saveCustReq",
+      "TP:RomRentSvc.getRentDtl",
+      "TBL:TB_ROM_RENT",
+      "TBL:TB_ROM_PROC_HST",
+      "TP:RomProcHstSvc.getProcHstList",
+      "COL:TB_ROM_RENT.ROM_TYP_CD",
+      "COL:TB_ROM_RENT_EQP.RSV_VOUCHER_NO",
+      "COL:TB_ROM_CUST_REQ.REQ_MEMO",
+      "COL:TB_ROM_RENT.RENT_QTY"
+    ],
+    "open_items": [
+      {
+        "owner": "business",
+        "question": "체크박스(Y/N) vs 수량 기재 방식 확정. 장비 행 단위 Y/N 이면 벌크 개별 확인 가능"
+      },
+      {
+        "owner": "business",
+        "question": "적용 대상이 I/B SIM 렌탈(31)만인지 I/B 전 유형인지 (의무화 검증 범위)"
+      },
+      {
+        "owner": "business",
+        "question": "'의무화'의 의미: Y/N 중 하나를 반드시 선택하게 할지(미선택 상태 필요) / 기존 '티','티거부' 메모 데이터 이관 여부"
+      },
+      {
+        "owner": "business",
+        "question": "T머니 실재고 마감(재고 관리) 기능은 범위 외인지, 월별 CDTS 추출 파일(ZROMBB0100010)에도 판촉품 컬럼을 추가할지"
+      },
+      {
+        "owner": "developer",
+        "question": "기존 렌탈 장비 행은 판촉품 컬럼 NULL → 정보변경 시 필수 검증으로 막히지 않도록 처리 기준 필요"
+      }
+    ]
+  },
+  "distractors": [
+    {
+      "node_id": "BAT:ZROMBB0100010",
+      "why_confusing": "요건 현황에 나오는 '월별 요구사항 메모 추출(CDTS)' 배치. 현행 수기 프로세스이며 필수 변경 대상 아님"
+    },
+    {
+      "node_id": "DBIO:RomCustReqSql.mergeCustReq",
+      "why_confusing": "고객요구사항 메모 저장. 메모 방식은 유지하고 별도 컬럼으로 관리하는 것이 요건"
+    },
+    {
+      "node_id": "SCR:ZROMRR0700090",
+      "why_confusing": "SIM 렌탈 계약서 이미지. 판촉품과 무관 (images: rom_ib_sim_k.jpg)"
+    }
+  ]
+}
