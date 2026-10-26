@@ -199,7 +199,8 @@ Simulator·Verifier·Composer 가 같은 함수(`rules.py`)를 쓴다. 판단 �
 | `area_verdicts` | 코드. `simulation.area_impacts` 를 영역별 한 행으로 (경로 요약은 "진입 → … → 끝 노드") |
 | `schedule_factors` | 코드. 영역별 `schedule_factors` 합치기 (중복 제거) |
 | `path_details` | 코드. `simulation` 경로 그대로 (같은 경로는 한 번만) |
-| `analysis_limits` | 코드. `simulation.unverified_segments` + `dropped_paths`(검토 제외 경로) + Verifier 미해결 점검 + 재계획 한도 초과 사실 |
+| `analysis_limits` | 코드. `simulation.unverified_segments` + Verifier 반복·경고 점검 + 재계획 한도 초과 사실 |
+| `dropped_paths` | 코드. `simulation.dropped_paths` → 레포트 "검토 제외 경로" 절 + 개발 체크리스트 항목 |
 | `checklist` | LLM 초안 + 코드 정리. 아래 규칙 |
 | `stage` | `initial` → (후속 답변 반영) `updated` → (체크리스트 전부 확정) `final_for_dev` |
 
@@ -279,6 +280,7 @@ yj 쪽 출력 필드를 그대로 쓰고, yj 쪽 기준표를 다시 정의하�
 |---|---|---|
 | `VerifyCheck.check` (`CheckKind`) | + `evidence_missing` | 다이어그램의 "근거 검증" 항목 |
 | `SimulationOutput` | + `dropped_paths: list[DroppedPath{path, reason}]` | 요건과 무관해 제외한 경로 (가드 통과분). 레포트 "검토 제외 경로", KPI 원인 분석 |
+| `ComplexReport` | + `dropped_paths: list[DroppedPath]` | 레포트 템플릿의 "검토 제외 경로" 절 렌더링 (Composer 구현 시 추가) |
 | `PathHop.evidence_ref` | 설명만 `file_path#symbol` → `file_path#location` | Retriever Evidence 의 `location`(라인 범위)과 맞춤 |
 | 신규 (LLM 응답용, `schemas.json` 비공개) | `SimulatorDraft`, `VerifierDraft`, `ComposerDraft` | Structured Output. 최종 출력은 코드가 조립 |
 

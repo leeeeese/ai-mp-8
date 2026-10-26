@@ -28,6 +28,17 @@
 {% for l in report.analysis_limits %}
 - {{ l }}
 {% endfor %}
+{% if report.dropped_paths %}
+
+## 검토 제외 경로
+요건과 무관하다고 판단해 영향 경로에서 뺀 경로입니다. 실제로 무관한지 확인이 필요합니다.
+
+| 경로 | 노드 | 제외 사유 |
+|---|---|---|
+{% for d in report.dropped_paths %}
+| {{ d.path.path_id }} | {% for h in d.path.hops %}{{ h.node }}{% if not loop.last %} → {% endif %}{% endfor %} | {{ d.reason }} |
+{% endfor %}
+{% endif %}
 
 ## 확인 체크리스트
 | ID | 담당 | 질문 | 답변 | 상태 |
