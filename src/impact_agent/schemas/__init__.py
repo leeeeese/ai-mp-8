@@ -86,6 +86,7 @@ from .retriever import (
 from .simulator import (
     Alternative,
     AreaImpact,
+    DroppedPath,
     ImpactPath,
     PathHop,
     SimulationOutput,
@@ -129,6 +130,7 @@ __all__ = [
     "Difficulty",
     "Direction",
     "Domain",
+    "DroppedPath",
     "Evidence",
     "ExcludeOption",
     "ExcludedNode",
