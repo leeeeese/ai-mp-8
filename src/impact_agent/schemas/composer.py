@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from .enums import Area, ChecklistOwner, ChecklistStatus, Complexity, Confidence, Difficulty, Feasibility
-from .simulator import ImpactPath
+from .simulator import DroppedPath, ImpactPath
 
 
 # --- complex ---------------------------------------------------------------
@@ -36,6 +36,7 @@ class ComplexReport(BaseModel):
     schedule_factors: list[str]
     path_details: list[ImpactPath]
     analysis_limits: list[str]
+    dropped_paths: list[DroppedPath] = Field(default_factory=list, description="검토 제외 경로 (Simulator 가 요건과 무관하다고 본 경로)")
     checklist: list[ChecklistItem]
     stage: Literal["initial", "updated", "final_for_dev"] = "initial"
 
@@ -61,6 +62,7 @@ class QueryResultSummary(BaseModel):
 
 class SimpleAnswer(BaseModel):
     conclusion_lines: list[str] = Field(min_length=3, max_length=5)
+    impact_paths: list[ImpactPath] = Field(default_factory=list, description="영향 경로 (A→…→끝)")
     evidence_table: list[SimpleEvidenceRow]
     check_queries: list[GuidanceQuery] = Field(default_factory=list)
     inquiry_contacts: list[str] = Field(default_factory=list)

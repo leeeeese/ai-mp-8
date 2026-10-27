@@ -1,12 +1,13 @@
 """Supervisor: LangGraph 노드·조건부 엣지로 순서·분기·재계획을 제어하고 실행 로그를 남긴다 (LLM 미사용).
 
     START ─(새 요건·변경 분석·재분석)→ planner ─→ explorer ─→ retriever ─(재탐색 요청, 루프·tool 한도 안)→ explorer
-          └(후속 답변·조회 결과)→ composer                    ├(simple)→ kpi → composer → END
+          └(후속 답변·조회 결과)→ composer                    ├(simple)→ composer → kpi → END
                                                               └(complex)→ simulator → verifier ─(보완 필요, 재계획 한도 안)→ planner
-                                                                                              └(통과·한도 초과)→ kpi
+                                                                                              └(통과·한도 초과)→ composer
 
 - 재계획 사유(Verifier 의 reason·additional_scope)는 replan_feedback 에 누적해 Planner 가 다음 계획에 반영한다 (Reflexion).
 - 상태(AgentState)는 checkpointer 에 세션(thread_id)별로 보관해 후속 입력에 재사용한다. 후속 입력은 최근 MEMORY_WINDOW_N 개만 유지.
+- (PoC 평가) KPI Agent 는 Composer 이후 AnswerKey(정답 경로 목록) + 실행 로그로 평가한다. 결과는 Composer 에 전달하지 않는다.
 """
 
 import time
@@ -21,6 +22,7 @@ from .. import config
 from ..schemas import (
     AgentName,
     AgentRunRecord,
+    AnswerKey,
     Complexity,
     ComposerOutput,
     FollowupInput,
@@ -61,17 +63,26 @@ class Supervisor:
         self.composer = ComposerAgent()
         self.checkpointer = checkpointer or MemorySaver()
         self.last_session_id: str | None = None
+        self.last_state: AgentState | None = None
 
     # --- 진입 -------------------------------------------------------------------
 
-    def run(self, user_input: UserInput) -> ComposerOutput:
-        return self.analyze(user_input).composer
+    def run(self, user_input: UserInput, answer_key: AnswerKey | None = None) -> ComposerOutput:
+        """분석을 실행하고 Composer 결과를 반환한다. KPI 평가 결과는 last_state.kpi 에 남는다."""
+        return self.analyze(user_input, answer_key=answer_key).composer
 
-    def analyze(self, user_input: UserInput, until: str | None = None, session_id: str | None = None) -> AgentState:
-        """새 요건을 분석하고 상태를 돌려준다. until 을 주면 그 단계까지만 실행한다 (KPI·Composer 생략)."""
+    def analyze(
+        self,
+        user_input: UserInput,
+        until: str | None = None,
+        session_id: str | None = None,
+        answer_key: AnswerKey | None = None,
+    ) -> AgentState:
+        """새 요건을 분석하고 상태를 돌려준다. until 을 주면 그 단계까지만 실행한다 (Composer·KPI 생략)."""
         if until is not None and until not in STAGES:
             raise ValueError(f"until 은 {STAGES} 중 하나")
-        return self._invoke(AgentState(user_input=user_input), until, session_id or uuid.uuid4().hex)
+        state = AgentState(user_input=user_input, answer_key=answer_key)
+        return self._invoke(state, until, session_id or uuid.uuid4().hex)
 
     def followup(self, session_id: str, followup: FollowupInput, until: str | None = None) -> AgentState:
         """같은 세션에 후속 입력을 넣는다. 답변·조회 결과는 Composer 로, 변경 분석·재분석 요청은 Planner 로 간다."""
@@ -85,7 +96,8 @@ class Supervisor:
     def _invoke(self, state: AgentState, until: str | None, session_id: str) -> AgentState:
         self.last_session_id = session_id
         result = self._graph(until).invoke(_updates(state), self._config(session_id))
-        return AgentState.model_validate(dict(result))
+        self.last_state = AgentState.model_validate(dict(result))
+        return self.last_state
 
     @staticmethod
     def _config(session_id: str) -> dict:
@@ -106,16 +118,16 @@ class Supervisor:
 
         g.add_conditional_edges(START, self._route_start, {"PLANNER": "PLANNER", "COMPOSER": "COMPOSER"})
         g.add_conditional_edges("PLANNER", lambda s: self._route_planner(s, until),
-                                {"EXPLORER": "EXPLORER", "SIMULATOR": "SIMULATOR", "KPI": "KPI", END: END})
+                                {"EXPLORER": "EXPLORER", "SIMULATOR": "SIMULATOR", "COMPOSER": "COMPOSER", END: END})
         g.add_edge("EXPLORER", "RETRIEVER")
         g.add_conditional_edges("RETRIEVER", lambda s: self._route_retriever(s, until),
-                                {"EXPLORER": "EXPLORER", "SIMULATOR": "SIMULATOR", "KPI": "KPI", END: END})
+                                {"EXPLORER": "EXPLORER", "SIMULATOR": "SIMULATOR", "COMPOSER": "COMPOSER", END: END})
         g.add_conditional_edges("SIMULATOR", lambda s: END if until == "simulator" else self._next_after_sim(s),
-                                {"VERIFIER": "VERIFIER", "KPI": "KPI", END: END})
+                                {"VERIFIER": "VERIFIER", "COMPOSER": "COMPOSER", END: END})
         g.add_conditional_edges("VERIFIER", lambda s: self._route_verifier(s, until),
-                                {"PLANNER": "PLANNER", "KPI": "KPI", END: END})
-        g.add_edge("KPI", "COMPOSER")
-        g.add_edge("COMPOSER", END)
+                                {"PLANNER": "PLANNER", "COMPOSER": "COMPOSER", END: END})
+        g.add_edge("COMPOSER", "KPI")  # PoC 평가: Composer 결과에는 반영하지 않음
+        g.add_edge("KPI", END)
         return g.compile(checkpointer=self.checkpointer)
 
     # --- 노드 ---------------------------------------------------------------------
@@ -176,18 +188,18 @@ class Supervisor:
         if until in ("explorer", "retriever"):
             return END
         if state.planner.complexity is Complexity.SIMPLE:
-            return "KPI"
+            return "COMPOSER"
         return self._next_after_sim(state) if AgentName.SIMULATOR not in self._steps(state) else "SIMULATOR"
 
     def _next_after_sim(self, state: AgentState) -> str:
-        return "VERIFIER" if AgentName.VERIFIER in self._steps(state) else "KPI"
+        return "VERIFIER" if AgentName.VERIFIER in self._steps(state) else "COMPOSER"
 
     def _route_verifier(self, state: AgentState, until: str | None) -> str:
         # 이번 Verifier 실행에서 재계획이 잡혔으면 (replan_count 가 지금까지의 Planner 실행 수만큼 올라감) Planner 로
         planner_runs = sum(r.agent == "planner" for r in state.agent_runs)
         if state.verifier.result is VerifyResult.NEEDS_SUPPLEMENT and state.replan_count >= planner_runs:
             return "PLANNER"
-        return END if until == "verifier" else "KPI"
+        return END if until == "verifier" else "COMPOSER"
 
     @staticmethod
     def _steps(state: AgentState) -> set[AgentName]:
@@ -196,7 +208,7 @@ class Supervisor:
     # --- 공통 -----------------------------------------------------------------------
 
     def _call(self, name: str, agent, state: AgentState) -> OutputT:
-        """에이전트를 실행하고 실행 로그(시간·tool 호출·토큰)를 남긴다."""
+        """에이전트를 실행하고 실행 로그(시간·tool 호출·토큰, KPI Agent 입력)를 남긴다."""
         start = time.perf_counter()
         output = agent.run(state)
         tool_calls = getattr(output, "tool_call_count", 0) or 0

@@ -4,6 +4,7 @@ from pydantic import BaseModel, Field
 
 from .schemas import (
     AgentRunRecord,
+    AnswerKey,
     ComposerOutput,
     ExplorerOutput,
     FollowupInput,
@@ -30,8 +31,8 @@ class AgentState(BaseModel):
     retriever: RetrieverOutput | None = None
     simulation: SimulationOutput | None = None
     verifier: VerifierOutput | None = None
-    kpi: KpiOutput | None = None
     composer: ComposerOutput | None = None
+    kpi: KpiOutput | None = None  # Composer 이후 평가 결과
 
     # 루프 제어 (config.MAX_* 와 비교)
     explore_loop_count: int = 0
@@ -39,5 +40,8 @@ class AgentState(BaseModel):
     tool_call_count: int = 0
     replan_feedback: list[ReplanFeedback] = Field(default_factory=list)
 
-    # KPI 측정용 실행 기록 (Supervisor 가 적재)
+    # 실행 로그 (Supervisor 가 적재) — KPI Agent 입력
     agent_runs: list[AgentRunRecord] = Field(default_factory=list)
+
+    # PoC 평가용 정답 경로 목록 — KPI Agent 입력 (분석 에이전트는 참조하지 않음)
+    answer_key: AnswerKey | None = None

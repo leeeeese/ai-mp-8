@@ -3,6 +3,14 @@
 - {{ line }}
 {% endfor %}
 
+{% if answer.impact_paths %}
+## 영향 경로
+{% for p in answer.impact_paths %}
+- {{ p.path_id }}: {% for h in p.hops %}{{ h.node }}{% if not loop.last %} → {% endif %}{% endfor %}
+
+{% endfor %}
+
+{% endif %}
 ## 근거
 | 주장 | 근거 | 위치 | 확신도 |
 |---|---|---|---|
@@ -17,6 +25,26 @@
 ```sql
 {{ q.sql }}
 ```
+{% endfor %}
+{% endif %}
+{% if answer.query_result_summary %}
+
+## 조회 결과 요약
+{% for x in answer.query_result_summary.code_meanings %}
+- 코드 의미: {{ x }}
+{% endfor %}
+{% for x in answer.query_result_summary.main_causes %}
+- 주요 원인: {{ x }}
+{% endfor %}
+{% for x in answer.query_result_summary.inquiry_items %}
+- 문의 필요: {{ x }}
+{% endfor %}
+{% endif %}
+{% if answer.inquiry_contacts %}
+
+## 문의처
+{% for c in answer.inquiry_contacts %}
+- {{ c }}
 {% endfor %}
 {% endif %}
 {% if answer.analysis_limits %}

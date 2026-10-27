@@ -1,6 +1,7 @@
 """LLM 호출 (OpenAI Structured Outputs). 모델은 .env 의 LLM_MODEL (기본 gpt-6.1-sol).
 
 Planner 는 항상, Explorer·Retriever 는 ReAct 보완 단계에서 사용한다 (react_llm).
+Simulator·Verifier·Composer 는 판정·문장 작성에 사용하고, 없으면 규칙 결과만 낸다 (analysis_llm).
 
 AZURE_OPENAI_ENDPOINT 가 있으면 Azure OpenAI 호환 게이트웨이로 호출한다 (api_version = OPENAI_API_VERSION).
 """
@@ -9,7 +10,7 @@ import os
 from dataclasses import dataclass
 from typing import Protocol, TypeVar
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ValidationError
 
 T = TypeVar("T", bound=BaseModel)
 DEFAULT_MODEL = "gpt-6.1-sol"
@@ -31,9 +32,28 @@ class LLMError(RuntimeError):
     pass
 
 
+def _llm_failures() -> tuple[type[Exception], ...]:
+    try:
+        from openai import OpenAIError
+    except ImportError:
+        return (LLMError, ValidationError)
+    return (LLMError, OpenAIError, ValidationError)
+
+
+# 규칙 결과로 대체할 LLM 실패 (거부·빈 응답, API·네트워크 오류, 응답 검증 실패)
+LLM_FAILURES = _llm_failures()
+
+
 def react_llm() -> "LLMClient | None":
     """Explorer·Retriever ReAct 단계용 LLM. 키가 없거나 REACT=0 이면 None (규칙 단계만 실행)."""
     if os.environ.get("REACT", "1") == "0" or not os.environ.get("OPENAI_API_KEY"):
+        return None
+    return OpenAIClient()
+
+
+def analysis_llm() -> "LLMClient | None":
+    """Simulator·Verifier·Composer 판정·문장용 LLM. 키가 없거나 ANALYSIS_LLM=0 이면 None (규칙 결과만)."""
+    if os.environ.get("ANALYSIS_LLM", "1") == "0" or not os.environ.get("OPENAI_API_KEY"):
         return None
     return OpenAIClient()
 

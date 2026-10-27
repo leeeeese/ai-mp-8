@@ -8,8 +8,7 @@
 ![Agent 워크플로우](agent_workflow.svg)
 
 - 흐름: 요건서 + SM 파트 → Supervisor → 1 Planner(복잡도·탐색 명세) → 2-1 Explorer ⇄ 2-2 Retriever(경로 / 확장 요청) → 단순은 3 Composer, 복잡은 2-3 Simulator → 2-4 Verifier(보완 필요 시 재계획) → 3 Composer.
-- KPI Agent (점선, 평가 PoC): 분석 흐름의 단계가 아니라 **별개로 측정**한다. 실행 결과·실행 로그를 정답 경로 목록과 비교해 재현율·미탐율·정밀도·시간을 낸다.
-  - 현재 코드(`agents/supervisor.py`)는 파트너 설계(KPI Agent·Composer 담당)대로 KPI 를 Composer 직전에 한 번 실행하고, 미달 지표(`warnings`)를 Composer 가 분석 한계로 쓴다. 분석 흐름의 분기·재계획에는 쓰지 않는다.
+- KPI Agent (점선, 평가 PoC): 분석 흐름의 단계가 아니라 **별개로 측정**한다. Composer 이후 실행 결과·실행 로그를 정답 경로 목록(`AnswerKey`)과 비교해 재현율·미탐율·정밀도·시간을 내고, 결과는 Composer 에 전달하지 않는다 (`agents/supervisor.py`: `… → COMPOSER → KPI → END`).
 - 후속 입력(현업 답변·개발 의견·조회 결과)은 START 에서 바로 Composer 로, 변경 분석·재분석 요청은 Planner 로 간다 (그림에는 없음).
 
 ```
@@ -67,7 +66,7 @@ UserInput (요청 문장 · SM 선택 · 확정 매핑)
    - 매 라운드 새로 시작 (`state.explorer = state.retriever = None`)
    - Retriever 의 `reexplore_request` 가 없거나, `MAX_EXPLORE_LOOP` 또는 `MAX_TOOL_CALLS` 에 닿으면 종료
 3. `simple` → 종료 / `complex` → Simulator → Verifier → `needs_supplement` 면 `replan_feedback` 누적 후 Planner 로 (`MAX_REPLAN` 까지)
-4. KPI Agent → Composer
+4. Composer → KPI Agent (평가 PoC, 결과는 Composer 에 전달하지 않음)
 5. 에이전트마다 `AgentRunRecord { agent, latency_ms, tool_calls, input_tokens, output_tokens }` 기록
 
 **한도·예외**: tool 호출은 에이전트 출력의 `tool_call_count` 를 `state.tool_call_count` 에 누적해서 관리. `analyze(user_input, until="retriever")` 로 지정 단계까지만 실행 가능 (뒷단 미구현 상태 확인용).
@@ -266,4 +265,4 @@ PYTHONPATH=src python3 scripts/YJ/run_guardrail.py
 3. 재탐색 라운드 근거 누적 (덮어쓰기 대신 병합), 근거 중복 병합
 4. Explorer ReAct 는 점검 신호가 있을 때만 시작 (지연), 분석 대상이 없는 입력은 Supervisor 에서 조기 종료
 5. 복잡도: 탐색 결과로 다시 판정하는 단계, 케이스당 3회 반복 평가
-6. Supervisor: 입력 정리(`input_meta`: 입력 출처·유형·분석 시점) 미구현, Composer `reanalysis_request` → Planner 재분석 라우팅 미구현, 에이전트 실패(예외) 시 대체 흐름 없음, KPI Agent 실행 로그(`agent_runs`) 미기록, tool 호출 한도 계산이 Explorer·Retriever 안에 흩어져 있음
+6. Supervisor: 입력 정리(`input_meta`: 입력 출처·유형·분석 시점) 미구현, Composer `reanalysis_request` → Planner 재분석 라우팅 미구현, 에이전트 실패(예외) 시 대체 흐름 없음, tool 호출 한도 계산이 Explorer·Retriever 안에 흩어져 있음

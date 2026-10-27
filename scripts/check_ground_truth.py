@@ -1,6 +1,6 @@
 """eval/ground_truth/*.json 이 그래프(data/graph)와 맞는지 검사한다.
 
-- 정답 경로(expected.paths)·오답 경로(wrong_paths)의 노드가 존재하고, 이웃한 두 노드가 from → to 엣지로 이어지는지
+- 정답 경로(expected.paths)·오답 경로(wrong_paths)의 노드가 존재하고, 이웃한 두 노드가 from → to 엣지로 이어지는지 (path_id 중복 포함)
 - impacted / reference_only / start_nodes / distractors 의 노드 존재, enum 값
 - distractors 가 impacted 에 섞이지 않았는지 (정답 경로 위 노드는 [INFO]: 경로는 지나지만 노드 자체는 변경 대상 아님)
 - [INFO] 시작 노드에서 2hop(Explorer 기본 탐색 범위) 밖에 있는 must_find 노드
@@ -73,6 +73,9 @@ def check(path: Path, nodes: set[str], edges: set[tuple[str, str]], adj: dict) -
             errs.append(f"open_items owner {o['owner']}")
 
     path_nodes: set[str] = set()
+    ids = [p["path_id"] for p in exp["paths"]]
+    if len(ids) != len(set(ids)):
+        errs.append("paths: path_id 중복")
     for kind, plist in (("paths", exp["paths"]), ("wrong_paths", gt.get("wrong_paths", []))):
         for p in plist:
             pid = p["path_id"]
