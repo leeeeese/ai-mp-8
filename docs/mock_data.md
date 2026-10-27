@@ -54,6 +54,13 @@ data/
 - 노드가 아닌 것: JS 함수(→ Screen 의 `events`), MyBatis `<sql>` 조각(→ 쓰는 SQL 에 흡수), Pro\*C 함수(→ Batch 에 흡수), Job 단계(→ Batch), 인터페이스 항목(→ Batch/TP/Module 의 `interfaces`).
 - ID 에 영역(domain)은 넣지 않고 `domain` 속성으로 구분합니다. 영역 간 ID 가 겹치면 그래프 빌드를 실패시킵니다.
 
+## 그래프 노드 구조 (공통)
+
+![영향도 그래프 노드 구조](impact_graph_structure.svg)
+
+- 0 진입 → 1 처리 진입 → 2 업무 로직 → 3 데이터 접근 → 4 테이블 → 5 컬럼 단계로, tos·swing 은 같은 라벨 체계의 하나의 그래프에 저장한다 (공통 역할 라벨: Entry · EntryHandler · Logic · DataAccess · Table · Column).
+- 그림은 기본 구조(화면 이동 OPENS 포함)이며, 그림에 없는 ★ 확장 패턴(tos Controller→SQL, swing Batch→Module·TP)은 아래 영역별 표에 있다.
+
 ## 그래프 모델 (swing)
 
 ```

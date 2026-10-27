@@ -1,9 +1,16 @@
 # Agent 설계서 (에이전트 단위)
 
 > 담당: **Supervisor · 1 Planner · 2-1 Explorer · 2-2 Retriever · UI** (본인) / 2-3 Simulator · 2-4 Verifier · 3 Composer · KPI Agent (파트너)
-> 스키마·필드명은 가안이며 그래프 적재 범위·프롬프트가 확정되면 조정한다. 기준일 2026-10-25.
+> 스키마·필드명은 가안이며 그래프 적재 범위·프롬프트가 확정되면 조정한다.
 
 ## 0. 한눈에 보기
+
+![Agent 워크플로우](agent_workflow.svg)
+
+- 흐름: 요건서 + SM 파트 → Supervisor → 1 Planner(복잡도·탐색 명세) → 2-1 Explorer ⇄ 2-2 Retriever(경로 / 확장 요청) → 단순은 3 Composer, 복잡은 2-3 Simulator → 2-4 Verifier(보완 필요 시 재계획) → 3 Composer.
+- KPI Agent (점선, 평가 PoC): 분석 흐름의 단계가 아니라 **별개로 측정**한다. 실행 결과·실행 로그를 정답 경로 목록과 비교해 재현율·미탐율·정밀도·시간을 낸다.
+  - 현재 코드(`agents/supervisor.py`)는 파트너 설계(KPI Agent·Composer 담당)대로 KPI 를 Composer 직전에 한 번 실행하고, 미달 지표(`warnings`)를 Composer 가 분석 한계로 쓴다. 분석 흐름의 분기·재계획에는 쓰지 않는다.
+- 후속 입력(현업 답변·개발 의견·조회 결과)은 START 에서 바로 Composer 로, 변경 분석·재분석 요청은 Planner 로 간다 (그림에는 없음).
 
 ```
 UserInput (요청 문장 · SM 선택 · 확정 매핑)
@@ -34,7 +41,7 @@ UserInput (요청 문장 · SM 선택 · 확정 매핑)
 |---|---|---|
 | 페르소나 | 시스템 공통(역할·목표·톤·제약) + 에이전트별 페르소나 표 | `prompts/_common.md` (BaseAgent 가 모든 프롬프트 앞에 붙임), `prompts/{planner,explorer,retriever}.md` |
 | Agent Framework | LangGraph: Supervisor = 진입 라우팅 + 노드 뒤 조건부 엣지 함수, MemorySaver checkpointer | `agents/supervisor.py` (`Supervisor.followup`) |
-| Planner | Few-shot (Brown et al. 2020): 판정 규칙 나열 대신 complex 2 / simple 2 판정 예시 | `prompts/planner.md` |
+| Planner | Few-shot (Brown et al. 2020): 판정 규칙 나열 대신 complex 2 / simple 3 판정 예시 | `prompts/planner.md` |
 | Planner·Supervisor | Reflexion (Shinn et al. 2023): Verifier 사유를 `replan_feedback` 에 누적, 재계획 시 이전 탐색 명세 + 누적 사유를 함께 전달 | `supervisor._verifier_node`, `planner.user_message` |
 | Explorer·Retriever | ReAct (Yao et al. 2023): 규칙 단계 결과를 Observation 으로 주고 Thought → Action → Observation 반복, 예시 궤적 1개 | `agents/react.py`, `explorer._react`, `retriever._react`, `ExplorerOutput/RetrieverOutput.react_trace` |
 | Output Parsing | Structured Output (Pydantic): `PlannerDraft`, `ExplorerDecision`, `RetrieverDecision` | 각 agent 모듈 |
@@ -112,13 +119,17 @@ UserInput (요청 문장 · SM 선택 · 확정 매핑)
 
 ## 3. Explorer (2-1)
 
-**역할**: 탐색 명세의 언급 표현을 그래프 노드로 매칭하고, 목표 역할까지 경로를 찾는다. 요건 유형 판단·소스 해석은 하지 않는다 (LLM 미사용).
+**역할**: 탐색 명세의 언급 표현을 그래프 노드로 매칭하고, 목표 역할까지 경로를 찾는다. 요건 유형 판단은 하지 않는다. 규칙 단계 뒤 ReAct 보완 단계에서 LLM 사용 (매칭 실패·목표 미도달·진입점·언급 값의 컬럼·공통코드 점검).
 
 **입력**: `planner.items`, `planner.domains`, `planner.exclude`, 재탐색이면 `retriever.reexplore_request` + 이전 `explorer`
 
 **tool**: `search_graph_nodes(terms, domains, labels, top_k)`, `traverse_graph(start_ids, direction, target_role, hop_cap, exclude_common, focus_ids, writes_only)`, `get_node_detail(node_id)`
 
 ### 3-1. 그래프 모델
+
+![영향도 그래프 노드 구조](impact_graph_structure.svg)
+
+- 그림 = 0 진입 ~ 5 컬럼 단계의 기본 구조 (화면 이동 OPENS 포함). 그림에 없는 확장 관계: tos Controller -EXECUTES→ SQL(★ 매퍼 직접 호출), swing Batch -INVOKES→ Module·TP(★ 배치의 모듈·서비스 재사용). Table -REFERENCES→ Table 은 DDL 에 FOREIGN KEY 가 있는 tos 에만 있다. 전체 패턴은 [mock_data.md](mock_data.md).
 - 노드 = 영역별 라벨 + **공통 역할 라벨** (`:Node:Controller:EntryHandler`, 속성 `role`)
 
 | 역할 | tos | swing |
@@ -167,7 +178,7 @@ Retriever 요청을 받아 이전 결과에 이어서 탐색한다. `continue` �
 
 ## 4. Retriever (2-2)
 
-**역할**: 경로 노드의 소스·화면·인터페이스 정의서 **원문을 직접 읽어** 근거로 Simulator 에 넘긴다. 벡터 검색 없음 (LLM 미사용).
+**역할**: 경로 노드의 소스·화면·인터페이스 정의서 **원문을 직접 읽어** 근거로 Simulator 에 넘긴다. 벡터 검색 없음. 규칙 단계 뒤 ReAct 보완 단계에서 LLM 사용 (잘린 원문 더 읽기, 경로 밖 연결은 재탐색 요청).
 
 **입력**: `explorer.start_nodes`, `explorer.paths`, `explorer.item_results`, `planner.items`
 
@@ -176,8 +187,8 @@ Retriever 요청을 받아 이전 결과에 이어서 탐색한다. `continue` �
 **처리**
 1. 시작 노드 + 경로 노드를 한 번에 읽는다 (최대 80개, 초과분은 근거 없음으로)
    - 위치: `SOURCE_ROOT_<DOMAIN>` / `source_file` 의 `source_line` 부터 노드 범위
-   - Screen 은 연결 js, Batch 는 PROC 프로그램(.pc)을 이어 붙임. Column 은 DDL 줄 + 코멘트
-   - 노드 `interfaces` 가 있으면 정의서(`DOCS_ROOT_<DOMAIN>/interface`)도 (`source_kind=interface_spec`)
+   - Screen 은 연결 js, Batch 는 실행 프로그램(tos `.pc`, swing `program/*.pgm`)을 이어 붙임. Column 은 DDL 줄 + 코멘트
+   - 노드 `interfaces` 가 있으면 정의서(`DOCS_ROOT_<DOMAIN>/interface`, 파일명 = ID 또는 파일 안 `INTERFACE <ID> … END INTERFACE` 블록)도 (`source_kind=interface_spec`)
 2. `Evidence { node_id, file_path, symbol, location(L시작-끝), summary, source_kind, domain, content(원문) }`
 3. 재탐색 요청
 
@@ -185,9 +196,9 @@ Retriever 요청을 받아 이전 결과에 이어서 탐색한다. `continue` �
 |---|---|---|
 | continue | 항목에 `frontier`(hop 상한) | frontier 에서 같은 목표로 이어서 |
 | reverse | 정방향 항목인데 시작 노드가 모두 목표보다 DB 쪽이라 경로 없음 | 그 노드에서 Entry 까지 |
-| next_target | (향후, LLM) 원문에서 그래프 밖 연결·근거 부족 판단 | 다음 목표 역할까지 |
+| next_target | (ReAct) 원문에서 탐색 범위 밖 연결을 발견 (`[경로 밖 연결]` 의 노드) | 지정한 목표 역할·방향까지 |
 
-**출력 `RetrieverOutput`**: `evidence`, `nodes_without_evidence`, `reexplore_request[{item_id, mode, node_ids, target_role, direction, reason}]`, `tool_call_count`
+**출력 `RetrieverOutput`**: `evidence`, `nodes_without_evidence`, `reexplore_request[{item_id, mode, node_ids, target_role, direction, reason}]`, `tool_call_count`, `react_trace`
 
 ---
 
@@ -204,7 +215,8 @@ Retriever 요청을 받아 이전 결과에 이어서 탐색한다. `continue` �
 
 ## 6. 데이터·적재 (공통 기반)
 
-- 그래프: `scripts/build_graph.py` (영역별 파서 → 공통 검증 → `data/graph` → `--load` Neo4j). 노드 ID 규칙 `<접두어>:<키>` ([mock_data.md](mock_data.md))
+- 그래프: `scripts/build_graph.py` (공통 파서 뼈대 `scripts/graph/common.py` 위의 영역별 파서 → 공통 검증 → `data/graph` → `--load` Neo4j). 노드 688 · 관계 850. 노드 ID 규칙 `<접두어>:<키>` ([mock_data.md](mock_data.md))
+- swing 한글 이름·설명: `data/docs/swing/` 정의서(테이블·프로그램·화면·배치)에서 읽어 `search_text`·`is_common` 에 반영
 - 적재 시 추가: 역할 라벨, `is_common`, `search_text`, full-text 인덱스 `node_search`(cjk)
 - **용어사전** `data/glossary/<영역>.csv` (`term, synonyms(|), node_id, note`) → 노드 `terms` + 검색 인덱스
   - 업무용어 ↔ 노드 매핑은 프롬프트가 아니라 그래프에 둔다 (고칠 위치 한 곳)
@@ -238,19 +250,20 @@ python -m impact_agent ... --confirm "비마케팅 여부=COL:TCP_MSG_SCRT.ADVT_
 pytest                                                                 # 가짜 그래프·LLM (Neo4j 불필요)
 ```
 
-검증 (Neo4j, 요건 문장만 보고 작성한 탐색 명세):
+시나리오 평가 (Neo4j, 실제 LLM, Retriever 까지):
 
-| 시나리오 | 정답 경로 exact | must_find |
-|---|---|---|
-| SC-001 비마케팅 T world | 3/3 | 4/4 |
-| SC-002 접속 불가 | 4/6 | 5/5 |
-| SC-003 수신거부 문구 | 1/4 | 1/3 |
-| SC-004 채널 재조회 | 2/3 | 4/4 |
-| SC-005 RCS 타사 숨김 | 1/2 | 1/1 |
-| SC-006 실패 사유 | 2/3 | 2/3 |
+```bash
+PYTHONPATH=src python3 scripts/YJ/run_scenarios.py SC-001 SC-003 SC-006 H-1 M-2 L-3 SC-004 SC-005 M-4 L-1
+PYTHONPATH=src python3 scripts/YJ/run_guardrail.py
+```
+
+결과 (10건, v2): 경로 재현율 0.73 (규칙만 0.26) · Critical 미탐 6/16 · must_find 0.84 · 근거율 0.86 · 복잡도 일치 7/10, 가드레일 30/30. 케이스별 기록은 `outputs/runs/YJ/` ([README](../outputs/runs/YJ/README.md)).
 
 ## 9. 남은 과제
 
-1. `screen_change` 목표가 EntryHandler 라 확인 경로(SC-003·005)가 Controller 에서 멈춤 → 정답셋 조정 또는 Retriever `next_target`
-2. Retriever 근거 부족 판단·Explorer 후보 재정렬에 LLM 적용 여부
-3. 용어사전 1차 작성, Planner 실제 LLM 검증 (API 키), swing 시나리오 검증
+1. Retriever 반복 읽기: 다시 읽을 때 이미 본 줄 이후부터 보여 주기 (같은 노드를 잘린 앞부분만 반복해서 읽음)
+2. Retriever 가 원문에서 찾은 연결(테이블·컬럼)을 `next_target` 재탐색으로 넘겨 그래프 경로에 반영
+3. 재탐색 라운드 근거 누적 (덮어쓰기 대신 병합), 근거 중복 병합
+4. Explorer ReAct 는 점검 신호가 있을 때만 시작 (지연), 분석 대상이 없는 입력은 Supervisor 에서 조기 종료
+5. 복잡도: 탐색 결과로 다시 판정하는 단계, 케이스당 3회 반복 평가
+6. Supervisor: 입력 정리(`input_meta`: 입력 출처·유형·분석 시점) 미구현, Composer `reanalysis_request` → Planner 재분석 라우팅 미구현, 에이전트 실패(예외) 시 대체 흐름 없음, KPI Agent 실행 로그(`agent_runs`) 미기록, tool 호출 한도 계산이 Explorer·Retriever 안에 흩어져 있음
