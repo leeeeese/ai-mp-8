@@ -1,6 +1,6 @@
 """시나리오 실행 기록 + 정답셋 평가 (Supervisor·Planner·Explorer·Retriever).
 
-케이스마다 Retriever 까지 실행하고 (Simulator 이후는 미구현), 같은 Planner 결과로 규칙만(REACT=0) 다시 돌려 ReAct 전후를 비교한다.
+케이스마다 Retriever 까지 실행하고 (담당 범위. Simulator 이후는 파트너 담당이라 평가에서 제외), 같은 Planner 결과로 규칙만(REACT=0) 다시 돌려 ReAct 전후를 비교한다.
 
     PYTHONPATH=src python3 scripts/YJ/run_scenarios.py SC-001 SC-003 SC-006 H-1 M-2 L-3   (.env 의 Neo4j 사용)
 
@@ -104,8 +104,9 @@ def perf(state: AgentState, seconds: float) -> dict:
         "explore_loops": state.explore_loop_count,
         "react_steps": {"explorer": len(state.explorer.react_trace) if state.explorer else 0,
                         "retriever": len(state.retriever.react_trace) if state.retriever else 0},
-        "llm_calls": sum(1 for r in runs if r.agent == "planner") + (len(state.explorer.react_trace) if state.explorer else 0)
-        + (len(state.retriever.react_trace) if state.retriever else 0),
+        "llm_calls": sum(1 for r in runs if r.agent == "planner")  # ReAct 단계 중 thought "-" 는 LLM 없이 시스템이 끝낸 단계
+        + sum(s.thought != "-" for s in (state.explorer.react_trace if state.explorer else []))
+        + sum(s.thought != "-" for s in (state.retriever.react_trace if state.retriever else [])),
     }
 
 

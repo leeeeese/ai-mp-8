@@ -178,8 +178,8 @@
         "explorer": 15.8,
         "retriever": 40.8
       },
-      "input_tokens": 72569,
-      "output_tokens": 3341,
+      "input_tokens": 65123,
+      "output_tokens": 2877,
       "tool_calls": 15,
       "explore_loops": 2,
       "react_steps": {
@@ -327,8 +327,8 @@
         "explorer": 36.5,
         "retriever": 56.7
       },
-      "input_tokens": 171429,
-      "output_tokens": 5235,
+      "input_tokens": 130108,
+      "output_tokens": 4156,
       "tool_calls": 20,
       "explore_loops": 2,
       "react_steps": {

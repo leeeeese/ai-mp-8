@@ -129,3 +129,78 @@ def test_followup_routes_to_composer_and_keeps_window(env):
     assert len(state.followups) == 5 and state.followups[-1].content == "결과 6"
     state = sup.followup(sid, FollowupInput(type=FollowupType.CHANGE_ANALYSIS, content="변경 분석 요청"))
     assert sum(r.agent == "planner" for r in state.agent_runs) == planner_runs + 1
+
+
+def test_explorer_skips_react_without_signals(env):
+    # 목표 도달·진입점 있음·값 언급 없음·공통 제외 없음 → 점검 신호가 없어 LLM 을 부르지 않는다
+    mentions = [Mention(kind=MentionKind.BATCH, phrase="주문 전송 배치")]
+    llm = ScriptLLM([])
+    state = analyze(sup_with(env, plan([item(ChangeType.BATCH_CHANGE, mentions, Direction.FORWARD, NodeRole.DATA_ACCESS)]),
+                             explorer_llm=llm))
+    assert llm.users == [] and state.explorer.react_trace == []
+
+
+def test_explorer_react_gets_signals(env):
+    mentions = [Mention(kind=MentionKind.COLUMN, phrase="없는표현")]
+    llm = ScriptLLM([ExplorerDecision(thought="끝", action="finish", **NULLS)])
+    analyze(sup_with(env, plan([item(ChangeType.COLUMN_SPEC_CHANGE, mentions, Direction.REVERSE, NodeRole.ENTRY)]),
+                     explorer_llm=llm))
+    assert "[점검 신호]" in llm.users[0] and "① 항목 1: 매칭 실패 ['없는표현']" in llm.users[0]
+
+
+def test_retriever_rereads_continue_and_stop_at_end(env, monkeypatch):
+    import impact_agent.agents.retriever as retriever_mod
+
+    monkeypatch.setattr(retriever_mod, "CONTEXT_LINES_PER_EVIDENCE", 1)
+    monkeypatch.setattr(retriever_mod, "SINGLE_NODE_OBSERVATION_CHARS", 20)
+    read = RetrieverDecision(thought="이어서 읽기", action="read_source", **{**R_NULLS, "node_ids": ["SVC:OrdService.save"]})
+    llm = ScriptLLM([read, read, read, RetrieverDecision(thought="끝", action="finish", **R_NULLS)])
+    mentions = [Mention(kind=MentionKind.SCREEN, phrase="주문 등록")]
+    state = analyze(sup_with(env, plan([item(ChangeType.DATA_ADD, mentions, Direction.FORWARD, NodeRole.TABLE)]),
+                             retriever_llm=llm))
+    trace = state.retriever.react_trace
+    assert "원문 2~2줄" in trace[0].observation and "saveItem();" in trace[0].observation
+    assert "원문 3~3줄" in trace[1].observation and "끝까지 읽음" in trace[1].observation
+    assert trace[2].observation.startswith("오류") and "이미 끝까지" in trace[2].observation
+    assert state.retriever.tool_call_count == 3  # 규칙 1 + 이어 읽기 2 (끝까지 읽은 노드는 tool 을 부르지 않음)
+    # 경로 테이블의 컬럼(경로에 없는 것)을 입력에 보여 줌
+    assert "- TBL:TOR_ORD: ★ADVT_YN(광고여부(Y:광고,N:비광고)), ★ORD_ID(주문ID)" in llm.users[0]  # 저장 SQL 원문에 나옴
+
+
+def test_retriever_keeps_evidence_across_reexplore_rounds(env):
+    # hop 상한 → continue 재탐색. 두 번째 Retriever 는 새 노드만 읽고 첫 라운드 근거를 이어받는다
+    mentions = [Mention(kind=MentionKind.SCREEN, phrase="주문 등록")]
+    state = analyze(sup_with(env, plan([item(ChangeType.DATA_ADD, mentions, Direction.FORWARD, NodeRole.TABLE, cap=2)])))
+    assert state.explore_loop_count == 2
+    ids = [e.node_id for e in state.retriever.evidence]
+    assert len(ids) == len(set(ids))
+    assert {"SCR:ORD01", "CTL:OrdController.save", "SQL:OrdMapper.insert", "TBL:TOR_ORD"} <= set(ids)
+    runs = [r for r in state.agent_runs if r.agent == "retriever"]
+    assert [r.tool_calls for r in runs] == [1, 1]
+
+
+def test_retriever_context_lines_shows_new_lines_first(env, monkeypatch):
+    import impact_agent.agents.retriever as retriever_mod
+
+    monkeypatch.setattr(retriever_mod, "CONTEXT_LINES_PER_EVIDENCE", 1)
+    llm = ScriptLLM([
+        RetrieverDecision(thought="앞뒤 함께", action="read_source",
+                          **{**R_NULLS, "node_ids": ["SVC:OrdService.save"], "context_lines": 1}),
+        RetrieverDecision(thought="끝", action="finish", **R_NULLS),
+    ])
+    mentions = [Mention(kind=MentionKind.SCREEN, phrase="주문 등록")]
+    state = analyze(sup_with(env, plan([item(ChangeType.DATA_ADD, mentions, Direction.FORWARD, NodeRole.TABLE)]),
+                             retriever_llm=llm))
+    obs = state.retriever.react_trace[0].observation
+    assert "L1-5 (원문 1~4줄" in obs and "class OrdService {" in obs  # 새로 붙은 L1 부터
+    assert [e.location for e in state.retriever.evidence if e.node_id == "SVC:OrdService.save"] == ["L1-5"]  # 넓은 범위 하나로
+
+
+def test_reexplore_round_does_not_repeat_explorer_tokens(env):
+    # 1라운드 ReAct 사용량이 재탐색 라운드(LLM 미사용) 실행 로그에 다시 기록되지 않는다
+    mentions = [Mention(kind=MentionKind.COLUMN, phrase="없는표현"), Mention(kind=MentionKind.SCREEN, phrase="주문 등록")]
+    llm = ScriptLLM([ExplorerDecision(thought="끝", action="finish", **NULLS)])
+    state = analyze(sup_with(env, plan([item(ChangeType.DATA_ADD, mentions, Direction.FORWARD, NodeRole.TABLE, cap=2)]),
+                             explorer_llm=llm))
+    runs = [r for r in state.agent_runs if r.agent == "explorer"]
+    assert len(runs) == 2 and runs[0].input_tokens == 10 and runs[1].input_tokens is None

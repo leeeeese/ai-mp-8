@@ -28,8 +28,8 @@
         "explorer": 18.2,
         "retriever": 45.2
       },
-      "input_tokens": 144363,
-      "output_tokens": 4170,
+      "input_tokens": 128549,
+      "output_tokens": 3673,
       "tool_calls": 20,
       "explore_loops": 2,
       "react_steps": {
@@ -102,8 +102,8 @@
         "explorer": 26.0,
         "retriever": 24.6
       },
-      "input_tokens": 90782,
-      "output_tokens": 4067,
+      "input_tokens": 62372,
+      "output_tokens": 3244,
       "tool_calls": 16,
       "explore_loops": 2,
       "react_steps": {
@@ -248,8 +248,8 @@
         "explorer": 28.0,
         "retriever": 35.7
       },
-      "input_tokens": 98971,
-      "output_tokens": 4741,
+      "input_tokens": 78685,
+      "output_tokens": 3992,
       "tool_calls": 16,
       "explore_loops": 3,
       "react_steps": {
@@ -324,8 +324,8 @@
         "explorer": 11.9,
         "retriever": 58.1
       },
-      "input_tokens": 153664,
-      "output_tokens": 4313,
+      "input_tokens": 138274,
+      "output_tokens": 3937,
       "tool_calls": 16,
       "explore_loops": 3,
       "react_steps": {

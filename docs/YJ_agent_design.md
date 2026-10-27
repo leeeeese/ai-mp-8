@@ -46,7 +46,9 @@ UserInput (요청 문장 · SM 선택 · 확정 매핑)
 | Output Parsing | Structured Output (Pydantic): `PlannerDraft`, `ExplorerDecision`, `RetrieverDecision` | 각 agent 모듈 |
 
 - 규칙 단계는 그대로 두고 ReAct 는 **빠진 곳 보완**만 한다 (매칭 실패·목표 미도달·잘린 원문·경로 밖 연결). LLM 키가 없거나 `REACT=0` 이면 규칙 단계만.
-- Explorer ReAct 는 tool 한도 중 3회(`RESERVED_FOR_RETRIEVER`)를 Retriever 몫으로 남긴다. Retriever ReAct 는 탐색 범위 안 노드만 `read_source`, 범위 밖은 `request_reexplore`(`next_target`)로만.
+- Explorer ReAct 는 규칙 결과의 **점검 신호**가 있을 때만 시작하고(최대 8단계), tool 한도 중 5회(`RESERVED_FOR_RETRIEVER`)를 Retriever 몫으로 남긴다. Retriever ReAct(최대 6단계)는 탐색 범위 안 노드만 `read_source`(다시 읽으면 이어서), 범위 밖·경로에 없는 컬럼은 `request_reexplore`(`next_target`)로만.
+- ReAct 단계의 LLM 호출이 실패하면(API 오류·응답 검증 실패) 그때까지의 단계만 남기고 규칙 결과로 진행한다.
+- tool 한도 배분 상수는 `rules.py` 한 곳(`RESERVED_FOR_RETRIEVER`, `MIN_CALLS_FOR_REEXPLORE`, `*_MAX_REACT_STEPS`), 남은 호출 계산은 `AgentState.tools_left()` 하나.
 - 후속 입력: 답변·의견·조회 결과 → Composer, 변경 분석·재분석 → Planner. 최근 `MEMORY_WINDOW_N` 개만 유지.
 - 범위 밖: RAG(벡터 DB)는 쓰지 않기로 함, Monitoring(Langfuse/LangSmith) 미확정, Simulator·Verifier·Composer 프롬프트 기법은 파트너 담당.
 
@@ -62,14 +64,15 @@ UserInput (요청 문장 · SM 선택 · 확정 매핑)
 
 **처리**
 1. Planner 실행 → `confirmed_nodes` 를 같은 표현의 `Mention.confirmed_node` 에 반영 (사용자가 확정한 매핑 우선).
-2. plan 에 Explorer 가 있으면 Explorer ⇄ Retriever 루프
-   - 매 라운드 새로 시작 (`state.explorer = state.retriever = None`)
-   - Retriever 의 `reexplore_request` 가 없거나, `MAX_EXPLORE_LOOP` 또는 `MAX_TOOL_CALLS` 에 닿으면 종료
-3. `simple` → 종료 / `complex` → Simulator → Verifier → `needs_supplement` 면 `replan_feedback` 누적 후 Planner 로 (`MAX_REPLAN` 까지)
-4. Composer → KPI Agent (평가 PoC, 결과는 Composer 에 전달하지 않음)
-5. 에이전트마다 `AgentRunRecord { agent, latency_ms, tool_calls, input_tokens, output_tokens }` 기록
+2. Planner 가 탐색 항목을 하나도 만들지 않으면(분석 대상 없음, 예: 업무와 무관한 질문) 탐색·시뮬레이션 없이 Composer 로 간다.
+3. plan 에 Explorer 가 있으면 Explorer ⇄ Retriever 루프
+   - Planner 실행(재계획 포함)마다 새로 시작 (`state.explorer = state.retriever = None`). 재탐색 라운드는 이전 경로·근거를 이어받는다
+   - Retriever 의 `reexplore_request` 가 없거나, `MAX_EXPLORE_LOOP` 에 닿거나, 남은 tool 호출이 `MIN_CALLS_FOR_REEXPLORE`(2: Explorer 탐색 1 + Retriever 새 노드 읽기 1) 미만이면 종료
+4. `simple` → 종료 / `complex` → Simulator → Verifier → `needs_supplement` 면 `replan_feedback` 누적 후 Planner 로 (`MAX_REPLAN` 까지)
+5. Composer → KPI Agent (평가 PoC, 결과는 Composer 에 전달하지 않음)
+6. 에이전트마다 `AgentRunRecord { agent, latency_ms, tool_calls, input_tokens, output_tokens }` 기록
 
-**한도·예외**: tool 호출은 에이전트 출력의 `tool_call_count` 를 `state.tool_call_count` 에 누적해서 관리. `analyze(user_input, until="retriever")` 로 지정 단계까지만 실행 가능 (뒷단 미구현 상태 확인용).
+**한도·예외**: tool 호출은 에이전트 출력의 `tool_call_count` 를 `state.tool_call_count` 에 누적하고, 남은 호출은 `state.tools_left()` 로만 계산한다. `analyze(user_input, until="retriever")` 로 지정 단계까지만 실행 가능 (담당 범위 평가용).
 
 ---
 
@@ -81,6 +84,7 @@ UserInput (요청 문장 · SM 선택 · 확정 매핑)
 
 **처리**
 1. LLM(`gpt-6.1-sol`, OpenAI Structured Outputs)이 `PlannerDraft` 를 채운다: 구조화 요청, 복잡도·근거, 요건 항목(문장·`change_type`·언급 표현·그래프 밖 영역), 공통 제외 여부.
+   - 복잡도 기준 (Few-shot 5개 + 요약): 운영 문의는 문장 끝맺음("알려 주세요")이 아니라 **문의 대상이 정상 동작의 결과인지(결과 해석 → simple), 기대와 다른 동작인지(안 보임·안 됨 → complex)** 로 가른다. 애매하면 complex
 2. 코드가 판단 기준표로 나머지를 채운다 (LLM 판단 일관성 확보)
    - 항목별 `target_role`·`direction`·`hop_cap` ← `rules.CHANGE_TYPE_RULES`
    - `domains` ← `rules.SM_PART_DOMAINS` (marketing → tos, product → swing)
@@ -119,6 +123,16 @@ UserInput (요청 문장 · SM 선택 · 확정 매핑)
 ## 3. Explorer (2-1)
 
 **역할**: 탐색 명세의 언급 표현을 그래프 노드로 매칭하고, 목표 역할까지 경로를 찾는다. 요건 유형 판단은 하지 않는다. 규칙 단계 뒤 ReAct 보완 단계에서 LLM 사용 (매칭 실패·목표 미도달·진입점·언급 값의 컬럼·공통코드 점검).
+
+**ReAct 시작 조건 (점검 신호)**: 규칙 결과에서 코드가 신호를 계산하고, 신호가 없으면 ReAct 를 생략한다. 신호는 입력 끝 `[점검 신호]` 로 LLM 에 준다.
+
+| 신호 | 조건 |
+|---|---|
+| ① 매칭 실패 | 항목에 노드를 못 찾은 언급 표현 |
+| ② 목표 미도달 | 항목 경로가 목표 역할에 닿지 않음 |
+| ④ 진입점 없음 | 항목 경로가 모두 Entry(화면·배치) 아닌 노드에서 시작 |
+| ⑤ 값의 컬럼 없음 | 항목에 Column·Term 언급이 있는데 경로에 Column 이 없음 |
+| ⑥ 공통 제외 | 공통이라 확장하지 않은 노드가 있음 |
 
 **입력**: `planner.items`, `planner.domains`, `planner.exclude`, 재탐색이면 `retriever.reexplore_request` + 이전 `explorer`
 
@@ -167,7 +181,7 @@ UserInput (요청 문장 · SM 선택 · 확정 매핑)
 | 그래프 밖 | `out_of_graph` 는 탐색 안 함 → `unresolved` |
 
 ### 3-4. 재탐색
-Retriever 요청을 받아 이전 결과에 이어서 탐색한다. `continue` 는 hop 상한으로 끊긴 경로에 새 경로를 이어 붙여 하나로 만든다.
+Retriever 요청을 받아 이전 결과에 이어서 탐색한다. `continue` 는 hop 상한으로 끊긴 경로에 새 경로를 이어 붙여 하나로 만든다. 요청 노드가 Column 이면 그 컬럼을 쓰는 엣지만 따라간다(`focus_ids`). 재탐색 라운드는 Retriever 가 새 노드를 읽을 1회를 남긴다.
 
 **출력 `ExplorerOutput`**: `start_nodes[{item_id, node_id, matched_keyword, match_source, score, reason}]`, `nodes`, `edges`, `paths[{item_id, nodes(진입→DB), direction, reached_role, stop_reason}]`, `item_results[{reached, hops_used, frontier, unmatched_mentions}]`, `excluded_common`, `unresolved`, `hops_used`, `tool_call_count`
 
@@ -184,12 +198,16 @@ Retriever 요청을 받아 이전 결과에 이어서 탐색한다. `continue` �
 **tool**: `read_source(node_ids, context_lines)`
 
 **처리**
-1. 시작 노드 + 경로 노드를 한 번에 읽는다 (최대 80개, 초과분은 근거 없음으로)
+1. 시작 노드 + 경로 노드를 한 번에 읽는다 (최대 80개, 초과분은 근거 없음으로). 재탐색 라운드는 이전 라운드 근거를 이어받고 **근거가 없는 새 노드만** 읽는다
    - 위치: `SOURCE_ROOT_<DOMAIN>` / `source_file` 의 `source_line` 부터 노드 범위
    - Screen 은 연결 js, Batch 는 실행 프로그램(tos `.pc`, swing `program/*.pgm`)을 이어 붙임. Column 은 DDL 줄 + 코멘트
    - 노드 `interfaces` 가 있으면 정의서(`DOCS_ROOT_<DOMAIN>/interface`, 파일명 = ID 또는 파일 안 `INTERFACE <ID> … END INTERFACE` 블록)도 (`source_kind=interface_spec`)
-2. `Evidence { node_id, file_path, symbol, location(L시작-끝), summary, source_kind, domain, content(원문) }`
-3. 재탐색 요청
+2. `Evidence { node_id, file_path, symbol, location(L시작-끝), summary, source_kind, domain, content(원문) }`. 같은 노드·파일·종류는 가장 넓은 범위 하나로 합친다
+3. ReAct 보완 (최대 6단계)
+   - 입력: 탐색 명세, Explorer 경로, 근거별 앞 10줄, `[경로 밖 연결]`, `[경로 테이블의 컬럼]`(경로에 없는 컬럼 + 코멘트, 원문 SQL·프로그램·화면에 이름이 나오면 ★)
+   - `read_source` 다시 읽기는 **이미 보여 준 줄 다음부터** 이어서 (노드 1개면 6,000자, 여러 개면 2,400자를 나눠 씀). `context_lines` 로 범위가 앞으로 넓어지면 새로 붙은 줄부터. 끝까지 본 노드는 tool 을 부르지 않고 오류 Observation
+   - 원문이 요건 값을 다루는 컬럼(다른 이름·반대 개념 포함)이 경로에 없으면 그 `COL:` 노드로 `request_reexplore` (reverse → Entry). 남은 호출이 2회 미만이면 요청 거부
+4. 재탐색 요청 (이미 요청한 노드 조합은 라운드가 바뀌어도 다시 요청하지 않음)
 
 | mode | 조건 | 요청 |
 |---|---|---|
@@ -252,17 +270,19 @@ pytest                                                                 # 가짜 
 시나리오 평가 (Neo4j, 실제 LLM, Retriever 까지):
 
 ```bash
-PYTHONPATH=src python3 scripts/YJ/run_scenarios.py SC-001 SC-003 SC-006 H-1 M-2 L-3 SC-004 SC-005 M-4 L-1
-PYTHONPATH=src python3 scripts/YJ/run_guardrail.py
+PYTHONPATH=src python3 scripts/YJ/run_scenarios.py SC-001 SC-002 SC-003 SC-004 SC-005 SC-006 --run-id <id>
+PYTHONPATH=src python3 scripts/YJ/run_scenarios.py H-1 H-2 M-1 M-2 M-3 M-4 L-1 L-2 L-3 L-4 --run-id <id>
+PYTHONPATH=src python3 scripts/YJ/run_guardrail.py --run-id <id>/guardrail-r1
 ```
 
-결과 (10건, v2): 경로 재현율 0.73 (규칙만 0.26) · Critical 미탐 6/16 · must_find 0.84 · 근거율 0.86 · 복잡도 일치 7/10, 가드레일 30/30. 케이스별 기록은 `outputs/runs/YJ/` ([README](../outputs/runs/YJ/README.md)).
+결과 (v3, 16건): 경로 재현율 0.94 (규칙만 0.45) · Critical 미탐 3/24 · must_find 0.94 · 근거율 0.92 · 복잡도 일치 13/16, 가드레일 30/30 (분석 대상 없음 조기 종료 포함).
+기존 10건 기준 v2 → v3: 경로 재현율 0.73 → 0.91, Critical 미탐 6/16 → 3/16. 케이스별 기록은 `outputs/runs/YJ/` ([README](../outputs/runs/YJ/README.md)).
 
 ## 9. 남은 과제
 
-1. Retriever 반복 읽기: 다시 읽을 때 이미 본 줄 이후부터 보여 주기 (같은 노드를 잘린 앞부분만 반복해서 읽음)
-2. Retriever 가 원문에서 찾은 연결(테이블·컬럼)을 `next_target` 재탐색으로 넘겨 그래프 경로에 반영
-3. 재탐색 라운드 근거 누적 (덮어쓰기 대신 병합), 근거 중복 병합
-4. Explorer ReAct 는 점검 신호가 있을 때만 시작 (지연), 분석 대상이 없는 입력은 Supervisor 에서 조기 종료
-5. 복잡도: 탐색 결과로 다시 판정하는 단계, 케이스당 3회 반복 평가
-6. Supervisor: 입력 정리(`input_meta`: 입력 출처·유형·분석 시점) 미구현, Composer `reanalysis_request` → Planner 재분석 라우팅 미구현, 에이전트 실패(예외) 시 대체 흐름 없음, tool 호출 한도 계산이 Explorer·Retriever 안에 흩어져 있음
+1. 경로 폭증: 컬럼에서 역방향 재탐색이 붙으면 경로가 수백 개로 늘어 Retriever 읽기 상한(80)을 넘음 (SC-001 경로 419 · 근거 없음 35), 노드 정밀도 하락 → 항목별 경로 상한·대표 경로 선별
+2. 공통코드 경로: 문구·사유 코드가 공통코드(`TCP_CMM_CD`)에서 오는 경우를 아직 못 찾음 (SC-003·SC-006)
+3. 복잡도: 요건 문장만으로는 알 수 없는 경우(문구가 공통코드·다른 처리에서도 쓰임) → 탐색 결과로 다시 판정하는 단계, 케이스당 3회 반복 평가
+4. 비용: v3 는 근거 보완이 늘어 요청당 입력 토큰 +21%, Retriever 지연 +32% → ReAct 입력 근거를 항목 관련 노드로 한정
+5. 응답 언어: ReAct thought 가 드물게 다른 언어로 나옴 (SC-002 1단계 일본어) → 공통 페르소나에 응답 언어 명시
+6. Supervisor: 입력 정리(`input_meta`: 입력 출처·유형·분석 시점) 미구현, 에이전트 예외(그래프 DB 장애 등) 시 대체 흐름 없음

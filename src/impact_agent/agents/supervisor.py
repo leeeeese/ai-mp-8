@@ -6,6 +6,8 @@
                                                                                               └(통과·한도 초과)→ composer
 
 - 재계획 사유(Verifier 의 reason·additional_scope)는 replan_feedback 에 누적해 Planner 가 다음 계획에 반영한다 (Reflexion).
+- Planner 가 탐색 항목을 하나도 만들지 않으면(분석 대상 없음) 탐색·시뮬레이션 없이 Composer 로 바로 간다.
+- 재탐색은 남은 tool 호출이 MIN_CALLS_FOR_REEXPLORE 이상일 때만 (Explorer 탐색 + Retriever 새 노드 읽기). 한도 계산은 AgentState.tools_left 하나.
 - 상태(AgentState)는 checkpointer 에 세션(thread_id)별로 보관해 후속 입력에 재사용한다. 후속 입력은 최근 MEMORY_WINDOW_N 개만 유지.
 - (PoC 평가) KPI Agent 는 Composer 이후 AnswerKey(정답 경로 목록) + 실행 로그로 평가한다. 결과는 Composer 에 전달하지 않는다.
 """
@@ -19,6 +21,7 @@ from langgraph.graph import END, START, StateGraph
 from pydantic import BaseModel
 
 from .. import config
+from ..rules import MIN_CALLS_FOR_REEXPLORE
 from ..schemas import (
     AgentName,
     AgentRunRecord,
@@ -174,13 +177,15 @@ class Supervisor:
     def _route_planner(self, state: AgentState, until: str | None) -> str:
         if until == "planner":
             return END
+        if not state.planner.items:  # 분석 대상 없음 (예: 업무와 무관한 질문) → 탐색·시뮬레이션 생략
+            return END if until in ("explorer", "retriever", "simulator", "verifier") else "COMPOSER"
         if AgentName.EXPLORER in self._steps(state):
             return "EXPLORER"
         return self._after_explore(state, until)
 
     def _route_retriever(self, state: AgentState, until: str | None) -> str:
         if (state.retriever.reexplore_request and state.explore_loop_count < config.MAX_EXPLORE_LOOP
-                and state.tool_call_count < config.MAX_TOOL_CALLS):
+                and state.tools_left() >= MIN_CALLS_FOR_REEXPLORE):
             return "EXPLORER"
         return self._after_explore(state, until)
 
