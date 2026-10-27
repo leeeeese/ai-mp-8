@@ -76,6 +76,85 @@
     }
   },
   {
+    "case": "SC-002",
+    "title": "가사번 연장 후 TOS 접속 불가",
+    "domain": "tos",
+    "difficulty": "상",
+    "react": {
+      "complexity_expected": "complex",
+      "complexity_actual": "complex",
+      "complexity_match": true,
+      "start_hit": false,
+      "path_recall": 1.0,
+      "path_exact": 3,
+      "paths_total": 6,
+      "critical_missed": 0,
+      "critical_total": 5,
+      "must_find": "5/5",
+      "must_find_rate": 1.0,
+      "must_missing": [],
+      "evidence_coverage": 1.0,
+      "node_precision": 0.3,
+      "distractors_found": [
+        "COL:TCM_USER.LOCK_YN",
+        "DBIO:DCM_USERAUTH_U01",
+        "BAT:TBHR9010"
+      ],
+      "latency_s": 124.8,
+      "agent_latency_s": {
+        "planner": 19.1,
+        "explorer": 39.5,
+        "retriever": 66.1
+      },
+      "input_tokens": 139871,
+      "output_tokens": 4036,
+      "tool_calls": 20,
+      "explore_loops": 2,
+      "react_steps": {
+        "explorer": 8,
+        "retriever": 3
+      },
+      "llm_calls": 12
+    },
+    "rule_only": {
+      "complexity_expected": "complex",
+      "complexity_actual": "complex",
+      "complexity_match": true,
+      "start_hit": false,
+      "path_recall": 0.0,
+      "path_exact": 0,
+      "paths_total": 6,
+      "critical_missed": 5,
+      "critical_total": 5,
+      "must_find": "1/5",
+      "must_find_rate": 0.2,
+      "must_missing": [
+        "TBL:TCM_USER_AUTH_HIST",
+        "BAT:TBHR2010",
+        "SQL:tbhr2010.ins_base_auth",
+        "SQL:tbhr2010.upd_base_auth#2"
+      ],
+      "evidence_coverage": 0.25,
+      "node_precision": 0.5,
+      "distractors_found": [],
+      "latency_s": 0.0,
+      "agent_latency_s": {
+        "planner": 0.0,
+        "explorer": 0.0,
+        "retriever": 0.0
+      },
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "tool_calls": 5,
+      "explore_loops": 1,
+      "react_steps": {
+        "explorer": 0,
+        "retriever": 0
+      },
+      "llm_calls": 1
+    }
+  },
+  {
     "case": "SC-003",
     "title": "타사회선 MMS 수신거부 안내문구·팝업 파라미터화",
     "domain": "tos",
@@ -148,86 +227,6 @@
       "output_tokens": 0,
       "tool_calls": 10,
       "explore_loops": 2,
-      "react_steps": {
-        "explorer": 0,
-        "retriever": 0
-      },
-      "llm_calls": 1
-    }
-  },
-  {
-    "case": "SC-006",
-    "title": "캠페인 발송 실패 사유 확인 (운영 문의)",
-    "domain": "tos",
-    "difficulty": "하",
-    "react": {
-      "complexity_expected": "simple",
-      "complexity_actual": "simple",
-      "complexity_match": true,
-      "start_hit": false,
-      "path_recall": 0.667,
-      "path_exact": 2,
-      "paths_total": 3,
-      "critical_missed": 1,
-      "critical_total": 3,
-      "must_find": "2/3",
-      "must_find_rate": 0.667,
-      "must_missing": [
-        "TBL:TCP_CMM_CD"
-      ],
-      "evidence_coverage": 0.333,
-      "node_precision": 0.075,
-      "distractors_found": [
-        "TBL:TCP_CMPN_TGT",
-        "TBL:TCH_EXT_SND_HIST"
-      ],
-      "latency_s": 108.5,
-      "agent_latency_s": {
-        "planner": 27.1,
-        "explorer": 41.4,
-        "retriever": 39.9
-      },
-      "input_tokens": 134148,
-      "output_tokens": 4152,
-      "tool_calls": 20,
-      "explore_loops": 2,
-      "react_steps": {
-        "explorer": 6,
-        "retriever": 2
-      },
-      "llm_calls": 9
-    },
-    "rule_only": {
-      "complexity_expected": "simple",
-      "complexity_actual": "simple",
-      "complexity_match": true,
-      "start_hit": false,
-      "path_recall": 0.0,
-      "path_exact": 0,
-      "paths_total": 3,
-      "critical_missed": 3,
-      "critical_total": 3,
-      "must_find": "1/3",
-      "must_find_rate": 0.333,
-      "must_missing": [
-        "COL:TCH_MMS_SND_TGT.FAIL_CD",
-        "TBL:TCP_CMM_CD"
-      ],
-      "evidence_coverage": 0.333,
-      "node_precision": 0.035,
-      "distractors_found": [
-        "TBL:TCP_CMPN_TGT"
-      ],
-      "latency_s": 0.1,
-      "agent_latency_s": {
-        "planner": 0.0,
-        "explorer": 0.1,
-        "retriever": 0.0
-      },
-      "input_tokens": 0,
-      "output_tokens": 0,
-      "tool_calls": 11,
-      "explore_loops": 1,
       "react_steps": {
         "explorer": 0,
         "retriever": 0
@@ -387,76 +386,77 @@
     }
   },
   {
-    "case": "SC-002",
-    "title": "가사번 연장 후 TOS 접속 불가",
+    "case": "SC-006",
+    "title": "캠페인 발송 실패 사유 확인 (운영 문의)",
     "domain": "tos",
-    "difficulty": "상",
+    "difficulty": "하",
     "react": {
-      "complexity_expected": "complex",
-      "complexity_actual": "complex",
+      "complexity_expected": "simple",
+      "complexity_actual": "simple",
       "complexity_match": true,
       "start_hit": false,
-      "path_recall": 1.0,
-      "path_exact": 3,
-      "paths_total": 6,
-      "critical_missed": 0,
-      "critical_total": 5,
-      "must_find": "5/5",
-      "must_find_rate": 1.0,
-      "must_missing": [],
-      "evidence_coverage": 1.0,
-      "node_precision": 0.3,
-      "distractors_found": [
-        "COL:TCM_USER.LOCK_YN",
-        "DBIO:DCM_USERAUTH_U01",
-        "BAT:TBHR9010"
+      "path_recall": 0.667,
+      "path_exact": 2,
+      "paths_total": 3,
+      "critical_missed": 1,
+      "critical_total": 3,
+      "must_find": "2/3",
+      "must_find_rate": 0.667,
+      "must_missing": [
+        "TBL:TCP_CMM_CD"
       ],
-      "latency_s": 124.8,
+      "evidence_coverage": 0.333,
+      "node_precision": 0.075,
+      "distractors_found": [
+        "TBL:TCP_CMPN_TGT",
+        "TBL:TCH_EXT_SND_HIST"
+      ],
+      "latency_s": 108.5,
       "agent_latency_s": {
-        "planner": 19.1,
-        "explorer": 39.5,
-        "retriever": 66.1
+        "planner": 27.1,
+        "explorer": 41.4,
+        "retriever": 39.9
       },
-      "input_tokens": 139871,
-      "output_tokens": 4036,
+      "input_tokens": 134148,
+      "output_tokens": 4152,
       "tool_calls": 20,
       "explore_loops": 2,
       "react_steps": {
-        "explorer": 8,
-        "retriever": 3
+        "explorer": 6,
+        "retriever": 2
       },
-      "llm_calls": 12
+      "llm_calls": 9
     },
     "rule_only": {
-      "complexity_expected": "complex",
-      "complexity_actual": "complex",
+      "complexity_expected": "simple",
+      "complexity_actual": "simple",
       "complexity_match": true,
       "start_hit": false,
       "path_recall": 0.0,
       "path_exact": 0,
-      "paths_total": 6,
-      "critical_missed": 5,
-      "critical_total": 5,
-      "must_find": "1/5",
-      "must_find_rate": 0.2,
+      "paths_total": 3,
+      "critical_missed": 3,
+      "critical_total": 3,
+      "must_find": "1/3",
+      "must_find_rate": 0.333,
       "must_missing": [
-        "TBL:TCM_USER_AUTH_HIST",
-        "BAT:TBHR2010",
-        "SQL:tbhr2010.ins_base_auth",
-        "SQL:tbhr2010.upd_base_auth#2"
+        "COL:TCH_MMS_SND_TGT.FAIL_CD",
+        "TBL:TCP_CMM_CD"
       ],
-      "evidence_coverage": 0.25,
-      "node_precision": 0.5,
-      "distractors_found": [],
-      "latency_s": 0.0,
+      "evidence_coverage": 0.333,
+      "node_precision": 0.035,
+      "distractors_found": [
+        "TBL:TCP_CMPN_TGT"
+      ],
+      "latency_s": 0.1,
       "agent_latency_s": {
         "planner": 0.0,
-        "explorer": 0.0,
+        "explorer": 0.1,
         "retriever": 0.0
       },
       "input_tokens": 0,
       "output_tokens": 0,
-      "tool_calls": 5,
+      "tool_calls": 11,
       "explore_loops": 1,
       "react_steps": {
         "explorer": 0,

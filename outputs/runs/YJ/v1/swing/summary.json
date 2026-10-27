@@ -10,7 +10,7 @@
       "complexity_match": true,
       "start_hit": true,
       "path_recall": 0.8,
-      "path_exact": 4,
+      "path_exact": 3,
       "paths_total": 5,
       "critical_missed": 1,
       "critical_total": 4,
@@ -18,25 +18,25 @@
       "must_find_rate": 1.0,
       "must_missing": [],
       "evidence_coverage": 0.833,
-      "node_precision": 0.297,
+      "node_precision": 0.346,
       "distractors_found": [
         "BAT:ZCMBBB0100010"
       ],
-      "latency_s": 93.3,
+      "latency_s": 91.7,
       "agent_latency_s": {
-        "planner": 30.5,
-        "explorer": 41.8,
-        "retriever": 21.0
+        "planner": 28.3,
+        "explorer": 18.2,
+        "retriever": 45.2
       },
-      "input_tokens": 87426,
-      "output_tokens": 3554,
+      "input_tokens": 128549,
+      "output_tokens": 3673,
       "tool_calls": 20,
-      "explore_loops": 1,
+      "explore_loops": 2,
       "react_steps": {
-        "explorer": 7,
-        "retriever": 3
+        "explorer": 3,
+        "retriever": 2
       },
-      "llm_calls": 11
+      "llm_calls": 6
     },
     "rule_only": {
       "complexity_expected": "complex",
@@ -54,7 +54,7 @@
         "TBL:TB_PROD"
       ],
       "evidence_coverage": 0.75,
-      "node_precision": 0.333,
+      "node_precision": 0.342,
       "distractors_found": [
         "BAT:ZCMBBB0100010"
       ],
@@ -85,34 +85,32 @@
       "complexity_actual": "complex",
       "complexity_match": true,
       "start_hit": true,
-      "path_recall": 0.333,
+      "path_recall": 0.0,
       "path_exact": 0,
       "paths_total": 3,
-      "critical_missed": 1,
+      "critical_missed": 2,
       "critical_total": 2,
       "must_find": "2/2",
       "must_find_rate": 1.0,
       "must_missing": [],
-      "evidence_coverage": 0.8,
-      "node_precision": 0.126,
-      "distractors_found": [
-        "TBL:TB_PAY_LMT"
-      ],
-      "latency_s": 92.8,
+      "evidence_coverage": 0.5,
+      "node_precision": 0.286,
+      "distractors_found": [],
+      "latency_s": 79.6,
       "agent_latency_s": {
-        "planner": 33.8,
-        "explorer": 37.6,
-        "retriever": 21.4
+        "planner": 29.0,
+        "explorer": 26.0,
+        "retriever": 24.6
       },
-      "input_tokens": 91005,
-      "output_tokens": 3775,
-      "tool_calls": 20,
-      "explore_loops": 1,
+      "input_tokens": 62372,
+      "output_tokens": 3244,
+      "tool_calls": 16,
+      "explore_loops": 2,
       "react_steps": {
-        "explorer": 6,
-        "retriever": 3
+        "explorer": 5,
+        "retriever": 1
       },
-      "llm_calls": 10
+      "llm_calls": 7
     },
     "rule_only": {
       "complexity_expected": "complex",
@@ -127,11 +125,9 @@
       "must_find": "2/2",
       "must_find_rate": 1.0,
       "must_missing": [],
-      "evidence_coverage": 0.7,
-      "node_precision": 0.224,
-      "distractors_found": [
-        "TBL:TB_PAY_LMT"
-      ],
+      "evidence_coverage": 0.5,
+      "node_precision": 0.259,
+      "distractors_found": [],
       "latency_s": 0.1,
       "agent_latency_s": {
         "planner": 0.0,
@@ -140,81 +136,7 @@
       },
       "input_tokens": 0,
       "output_tokens": 0,
-      "tool_calls": 13,
-      "explore_loops": 1,
-      "react_steps": {
-        "explorer": 0,
-        "retriever": 0
-      },
-      "llm_calls": 1
-    }
-  },
-  {
-    "case": "L-3",
-    "title": "I/B 로밍업무처리내역조회 - 추천인 그리드 추가 요청",
-    "domain": "swing",
-    "difficulty": "하",
-    "react": {
-      "complexity_expected": "simple",
-      "complexity_actual": "simple",
-      "complexity_match": true,
-      "start_hit": true,
-      "path_recall": 1.0,
-      "path_exact": 0,
-      "paths_total": 1,
-      "critical_missed": 0,
-      "critical_total": 0,
-      "must_find": "2/2",
-      "must_find_rate": 1.0,
-      "must_missing": [],
-      "evidence_coverage": 1.0,
-      "node_precision": 0.238,
-      "distractors_found": [
-        "SCR:ZROMSS0100010"
-      ],
-      "latency_s": 75.0,
-      "agent_latency_s": {
-        "planner": 18.3,
-        "explorer": 15.8,
-        "retriever": 40.8
-      },
-      "input_tokens": 65123,
-      "output_tokens": 2877,
-      "tool_calls": 15,
-      "explore_loops": 2,
-      "react_steps": {
-        "explorer": 2,
-        "retriever": 3
-      },
-      "llm_calls": 6
-    },
-    "rule_only": {
-      "complexity_expected": "simple",
-      "complexity_actual": "simple",
-      "complexity_match": true,
-      "start_hit": true,
-      "path_recall": 0.0,
-      "path_exact": 0,
-      "paths_total": 1,
-      "critical_missed": 0,
-      "critical_total": 0,
-      "must_find": "2/2",
-      "must_find_rate": 1.0,
-      "must_missing": [],
-      "evidence_coverage": 0.8,
-      "node_precision": 0.2,
-      "distractors_found": [
-        "SCR:ZROMSS0100010"
-      ],
-      "latency_s": 0.1,
-      "agent_latency_s": {
-        "planner": 0.0,
-        "explorer": 0.1,
-        "retriever": 0.0
-      },
-      "input_tokens": 0,
-      "output_tokens": 0,
-      "tool_calls": 8,
+      "tool_calls": 10,
       "explore_loops": 1,
       "react_steps": {
         "explorer": 0,
@@ -242,26 +164,25 @@
       "must_find_rate": 1.0,
       "must_missing": [],
       "evidence_coverage": 1.0,
-      "node_precision": 0.175,
+      "node_precision": 0.556,
       "distractors_found": [
-        "SCR:ZCMBSS0200010",
         "BAT:ZCMBBB0100010"
       ],
-      "latency_s": 110.8,
+      "latency_s": 88.3,
       "agent_latency_s": {
-        "planner": 27.5,
-        "explorer": 64.3,
-        "retriever": 19.0
+        "planner": 24.6,
+        "explorer": 28.0,
+        "retriever": 35.7
       },
-      "input_tokens": 99123,
-      "output_tokens": 3946,
-      "tool_calls": 20,
-      "explore_loops": 1,
+      "input_tokens": 78685,
+      "output_tokens": 3992,
+      "tool_calls": 16,
+      "explore_loops": 3,
       "react_steps": {
-        "explorer": 10,
-        "retriever": 3
+        "explorer": 5,
+        "retriever": 1
       },
-      "llm_calls": 14
+      "llm_calls": 7
     },
     "rule_only": {
       "complexity_expected": "complex",
@@ -283,15 +204,15 @@
       "distractors_found": [
         "BAT:ZCMBBB0100010"
       ],
-      "latency_s": 0.1,
+      "latency_s": 0.0,
       "agent_latency_s": {
         "planner": 0.0,
-        "explorer": 0.1,
+        "explorer": 0.0,
         "retriever": 0.0
       },
       "input_tokens": 0,
       "output_tokens": 0,
-      "tool_calls": 9,
+      "tool_calls": 8,
       "explore_loops": 1,
       "react_steps": {
         "explorer": 0,
@@ -307,57 +228,132 @@
     "difficulty": "하",
     "react": {
       "complexity_expected": "simple",
-      "complexity_actual": "complex",
-      "complexity_match": false,
-      "start_hit": true,
-      "path_recall": 1.0,
-      "path_exact": 0,
-      "paths_total": 5,
-      "critical_missed": 0,
-      "critical_total": 0,
-      "must_find": "7/7",
-      "must_find_rate": 1.0,
-      "must_missing": [],
-      "evidence_coverage": 1.0,
-      "node_precision": 0.277,
-      "distractors_found": [],
-      "latency_s": 109.6,
-      "agent_latency_s": {
-        "planner": 16.4,
-        "explorer": 36.5,
-        "retriever": 56.7
-      },
-      "input_tokens": 130108,
-      "output_tokens": 4156,
-      "tool_calls": 20,
-      "explore_loops": 2,
-      "react_steps": {
-        "explorer": 7,
-        "retriever": 3
-      },
-      "llm_calls": 11
-    },
-    "rule_only": {
-      "complexity_expected": "simple",
-      "complexity_actual": "complex",
-      "complexity_match": false,
+      "complexity_actual": "simple",
+      "complexity_match": true,
       "start_hit": true,
       "path_recall": 0.0,
       "path_exact": 0,
       "paths_total": 5,
       "critical_missed": 0,
       "critical_total": 0,
-      "must_find": "3/7",
-      "must_find_rate": 0.429,
+      "must_find": "6/7",
+      "must_find_rate": 0.857,
+      "must_missing": [
+        "COL:TB_BAT_JOB.CRON_EXPR"
+      ],
+      "evidence_coverage": 0.875,
+      "node_precision": 0.277,
+      "distractors_found": [],
+      "latency_s": 92.3,
+      "agent_latency_s": {
+        "planner": 22.3,
+        "explorer": 11.9,
+        "retriever": 58.1
+      },
+      "input_tokens": 138274,
+      "output_tokens": 3937,
+      "tool_calls": 16,
+      "explore_loops": 3,
+      "react_steps": {
+        "explorer": 3,
+        "retriever": 1
+      },
+      "llm_calls": 5
+    },
+    "rule_only": {
+      "complexity_expected": "simple",
+      "complexity_actual": "simple",
+      "complexity_match": true,
+      "start_hit": true,
+      "path_recall": 0.0,
+      "path_exact": 0,
+      "paths_total": 5,
+      "critical_missed": 0,
+      "critical_total": 0,
+      "must_find": "4/7",
+      "must_find_rate": 0.571,
       "must_missing": [
         "TBL:TB_BAT_JOB",
         "COL:TB_BAT_JOB.CRON_EXPR",
-        "BAT:ZDOCBB0100040",
-        "BAT:ZDOCBB0100050"
+        "BAT:ZDOCBB0100040"
       ],
-      "evidence_coverage": 0.5,
-      "node_precision": 0.333,
+      "evidence_coverage": 0.625,
+      "node_precision": 0.25,
       "distractors_found": [],
+      "latency_s": 0.1,
+      "agent_latency_s": {
+        "planner": 0.0,
+        "explorer": 0.1,
+        "retriever": 0.0
+      },
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "tool_calls": 8,
+      "explore_loops": 1,
+      "react_steps": {
+        "explorer": 0,
+        "retriever": 0
+      },
+      "llm_calls": 1
+    }
+  },
+  {
+    "case": "L-3",
+    "title": "I/B 로밍업무처리내역조회 - 추천인 그리드 추가 요청",
+    "domain": "swing",
+    "difficulty": "하",
+    "react": {
+      "complexity_expected": "simple",
+      "complexity_actual": "simple",
+      "complexity_match": true,
+      "start_hit": true,
+      "path_recall": 0.0,
+      "path_exact": 0,
+      "paths_total": 1,
+      "critical_missed": 0,
+      "critical_total": 0,
+      "must_find": "2/2",
+      "must_find_rate": 1.0,
+      "must_missing": [],
+      "evidence_coverage": 0.8,
+      "node_precision": 0.093,
+      "distractors_found": [
+        "SCR:ZROMSS0100010"
+      ],
+      "latency_s": 46.6,
+      "agent_latency_s": {
+        "planner": 18.6,
+        "explorer": 15.1,
+        "retriever": 12.9
+      },
+      "input_tokens": 41348,
+      "output_tokens": 1896,
+      "tool_calls": 10,
+      "explore_loops": 1,
+      "react_steps": {
+        "explorer": 2,
+        "retriever": 2
+      },
+      "llm_calls": 5
+    },
+    "rule_only": {
+      "complexity_expected": "simple",
+      "complexity_actual": "simple",
+      "complexity_match": true,
+      "start_hit": true,
+      "path_recall": 0.0,
+      "path_exact": 0,
+      "paths_total": 1,
+      "critical_missed": 0,
+      "critical_total": 0,
+      "must_find": "2/2",
+      "must_find_rate": 1.0,
+      "must_missing": [],
+      "evidence_coverage": 0.8,
+      "node_precision": 0.093,
+      "distractors_found": [
+        "SCR:ZROMSS0100010"
+      ],
       "latency_s": 0.1,
       "agent_latency_s": {
         "planner": 0.0,

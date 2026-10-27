@@ -270,13 +270,13 @@ pytest                                                                 # 가짜 
 시나리오 평가 (Neo4j, 실제 LLM, Retriever 까지):
 
 ```bash
-PYTHONPATH=src python3 scripts/YJ/run_scenarios.py SC-001 SC-002 SC-003 SC-004 SC-005 SC-006 --run-id <id>
-PYTHONPATH=src python3 scripts/YJ/run_scenarios.py H-1 H-2 M-1 M-2 M-3 M-4 L-1 L-2 L-3 L-4 --run-id <id>
-PYTHONPATH=src python3 scripts/YJ/run_guardrail.py --run-id <id>/guardrail-r1
+PYTHONPATH=src python3 scripts/YJ/run_scenarios.py SC-001 SC-002 SC-003 SC-004 SC-005 SC-006 --run-id v3/tos
+PYTHONPATH=src python3 scripts/YJ/run_scenarios.py H-1 H-2 M-1 M-2 M-3 M-4 L-1 L-2 L-3 L-4 --run-id v3/swing
+PYTHONPATH=src python3 scripts/YJ/run_guardrail.py --run-id v3/guardrail/r1
 ```
 
 결과 (v3, 16건): 경로 재현율 0.94 (규칙만 0.45) · Critical 미탐 3/24 · must_find 0.94 · 근거율 0.92 · 복잡도 일치 13/16, 가드레일 30/30 (분석 대상 없음 조기 종료 포함).
-기존 10건 기준 v2 → v3: 경로 재현율 0.73 → 0.91, Critical 미탐 6/16 → 3/16. 케이스별 기록은 `outputs/runs/YJ/` ([README](../outputs/runs/YJ/README.md)).
+기존 10건 기준 v2 → v3: 경로 재현율 0.73 → 0.91, Critical 미탐 6/16 → 3/16. 케이스별 기록은 `outputs/runs/YJ/<버전>/<영역>/` ([README](../outputs/runs/YJ/README.md)).
 
 ## 9. 남은 과제
 

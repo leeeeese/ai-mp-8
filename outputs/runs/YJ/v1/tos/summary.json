@@ -162,86 +162,6 @@
     }
   },
   {
-    "case": "SC-006",
-    "title": "캠페인 발송 실패 사유 확인 (운영 문의)",
-    "domain": "tos",
-    "difficulty": "하",
-    "react": {
-      "complexity_expected": "simple",
-      "complexity_actual": "complex",
-      "complexity_match": false,
-      "start_hit": true,
-      "path_recall": 0.667,
-      "path_exact": 1,
-      "paths_total": 3,
-      "critical_missed": 1,
-      "critical_total": 3,
-      "must_find": "2/3",
-      "must_find_rate": 0.667,
-      "must_missing": [
-        "TBL:TCP_CMM_CD"
-      ],
-      "evidence_coverage": 0.667,
-      "node_precision": 0.131,
-      "distractors_found": [
-        "TBL:TCP_CMPN_TGT",
-        "TBL:TCH_EXT_SND_HIST"
-      ],
-      "latency_s": 67.9,
-      "agent_latency_s": {
-        "planner": 28.2,
-        "explorer": 19.0,
-        "retriever": 20.7
-      },
-      "input_tokens": 77235,
-      "output_tokens": 3207,
-      "tool_calls": 20,
-      "explore_loops": 1,
-      "react_steps": {
-        "explorer": 4,
-        "retriever": 3
-      },
-      "llm_calls": 8
-    },
-    "rule_only": {
-      "complexity_expected": "simple",
-      "complexity_actual": "complex",
-      "complexity_match": false,
-      "start_hit": true,
-      "path_recall": 0.667,
-      "path_exact": 1,
-      "paths_total": 3,
-      "critical_missed": 1,
-      "critical_total": 3,
-      "must_find": "2/3",
-      "must_find_rate": 0.667,
-      "must_missing": [
-        "TBL:TCP_CMM_CD"
-      ],
-      "evidence_coverage": 0.667,
-      "node_precision": 0.131,
-      "distractors_found": [
-        "TBL:TCP_CMPN_TGT",
-        "TBL:TCH_EXT_SND_HIST"
-      ],
-      "latency_s": 0.1,
-      "agent_latency_s": {
-        "planner": 0.0,
-        "explorer": 0.1,
-        "retriever": 0.0
-      },
-      "input_tokens": 0,
-      "output_tokens": 0,
-      "tool_calls": 15,
-      "explore_loops": 1,
-      "react_steps": {
-        "explorer": 0,
-        "retriever": 0
-      },
-      "llm_calls": 1
-    }
-  },
-  {
     "case": "SC-004",
     "title": "AI 캠페인 기획 채널 초기화 후 채널 재조회 불가 문의",
     "domain": "tos",
@@ -383,6 +303,86 @@
       "input_tokens": 0,
       "output_tokens": 0,
       "tool_calls": 7,
+      "explore_loops": 1,
+      "react_steps": {
+        "explorer": 0,
+        "retriever": 0
+      },
+      "llm_calls": 1
+    }
+  },
+  {
+    "case": "SC-006",
+    "title": "캠페인 발송 실패 사유 확인 (운영 문의)",
+    "domain": "tos",
+    "difficulty": "하",
+    "react": {
+      "complexity_expected": "simple",
+      "complexity_actual": "complex",
+      "complexity_match": false,
+      "start_hit": true,
+      "path_recall": 0.667,
+      "path_exact": 1,
+      "paths_total": 3,
+      "critical_missed": 1,
+      "critical_total": 3,
+      "must_find": "2/3",
+      "must_find_rate": 0.667,
+      "must_missing": [
+        "TBL:TCP_CMM_CD"
+      ],
+      "evidence_coverage": 0.667,
+      "node_precision": 0.131,
+      "distractors_found": [
+        "TBL:TCP_CMPN_TGT",
+        "TBL:TCH_EXT_SND_HIST"
+      ],
+      "latency_s": 67.9,
+      "agent_latency_s": {
+        "planner": 28.2,
+        "explorer": 19.0,
+        "retriever": 20.7
+      },
+      "input_tokens": 77235,
+      "output_tokens": 3207,
+      "tool_calls": 20,
+      "explore_loops": 1,
+      "react_steps": {
+        "explorer": 4,
+        "retriever": 3
+      },
+      "llm_calls": 8
+    },
+    "rule_only": {
+      "complexity_expected": "simple",
+      "complexity_actual": "complex",
+      "complexity_match": false,
+      "start_hit": true,
+      "path_recall": 0.667,
+      "path_exact": 1,
+      "paths_total": 3,
+      "critical_missed": 1,
+      "critical_total": 3,
+      "must_find": "2/3",
+      "must_find_rate": 0.667,
+      "must_missing": [
+        "TBL:TCP_CMM_CD"
+      ],
+      "evidence_coverage": 0.667,
+      "node_precision": 0.131,
+      "distractors_found": [
+        "TBL:TCP_CMPN_TGT",
+        "TBL:TCH_EXT_SND_HIST"
+      ],
+      "latency_s": 0.1,
+      "agent_latency_s": {
+        "planner": 0.0,
+        "explorer": 0.1,
+        "retriever": 0.0
+      },
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "tool_calls": 15,
       "explore_loops": 1,
       "react_steps": {
         "explorer": 0,

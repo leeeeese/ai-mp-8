@@ -1,78 +1,72 @@
 [
   {
-    "case": "SC-002",
-    "title": "가사번 연장 후 TOS 접속 불가",
-    "domain": "tos",
+    "case": "H-1",
+    "title": "유선+무선 결합상품 A를 무선+무선만으로도 결합 가능하도록 변경",
+    "domain": "swing",
     "difficulty": "상",
     "react": {
       "complexity_expected": "complex",
-      "complexity_actual": "simple",
-      "complexity_match": false,
+      "complexity_actual": "complex",
+      "complexity_match": true,
       "start_hit": true,
-      "path_recall": 0.833,
-      "path_exact": 3,
-      "paths_total": 6,
+      "path_recall": 0.8,
+      "path_exact": 4,
+      "paths_total": 5,
       "critical_missed": 1,
-      "critical_total": 5,
+      "critical_total": 4,
       "must_find": "5/5",
       "must_find_rate": 1.0,
       "must_missing": [],
-      "evidence_coverage": 0.0,
-      "node_precision": 0.269,
+      "evidence_coverage": 0.833,
+      "node_precision": 0.297,
       "distractors_found": [
-        "COL:TCM_USER.LOCK_YN",
-        "DBIO:DCM_USERAUTH_U01",
-        "BAT:TBHR9010",
-        "SQL:LoginMapper.selectUserMenuList"
+        "BAT:ZCMBBB0100010"
       ],
-      "latency_s": 194.4,
+      "latency_s": 93.3,
       "agent_latency_s": {
-        "planner": 16.8,
-        "explorer": 46.1,
-        "retriever": 131.4
+        "planner": 30.5,
+        "explorer": 41.8,
+        "retriever": 21.0
       },
-      "input_tokens": 135819,
-      "output_tokens": 4298,
+      "input_tokens": 87426,
+      "output_tokens": 3554,
       "tool_calls": 20,
-      "explore_loops": 2,
+      "explore_loops": 1,
       "react_steps": {
-        "explorer": 8,
-        "retriever": 0
+        "explorer": 7,
+        "retriever": 3
       },
-      "llm_calls": 9
+      "llm_calls": 11
     },
     "rule_only": {
       "complexity_expected": "complex",
-      "complexity_actual": "simple",
-      "complexity_match": false,
-      "start_hit": false,
-      "path_recall": 0.0,
-      "path_exact": 0,
-      "paths_total": 6,
-      "critical_missed": 5,
-      "critical_total": 5,
-      "must_find": "1/5",
-      "must_find_rate": 0.2,
+      "complexity_actual": "complex",
+      "complexity_match": true,
+      "start_hit": true,
+      "path_recall": 0.6,
+      "path_exact": 3,
+      "paths_total": 5,
+      "critical_missed": 1,
+      "critical_total": 4,
+      "must_find": "4/5",
+      "must_find_rate": 0.8,
       "must_missing": [
-        "TBL:TCM_USER_AUTH_HIST",
-        "BAT:TBHR2010",
-        "SQL:tbhr2010.ins_base_auth",
-        "SQL:tbhr2010.upd_base_auth#2"
+        "TBL:TB_PROD"
       ],
-      "evidence_coverage": 0.417,
-      "node_precision": 0.238,
+      "evidence_coverage": 0.75,
+      "node_precision": 0.333,
       "distractors_found": [
-        "SQL:LoginMapper.selectUserMenuList"
+        "BAT:ZCMBBB0100010"
       ],
-      "latency_s": 0.0,
+      "latency_s": 0.1,
       "agent_latency_s": {
         "planner": 0.0,
-        "explorer": 0.0,
+        "explorer": 0.1,
         "retriever": 0.0
       },
       "input_tokens": 0,
       "output_tokens": 0,
-      "tool_calls": 6,
+      "tool_calls": 12,
       "explore_loops": 1,
       "react_steps": {
         "explorer": 0,
@@ -227,6 +221,80 @@
     }
   },
   {
+    "case": "M-2",
+    "title": "휴대폰결제 이용동의 해지 시 휴대폰결제 안심통보 자동해지 로직 개발",
+    "domain": "swing",
+    "difficulty": "중",
+    "react": {
+      "complexity_expected": "complex",
+      "complexity_actual": "complex",
+      "complexity_match": true,
+      "start_hit": true,
+      "path_recall": 0.333,
+      "path_exact": 0,
+      "paths_total": 3,
+      "critical_missed": 1,
+      "critical_total": 2,
+      "must_find": "2/2",
+      "must_find_rate": 1.0,
+      "must_missing": [],
+      "evidence_coverage": 0.8,
+      "node_precision": 0.126,
+      "distractors_found": [
+        "TBL:TB_PAY_LMT"
+      ],
+      "latency_s": 92.8,
+      "agent_latency_s": {
+        "planner": 33.8,
+        "explorer": 37.6,
+        "retriever": 21.4
+      },
+      "input_tokens": 91005,
+      "output_tokens": 3775,
+      "tool_calls": 20,
+      "explore_loops": 1,
+      "react_steps": {
+        "explorer": 6,
+        "retriever": 3
+      },
+      "llm_calls": 10
+    },
+    "rule_only": {
+      "complexity_expected": "complex",
+      "complexity_actual": "complex",
+      "complexity_match": true,
+      "start_hit": true,
+      "path_recall": 0.0,
+      "path_exact": 0,
+      "paths_total": 3,
+      "critical_missed": 2,
+      "critical_total": 2,
+      "must_find": "2/2",
+      "must_find_rate": 1.0,
+      "must_missing": [],
+      "evidence_coverage": 0.7,
+      "node_precision": 0.224,
+      "distractors_found": [
+        "TBL:TB_PAY_LMT"
+      ],
+      "latency_s": 0.1,
+      "agent_latency_s": {
+        "planner": 0.0,
+        "explorer": 0.1,
+        "retriever": 0.0
+      },
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "tool_calls": 13,
+      "explore_loops": 1,
+      "react_steps": {
+        "explorer": 0,
+        "retriever": 0
+      },
+      "llm_calls": 1
+    }
+  },
+  {
     "case": "M-3",
     "title": "IB SIM렌탈 대상 T머니 지급 관련 전산 체크 로직 추가",
     "domain": "swing",
@@ -305,6 +373,158 @@
     }
   },
   {
+    "case": "M-4",
+    "title": "스마트플래너 휴대폰요금상담 결합상품 개선 반영",
+    "domain": "swing",
+    "difficulty": "중",
+    "react": {
+      "complexity_expected": "complex",
+      "complexity_actual": "complex",
+      "complexity_match": true,
+      "start_hit": true,
+      "path_recall": 1.0,
+      "path_exact": 0,
+      "paths_total": 1,
+      "critical_missed": 0,
+      "critical_total": 0,
+      "must_find": "3/3",
+      "must_find_rate": 1.0,
+      "must_missing": [],
+      "evidence_coverage": 1.0,
+      "node_precision": 0.175,
+      "distractors_found": [
+        "SCR:ZCMBSS0200010",
+        "BAT:ZCMBBB0100010"
+      ],
+      "latency_s": 110.8,
+      "agent_latency_s": {
+        "planner": 27.5,
+        "explorer": 64.3,
+        "retriever": 19.0
+      },
+      "input_tokens": 99123,
+      "output_tokens": 3946,
+      "tool_calls": 20,
+      "explore_loops": 1,
+      "react_steps": {
+        "explorer": 10,
+        "retriever": 3
+      },
+      "llm_calls": 14
+    },
+    "rule_only": {
+      "complexity_expected": "complex",
+      "complexity_actual": "complex",
+      "complexity_match": true,
+      "start_hit": true,
+      "path_recall": 0.0,
+      "path_exact": 0,
+      "paths_total": 1,
+      "critical_missed": 0,
+      "critical_total": 0,
+      "must_find": "2/3",
+      "must_find_rate": 0.667,
+      "must_missing": [
+        "DBIO:FeeCnslSql.selectWlSvcFeeList"
+      ],
+      "evidence_coverage": 0.6,
+      "node_precision": 0.462,
+      "distractors_found": [
+        "BAT:ZCMBBB0100010"
+      ],
+      "latency_s": 0.1,
+      "agent_latency_s": {
+        "planner": 0.0,
+        "explorer": 0.1,
+        "retriever": 0.0
+      },
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "tool_calls": 9,
+      "explore_loops": 1,
+      "react_steps": {
+        "explorer": 0,
+        "retriever": 0
+      },
+      "llm_calls": 1
+    }
+  },
+  {
+    "case": "L-1",
+    "title": "구비서류 처리 자동화 배치 주기 단축 요청",
+    "domain": "swing",
+    "difficulty": "하",
+    "react": {
+      "complexity_expected": "simple",
+      "complexity_actual": "complex",
+      "complexity_match": false,
+      "start_hit": true,
+      "path_recall": 1.0,
+      "path_exact": 0,
+      "paths_total": 5,
+      "critical_missed": 0,
+      "critical_total": 0,
+      "must_find": "7/7",
+      "must_find_rate": 1.0,
+      "must_missing": [],
+      "evidence_coverage": 1.0,
+      "node_precision": 0.277,
+      "distractors_found": [],
+      "latency_s": 109.6,
+      "agent_latency_s": {
+        "planner": 16.4,
+        "explorer": 36.5,
+        "retriever": 56.7
+      },
+      "input_tokens": 130108,
+      "output_tokens": 4156,
+      "tool_calls": 20,
+      "explore_loops": 2,
+      "react_steps": {
+        "explorer": 7,
+        "retriever": 3
+      },
+      "llm_calls": 11
+    },
+    "rule_only": {
+      "complexity_expected": "simple",
+      "complexity_actual": "complex",
+      "complexity_match": false,
+      "start_hit": true,
+      "path_recall": 0.0,
+      "path_exact": 0,
+      "paths_total": 5,
+      "critical_missed": 0,
+      "critical_total": 0,
+      "must_find": "3/7",
+      "must_find_rate": 0.429,
+      "must_missing": [
+        "TBL:TB_BAT_JOB",
+        "COL:TB_BAT_JOB.CRON_EXPR",
+        "BAT:ZDOCBB0100040",
+        "BAT:ZDOCBB0100050"
+      ],
+      "evidence_coverage": 0.5,
+      "node_precision": 0.333,
+      "distractors_found": [],
+      "latency_s": 0.1,
+      "agent_latency_s": {
+        "planner": 0.0,
+        "explorer": 0.1,
+        "retriever": 0.0
+      },
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "tool_calls": 8,
+      "explore_loops": 1,
+      "react_steps": {
+        "explorer": 0,
+        "retriever": 0
+      },
+      "llm_calls": 1
+    }
+  },
+  {
     "case": "L-2",
     "title": "대구공항 운영중단 대고객안내를 위한 계약서 이미지 교체 요청",
     "domain": "swing",
@@ -366,6 +586,80 @@
       "input_tokens": 0,
       "output_tokens": 0,
       "tool_calls": 11,
+      "explore_loops": 1,
+      "react_steps": {
+        "explorer": 0,
+        "retriever": 0
+      },
+      "llm_calls": 1
+    }
+  },
+  {
+    "case": "L-3",
+    "title": "I/B 로밍업무처리내역조회 - 추천인 그리드 추가 요청",
+    "domain": "swing",
+    "difficulty": "하",
+    "react": {
+      "complexity_expected": "simple",
+      "complexity_actual": "simple",
+      "complexity_match": true,
+      "start_hit": true,
+      "path_recall": 1.0,
+      "path_exact": 0,
+      "paths_total": 1,
+      "critical_missed": 0,
+      "critical_total": 0,
+      "must_find": "2/2",
+      "must_find_rate": 1.0,
+      "must_missing": [],
+      "evidence_coverage": 1.0,
+      "node_precision": 0.238,
+      "distractors_found": [
+        "SCR:ZROMSS0100010"
+      ],
+      "latency_s": 75.0,
+      "agent_latency_s": {
+        "planner": 18.3,
+        "explorer": 15.8,
+        "retriever": 40.8
+      },
+      "input_tokens": 65123,
+      "output_tokens": 2877,
+      "tool_calls": 15,
+      "explore_loops": 2,
+      "react_steps": {
+        "explorer": 2,
+        "retriever": 3
+      },
+      "llm_calls": 6
+    },
+    "rule_only": {
+      "complexity_expected": "simple",
+      "complexity_actual": "simple",
+      "complexity_match": true,
+      "start_hit": true,
+      "path_recall": 0.0,
+      "path_exact": 0,
+      "paths_total": 1,
+      "critical_missed": 0,
+      "critical_total": 0,
+      "must_find": "2/2",
+      "must_find_rate": 1.0,
+      "must_missing": [],
+      "evidence_coverage": 0.8,
+      "node_precision": 0.2,
+      "distractors_found": [
+        "SCR:ZROMSS0100010"
+      ],
+      "latency_s": 0.1,
+      "agent_latency_s": {
+        "planner": 0.0,
+        "explorer": 0.1,
+        "retriever": 0.0
+      },
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "tool_calls": 8,
       "explore_loops": 1,
       "react_steps": {
         "explorer": 0,
