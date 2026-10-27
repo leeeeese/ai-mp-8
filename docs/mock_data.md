@@ -10,22 +10,22 @@ data/
 │   └── swing/            #   의사코드 (As-Is 상태)
 │       ├── screen/       #     화면 / 출력 화면              (*.scr)  → Screen
 │       ├── program/      #     서비스 / 공통 모듈 / 배치 로직 (*.pgm)  → TP, Module (배치 로직은 Batch 에 흡수)
-│       ├── sql/          #     SQL 매퍼                       (*.sql)  → DBIO
+│       ├── sql/          #     SQL 패키지 (PL/SQL)            (*.sql)  → DBIO (PACKAGE BODY 의 함수)
 │       ├── table/        #     테이블 DDL                     (*.sql)  → Table, Column (자동)
 │       ├── code/         #     공통코드 데이터                (*.sql)  → Column 속성 (code_values)
 │       └── batch/        #     배치 Job 정의 + Job 등록 데이터 (*.bat) → Batch
 ├── docs/<domain>/        # 문서 루트 (영역별, .env 의 DOCS_ROOT_<DOMAIN>)
 │   ├── tos/              #   batch · interface · ops · table 정의서 (*.md)
-│   └── swing/interface/  #   인터페이스 스펙 (*.if) → TP/Module 속성 interfaces 는 소스의 @if 로 생성
+│   └── swing/            #   table · program · screen · batch 정의서 (*.md, 한글 이름·설명) · interface 스펙 (*.if)
 ├── snapshot/<domain>/    # 운영 DB 조회 결과 (tos 만 있음)
-├── graph/                # 그래프 시드 (현재 swing 만). nodes.csv · edges.csv · seed.cypher
+├── graph/                # 그래프 시드 (swing + tos). nodes.csv · edges.csv · seed.cypher
 └── neo4j/                # Neo4j 런타임 데이터 (docker-compose 가 마운트하는 유일한 저장소)
 ```
 
 - 노드의 `source_file` 은 **해당 영역 소스 루트 기준 상대경로**입니다 (예: domain `swing`, `batch/ZCMBBB0100010.bat` → `data/source/swing/batch/ZCMBBB0100010.bat`).
 - 소스는 모두 **요건 반영 전(As-Is)** 상태입니다. 요건이 "무엇을 바꿔야 하는지"는 `eval/ground_truth/` 에만 기록합니다.
 - 방해(노이즈) 소스도 일반 소스와 똑같은 모습으로 섞어 둡니다. 노이즈 여부는 정답셋에만 적습니다.
-- swing 노드에는 원문이 `code` 속성으로도 들어 있습니다. Retriever 는 `source_file`/`source_line` 으로 원문을 직접 읽어 Simulator 에 넘깁니다.
+- 노드에는 원문이 `code` 속성으로도 들어 있습니다. Retriever 는 `source_file`/`source_line` 으로 원문을 직접 읽어 Simulator 에 넘깁니다.
 
 ## 노드 ID 규칙 (공통, 2026-10-25 고정)
 
@@ -57,60 +57,57 @@ data/
 ## 그래프 모델 (swing)
 
 ```
+   Screen ──OPENS──▶ Screen
 0  Screen ──CALLS──▶ TP ◀─CALLS─┐ (TP 자기 호출)
 1  Batch                │       │
        │           INVOKES──────┘
 2      ├─INVOKES─▶ Module ◀─INVOKES─ Module (자기 호출)
        │   TP ─INVOKES─▶ DBIO ◀─INVOKES─ Module
 3      └─INVOKES─▶ DBIO
-4                   DBIO ─READS/WRITES─▶ Table ─REFERENCES─▶ Table
+4                   DBIO ─READS/WRITES─▶ Table
 5                                        Table ─HAS_COLUMN─▶ Column
 ```
 
-| Label | ID 형식 | 예 | 출처 |
+| Label | ID 형식 | 예 | 출처 (코드 관례) |
 |---|---|---|---|
-| Screen | `SCR:<화면ID>` | `SCR:ZCUSSS0100010` | `@node Screen` |
-| TP | `TP:<클래스>.<메서드>` | `TP:ProdScrbSvc.scrbProd` | `@member TP` — 화면이 직접 호출하는 서비스 |
-| Batch | `BAT:<배치ID>` | `BAT:ZDOCBB0100010` | `@node Batch` + `@attach` 로 배치 로직 흡수 |
-| Module | `MOD:<클래스>.<메서드>` | `MOD:ProdScrbSvc.checkAgeLimit` | `@member Module` — 공통/내부 로직 |
-| DBIO | `DBIO:<매퍼>.<문ID>` | `DBIO:SvcProdSql.insertSvcProd` | `@member DBIO` |
-| Table | `TBL:<테이블>` | `TBL:TB_SVC_PROD` | `@node Table` |
+| Screen | `SCR:<화면ID>` | `SCR:ZCUSSS0100010` | `screen/*.scr` 의 `SCREEN <화면ID> "<화면명>"` |
+| TP | `TP:<프로그램>.<함수>` | `TP:ProdScrbSvc.scrbProd` | `program/*.pgm` 의 `FUNCTION` 중 **화면 EVENT 가 직접 CALL 하는 함수** |
+| Batch | `BAT:<JobID>` | `BAT:ZDOCBB0100010` | `batch/*.bat` 의 `JOB`. `PROGRAM <프로그램>.<함수>` 의 실행 함수를 흡수 |
+| Module | `MOD:<프로그램>.<함수>` | `MOD:ProdScrbSvc.checkAgeLimit` | 그 밖의 `FUNCTION` (내부·공통 로직) |
+| DBIO | `DBIO:<패키지>.<함수>` | `DBIO:SvcProdSql.insertSvcProd` | `sql/*.sql` 의 `PACKAGE BODY` 안 `FUNCTION`/`PROCEDURE` |
+| Table | `TBL:<테이블>` | `TBL:TB_SVC_PROD` | `table/*.sql` 의 `CREATE TABLE` |
 | Column | `COL:<테이블>.<컬럼>` | `COL:TB_SVC.SVC_CL_CD` | DDL 컬럼 정의에서 자동 생성 |
 
-| 엣지 | 패턴 |
-|---|---|
-| CALLS | Screen→TP, TP→TP |
-| INVOKES | TP→Module, TP→DBIO, Module→Module, Module→DBIO, Batch→DBIO, Batch→Module ★, Batch→TP ★ |
-| READS / WRITES | DBIO→Table (속성 `columns`: SQL 에서 접근하는 컬럼 목록, 자동 계산) |
-| REFERENCES | Table→Table (속성 `via`: 참조 컬럼) |
-| HAS_COLUMN | Table→Column |
+| 엣지 | 패턴 | 근거 (코드 관례) |
+|---|---|---|
+| CALLS | Screen→TP, TP→TP | 화면 `EVENT` 안의 `CALL <프로그램>.<함수>` (속성 `event`), TP 함수 안의 TP 호출 |
+| OPENS | Screen→Screen | 화면의 `OPEN <화면ID>(…)` / `POPUP <화면ID>(…)` |
+| INVOKES | TP→Module, TP→DBIO, Module→Module, Module→DBIO, Batch→DBIO, Batch→Module ★, Batch→TP ★ | 함수 안의 `CALL <프로그램>.<함수>` (같은 프로그램은 `CALL <함수>`), `SQL <패키지>.<함수>` |
+| READS / WRITES | DBIO→Table (속성 `columns`: SQL 에서 접근하는 컬럼 목록, 자동 계산) | PL/SQL 본문의 테이블. `INSERT INTO`/`UPDATE`/`DELETE`/`MERGE` 대상은 WRITES |
+| HAS_COLUMN | Table→Column | DDL 컬럼 정의 |
 
 ★ 는 원본 구조도에 없는 확장 패턴입니다 (배치가 공통 모듈/서비스를 재사용하는 경우). 이 외 패턴은 빌드 시 경고합니다.
-`@calls` 의 엣지 타입은 노드 라벨로 결정됩니다: Screen 출발 또는 TP→TP 는 `CALLS`, 나머지는 `INVOKES`.
+- Batch: Job 실행 함수(`PROGRAM`)의 호출에 더해, `LAUNCHER <기동기>` 로 기동되는 Job 은 기동기가 Job 실행(`INVOKE(…)`) 뒤 부르는 SQL(실행 결과·이력 기록)도 Batch→DBIO 로 연결합니다.
+- 인터페이스: 함수 안의 `IfClient.send('<IF_ID>', …)` / `IF_ENDPOINT['<IF_ID>']` → 노드 속성 `interfaces` (이름은 `docs/swing/interface/*.if` 의 `INTERFACE <ID> "<이름>"`).
+- Table→Table REFERENCES: swing DDL 에는 FOREIGN KEY 가 없어 만들지 않습니다.
 
-## 어노테이션 규약
+## 한글 이름·설명 (정의서, swing)
 
-주석 기호는 `//`, `--`, `#`, `*` 중 아무거나 쓸 수 있고, 한 줄에 어노테이션 하나만 씁니다.
+swing 소스에는 한글 이름·설명이 없으므로 문서(`data/docs/swing/`)에서 읽어 노드 속성에 넣습니다. 검색(`search_text`)과 공통 판정(`is_common`)이 이 값을 씁니다.
 
-| 어노테이션 | 의미 |
-|---|---|
-| `@node <Label> <ID>` | 단독 노드 시작 (Screen, Batch, Table) |
-| `@group <ID>` | 프로그램/SQL 매퍼 단위 묶음. 노드는 만들지 않고 `@name`/`@desc`/`@sm_part` 를 하위 노드에 `program_name`/`program_desc`/`sm_part` 로 상속 |
-| `@member <Label> <ID>` | 그룹 안의 노드 (TP, Module, DBIO) |
-| `@attach <ID>` | 이후 본문/엣지/속성을 이미 정의된 노드에 합침 (배치 프로그램 진입 메서드 → Batch) |
-| `@event <이벤트명>` | 화면 이벤트 구분. 이후 `@calls` 엣지에 `event` 속성으로 기록, 화면 `events` 속성에 누적 |
-| `@calls <ID> [메모]` | 호출 (CALLS / INVOKES) |
-| `@reads <TBL:ID>` / `@writes <TBL:ID>` | DBIO 의 테이블 조회 / 변경 |
-| `@references <TBL:ID> via <컬럼>` | 테이블 간 참조 (FK) |
-| `@rule <문장>` | 핵심 업무 규칙 요약 (리스트 속성 `rules`) |
-| `@if <IF_ID> <이름>` | 호출하는 인터페이스 (리스트 속성 `interfaces`) |
-| `@image <파일> \| <인쇄 문구 요약>` | 출력 화면의 배경 이미지 (리스트 속성 `images`) |
-| 그 외 `@<key> <값>` | 노드 속성 (`@name`, `@desc`, `@sm_part`, `@cycle`, `@cron`, `@pgm_typ` ...) |
+| 정의서 | 형식 | 노드 속성 |
+|---|---|---|
+| `table/swing_table_def.md` | `## <테이블> <한글명>` + `설명:` + 컬럼 표(컬럼·타입·NULL·설명), 끝에 공통코드 그룹 표 | Table `name`·`desc`, Column `comment`, `code_grp_nm` |
+| `program/swing_program_def.md` | 목록 표(이름·구분·한글명·설명) + `## <프로그램>` 의 함수 표(함수·설명) | TP/Module/DBIO `program_name`·`program_desc`·`desc` |
+| `screen/swing_screen_def.md` | 화면 목록 표(화면·화면명·설명) + `## <화면ID>` 의 이미지 표 | Screen `desc`·`images` |
+| `batch/swing_batch_def.md` | Job 표(Job·Job명·주기·설명) | Batch `cycle`·`desc` |
+
+- 업무 규칙과 TP/Module 구분은 정의서에 쓰지 않습니다. 규칙은 에이전트가 코드에서 찾고, 라벨은 파서가 호출 관계로 정합니다.
 
 자동 생성 속성:
-- 모든 Screen/TP/Batch/Module/DBIO/Table: `code` — 어노테이션 다음부터 다음 노드 전까지의 원문
+- 모든 Screen/TP/Batch/Module/DBIO/Table: `code` — 해당 블록 원문 (Batch 는 Job 정의 뒤에 `// ---- program/<프로그램>.pgm ----` 와 실행 함수 원문)
 - Column: `data_type`, `nullable`, `pk`, `comment`, `code_grp`, `code_grp_nm`, `code_values`
-  (컬럼 코멘트의 `(XXX_CD: ...)` 또는 컬럼명과 같은 공통코드 그룹의 값을 `code/*.sql` 에서 읽어 채움)
+  (컬럼 설명의 `(XXX_CD: ...)` 또는 컬럼명과 같은 공통코드 그룹의 값을 `code/*.sql` 에서 읽어 채움)
 
 화면/배치/출력 프로그램 ID 는 `Z` + 업무(3자리) + 유형(2자리) + 일련번호(7자리) 형식입니다.
 유형: `SS` 화면, `RR` 출력/레포트, `BB` 배치. 업무: `CUS` 고객, `PRD` 상품, `CMB` 결합, `DOC` 구비서류, `CNT` 접촉이력, `ROM` 로밍, `PAY` 결제, `PLN` 스마트플래너, `COM` 공통.
@@ -131,7 +128,8 @@ FUNCTION scrbProd(svcMgmtNo, prodId) -> scrbSeq
 END FUNCTION
 ```
 
-화면(`*.scr`) 은 `SCREEN / AREA / INPUT / COMBO / CHECK / GRID / COLUMN / BUTTON / LABEL / EVENT` 키워드로 레이아웃과 이벤트를 적습니다.
+화면(`*.scr`) 은 `SCREEN / AREA / INPUT / COMBO / CHECK / GRID / COLUMN / BUTTON / LABEL / EVENT … END EVENT` 키워드로 레이아웃과 이벤트를 적고, 다른 화면은 `OPEN <화면ID>(…)` / `POPUP <화면ID>(…)` 로 엽니다.
+SQL(`sql/*.sql`) 은 PL/SQL `CREATE OR REPLACE PACKAGE BODY <패키지>` 안의 `FUNCTION`/`PROCEDURE … END <이름>;`, 배치(`batch/*.bat`) 는 `JOB <JobID> "<Job명>" … PROGRAM / LAUNCHER / SCHEDULE … END JOB` 입니다.
 
 ## 그래프 모델 (tos)
 
@@ -164,6 +162,7 @@ python scripts/build_graph.py --strict   # 영역별 파서 → 공통 검증 �
 python scripts/build_graph.py --load     # 생성 후 .env 의 Neo4j 에 적재 (기존 :Node 그래프 삭제 후 재적재)
 ```
 
-- 구조: `scripts/graph/parse_swing.py`, `scripts/graph/parse_tos.py` (영역별 파서) → `scripts/graph/model.py` (라벨·엣지·허용 패턴·검증·출력·적재)
-- 영역을 추가하려면 `parse_<domain>.py` 를 만들고 `build_graph.py` 의 `PARSERS` 에 등록합니다.
+- 구조: `scripts/graph/common.py` (**공통 파서 뼈대** `BaseParser`: 노드·관계 추가, DDL → 테이블·컬럼, SQL 본문 → READS/WRITES, 정의서 md 읽기)
+  → `scripts/graph/parse_swing.py` · `parse_tos.py` (`BaseParser` 상속, 영역 언어를 읽는 부분만) → `scripts/graph/model.py` (라벨·엣지·허용 패턴·검증·출력·적재)
+- 영역을 추가하려면 `BaseParser` 를 상속한 `parse_<domain>.py` 를 만들고 `build_graph.py` 의 `PARSERS` 에 등록합니다.
 - `[INFO]` 는 의도된 누락(적재 범위 밖 프로그램, 매핑 없는 주소 등)이라 `--strict` 에서도 실패하지 않습니다.

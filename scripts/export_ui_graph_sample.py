@@ -1,4 +1,4 @@
-"""UI mock 용 그래프 샘플을 만든다: data/graph/*.csv → frontend/src/mocks/data/graph-sample.json
+"""UI mock 용 그래프 샘플을 만든다: data/graph/*.csv → frontend/src/mocks/fixtures/graph-sample.json
 
 영역별(dbm = tos, prod = swing) 노드·엣지와 품질 점검 값. 소스 원문(code)은 넣지 않는다.
 
@@ -12,7 +12,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 GRAPH_DIR = ROOT / "data" / "graph"
-OUT = ROOT / "frontend" / "src" / "mocks" / "data" / "graph-sample.json"
+OUT = ROOT / "frontend" / "src" / "mocks" / "fixtures" / "graph-sample.json"
 SM = {"tos": "dbm", "swing": "prod"}
 KEEP_PROPS = ("desc", "comment", "program", "url", "stmt_type", "is_common", "table", "interfaces")
 KEEP_EDGE = ("columns", "via", "event", "note")

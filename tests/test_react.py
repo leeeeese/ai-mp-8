@@ -1,7 +1,5 @@
 """설계 기술 반영 테스트: ReAct(Explorer·Retriever), Reflexion(재계획 메시지), LangGraph 후속 입력 라우팅. 가짜 LLM 사용."""
 
-from test_explore import Fixed, analyze, env, item, plan  # noqa: F401  (env 는 fixture)
-
 from impact_agent.agents import ExplorerAgent, RetrieverAgent, Supervisor
 from impact_agent.agents.explorer import ExplorerDecision
 from impact_agent.agents.planner import user_message
@@ -9,8 +7,8 @@ from impact_agent.agents.retriever import RetrieverDecision
 from impact_agent.llm import Usage
 from impact_agent.schemas import (
     ChangeType,
-    ComposerOutput,
     Complexity,
+    ComposerOutput,
     Direction,
     FollowupInput,
     FollowupType,
@@ -22,6 +20,7 @@ from impact_agent.schemas import (
     UserInput,
 )
 from impact_agent.state import AgentState
+from test_explore import Fixed, analyze, item, plan
 
 NULLS = dict(item_id=None, terms=None, labels=None, node_ids=None, direction=None, target_role=None)
 R_NULLS = dict(item_id=None, node_ids=None, context_lines=None, target_role=None, direction=None, reason=None)

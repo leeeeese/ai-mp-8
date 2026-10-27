@@ -1,6 +1,6 @@
 import { http, HttpResponse } from 'msw';
 import type { CreateSessionRequest, GraphEdge, GraphNode, GraphStatus, MessageKind, SmPart, User } from '@/api/types';
-import graphSample from './data/graph-sample.json';
+import graphSample from './fixtures/graph-sample.json';
 import { addMessage, audit, checklistOf, createSession, db, nextId } from './db';
 
 interface Sample {

@@ -22,7 +22,8 @@
 import re
 from pathlib import Path
 
-from .model import ParseResult, new_edge
+from .common import BaseParser, ddl_blocks, ddl_columns, line_of
+from .model import ParseResult
 
 # --- 공통 텍스트 처리 ---------------------------------------------------------
 
@@ -71,20 +72,10 @@ def block_end(text: str, open_idx: int) -> int:
     return len(text)
 
 
-def line_of(text: str, idx: int) -> int:
-    return text.count("\n", 0, idx) + 1
-
-
 def header_field(text: str, key: str) -> str:
     m = re.search(rf"^\s*\*?\s*{key}\s*:\s*(.+?)\s*$", text, re.M)
     return m.group(1) if m else ""
 
-
-# --- SQL → 테이블 -------------------------------------------------------------
-
-WRITE_TARGET = re.compile(r"\b(?:INSERT\s+INTO|UPDATE|DELETE\s+FROM|DELETE|MERGE\s+INTO)\s+(\w+)", re.I)
-TABLE_REF = re.compile(r"\b(?:FROM|JOIN|INTO|UPDATE)\s+(\w+)", re.I)
-SQL_KEYWORDS = {"DUAL", "SELECT", "SET", "WHERE", "VALUES"}
 
 # --- Java ----------------------------------------------------------------------
 
@@ -114,60 +105,24 @@ C_DEFINE = re.compile(r"^#define\s+(\w+)\s+\"(\w+)\"", re.M)
 DBIO_CALL = re.compile(r"\btmk_dbio_\w+\(\s*(\"\w+\"|\w+)")
 
 
-class TosParser:
+class TosParser(BaseParser):
+    """tos 언어(JSP/JS · Spring · MyBatis · Job XML · Pro*C · DDL) 읽기. 공통 부분은 BaseParser."""
+
     def __init__(self, root: Path, domain: str, docs_root: Path | None) -> None:
-        self.root = root
-        self.domain = domain
-        self.docs_root = docs_root
-        self.r = ParseResult()
-        self.ids: set[str] = set()
-        self.tables: set[str] = set()
+        super().__init__(root, domain, docs_root)
         self.methods: dict[str, dict[str, list[dict]]] = {}  # class → method name → [method info]
         self.url_map: dict[str, tuple[str, str]] = {}  # url → ("view", 화면ID) | ("ctl", node_id)
-
-    # --- 공통 -----------------------------------------------------------------
-
-    def rel(self, path: Path) -> str:
-        return path.relative_to(self.root).as_posix()
-
-    def add_node(self, node_id: str, label: str, name: str, path: Path, line: int, props: dict) -> dict:
-        node = {"node_id": node_id, "label": label, "name": name, "domain": self.domain, "source_file": self.rel(path),
-                "source_line": line, "properties": props}
-        self.r.nodes.append(node)
-        self.ids.add(node_id)
-        return node
-
-    def add_edge(self, from_id: str, to_id: str, type_: str, path: Path, line: int, **kw) -> None:
-        self.r.edges.append(new_edge(from_id, to_id, type_, f"{self.rel(path)}:{line}", **kw))
 
     def table_edges(self, from_id: str, sql: str, path: Path, line: int) -> None:
         # MyBatis 태그(<update id=..>, <if ..>)와 CDATA 표시만 지운다. 비교 연산자(<=, >=)는 남긴다.
         sql_u = re.sub(r"<!\[CDATA\[|\]\]>|</?[A-Za-z][\w:.-]*(?:\s[^<>]*)?/?>", " ", sql).upper()
-        writes = {m.group(1) for m in WRITE_TARGET.finditer(sql_u)}
-        for t in sorted(writes):
-            if t in self.tables:
-                self.add_edge(from_id, "TBL:" + t, "WRITES", path, line)
-        for t in sorted(t for t in self.tables if t not in writes and re.search(rf"\b{t}\b", sql_u)):
-            self.add_edge(from_id, "TBL:" + t, "READS", path, line)
-        for m in TABLE_REF.finditer(sql_u):
-            t = m.group(1)
-            if t not in self.tables and t not in SQL_KEYWORDS and not t.startswith(("H_", ":")):
-                self.r.infos.append(f"{from_id}: DDL 없는 테이블 {t} ({self.rel(path)}:{line})")
+        super().table_edges(from_id, sql_u, path, line)
 
     # --- Table / Column -------------------------------------------------------
 
-    @staticmethod
-    def ddl_blocks(text: str) -> list[tuple[str, int, int]]:
-        """파일 안의 CREATE TABLE 블록들 (테이블명, 시작, 끝). 한 파일에 여러 테이블이 있을 수 있다."""
-        blocks = []
-        for m in re.finditer(r"CREATE TABLE\s+(\w+)\s*\(", text):
-            end = text.find("\n);", m.end())
-            blocks.append((m.group(1), m.start(), len(text) if end < 0 else end + 3))
-        return blocks
-
     def parse_ddl(self, path: Path) -> None:
         text = path.read_text(encoding="utf-8")
-        blocks = self.ddl_blocks(text)
+        blocks = ddl_blocks(text)
         head = re.match(r"\s*--\s*(.+)", text)
         for tname, start, end in blocks:
             tcomment = re.search(rf"COMMENT ON TABLE\s+{tname}\s+IS\s+'([^']*)'", text)
@@ -184,23 +139,16 @@ class TosParser:
                           props | {"code": code})
 
             col_comments = dict(re.findall(rf"COMMENT ON COLUMN\s+{tname}\.(\w+)\s+IS\s+'([^']*)'", text))
-            body = text[start:end]
-            pks: set[str] = set()
-            for pk in re.finditer(r"PRIMARY KEY\s*\(([^)]*)\)", body):
-                pks |= {c.strip() for c in pk.group(1).split(",")}
-            for cm in re.finditer(r"^[ \t]+([A-Z][A-Z0-9_]*)[ \t]+((?:VARCHAR2|VARCHAR|NUMBER|CHAR|DATE|TIMESTAMP|CLOB)(?:\([^)]*\))?)(.*)$",
-                                  body, re.M):
-                col, dtype, rest = cm.group(1), cm.group(2), cm.group(3)
-                line = line_of(text, start + cm.start())
-                cid = f"COL:{tname}.{col}"
-                self.add_node(cid, "Column", col, path, line,
-                              {"table": tname, "data_type": dtype, "nullable": "NOT NULL" not in rest, "pk": col in pks,
-                               "comment": col_comments.get(col, "")})
-                self.add_edge(tid, cid, "HAS_COLUMN", path, line)
+            for c in ddl_columns(text, start, end):
+                cid = f"COL:{tname}.{c['name']}"
+                self.add_node(cid, "Column", c["name"], path, c["line"],
+                              {"table": tname, "data_type": c["data_type"], "nullable": c["nullable"], "pk": c["pk"],
+                               "comment": col_comments.get(c["name"], "")})
+                self.add_edge(tid, cid, "HAS_COLUMN", path, c["line"])
 
     def parse_fks(self, path: Path) -> None:
         text = path.read_text(encoding="utf-8")
-        for tname, start, end in self.ddl_blocks(text):
+        for tname, start, end in ddl_blocks(text):
             for fk in re.finditer(r"FOREIGN KEY\s*\(([^)]*)\)\s*REFERENCES\s+(\w+)", text[start:end]):
                 via = ",".join(c.strip() for c in fk.group(1).split(","))
                 self.add_edge("TBL:" + tname, "TBL:" + fk.group(2), "REFERENCES", path, line_of(text, start + fk.start()), via=via)

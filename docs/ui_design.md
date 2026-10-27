@@ -226,7 +226,7 @@ Dribbble "Forge – AI Agent Code Workspace"(라이트) · "AI Knowledge Base Em
 
 | 데이터 | 출처 |
 |---|---|
-| 세션 3건 (SC-001 복잡, SC-006 단순, H-1 상품) | 목업 시나리오 정답셋을 바탕으로 작성한 예시 결과 (`src/mocks/data/scenarios.ts`) |
+| 세션 3건 (SC-001 복잡, SC-006 단순, H-1 상품) | 목업 시나리오 정답셋을 바탕으로 작성한 예시 결과 (`src/mocks/fixtures/scenarios.ts`) |
 | 그래프 샘플 | 실제 적재 그래프(`data/graph`)의 tos·swing 노드·엣지, **소스 원문 제외** (`python scripts/export_ui_graph_sample.py`) |
 | 품질 점검 수치 | 위 그래프에서 계산 (예: dbm 고립 노드 4개) |
 | master 대비·적재 이력·사용자·재적재 요청·감사 로그 | 가상 값 |
