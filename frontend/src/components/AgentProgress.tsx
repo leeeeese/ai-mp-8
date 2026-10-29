@@ -67,9 +67,9 @@ function Meter({ label, value, max }: { label: string; value: number; max: numbe
 /** 우측 "Agent 진행" 패널 (SSE 로 실시간 갱신) */
 export function AgentProgress({ state }: { state: ProgressState }) {
   return (
-    <section aria-label="Agent 진행" aria-live="polite" className="glass flex flex-col gap-4 p-4">
+    <section aria-label="Agent 진행" aria-live="polite" className="glass flex max-h-full min-h-0 flex-col gap-4 p-4">
       <h2 className="text-sm font-semibold">Agent 진행</h2>
-      <ol className="flex flex-col">
+      <ol className="flex shrink-0 flex-col">
         {NODES.map((n, i) => {
           const st = state.status[n.node];
           return (
@@ -93,15 +93,16 @@ export function AgentProgress({ state }: { state: ProgressState }) {
           );
         })}
       </ol>
-      <div className="flex flex-col gap-2 border-t border-border pt-3">
+      <div className="flex shrink-0 flex-col gap-2 border-t border-border pt-3">
         <Meter label="도구 호출" value={state.counters.toolCalls} max={LIMITS.maxToolCalls} />
         <Meter label="Explorer ⇄ Retriever 왕복" value={state.counters.exploreLoops} max={LIMITS.maxExploreLoop} />
         <Meter label="재계획" value={state.counters.replans} max={LIMITS.maxReplan} />
       </div>
       {state.evidence.length > 0 && (
-        <div className="border-t border-border pt-3">
-          <h3 className="mb-1.5 text-xs font-medium text-muted">근거</h3>
-          <ul className="flex flex-col gap-1.5">
+        <div className="flex min-h-0 flex-col border-t border-border pt-3">
+          <h3 className="mb-1.5 text-xs font-medium text-muted">근거 ({state.evidence.length})</h3>
+          {/* 근거가 많아도 단계·한도는 화면에 남도록 근거 목록만 스크롤 */}
+          <ul className="flex min-h-0 flex-col gap-1.5 overflow-y-auto pr-1">
             {state.evidence.map((e) => (
               <li key={e.nodeId + e.file} className="text-xs">
                 <div className="node-id truncate text-text">{e.nodeId}</div>

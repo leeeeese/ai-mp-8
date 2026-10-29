@@ -1,6 +1,6 @@
 import { ChevronDown } from 'lucide-react';
 
-/** 칩 모양 select (네이티브 select 라 키보드·스크린리더 지원) */
+/** 칩 모양 select (네이티브 select 라 키보드·스크린리더 지원). select 가 칩 전체를 덮어 화살표를 눌러도 열린다 */
 export function ChipSelect<T extends string>({ label, value, options, onChange }: {
   label: string;
   value: T;
@@ -8,13 +8,13 @@ export function ChipSelect<T extends string>({ label, value, options, onChange }
   onChange: (v: T) => void;
 }) {
   return (
-    <label className="chip relative cursor-pointer pr-7">
+    <label className="chip relative cursor-pointer !px-0">
       <span className="sr-only">{label}</span>
       <select
         aria-label={label}
         value={value}
         onChange={(e) => onChange(e.target.value as T)}
-        className="cursor-pointer appearance-none bg-transparent pr-1 outline-none"
+        className="min-h-[30px] cursor-pointer appearance-none self-stretch bg-transparent pl-2.5 pr-7 outline-none"
       >
         {options.map((o) => (
           <option key={o.value} value={o.value} className="bg-[color:var(--bg)]">

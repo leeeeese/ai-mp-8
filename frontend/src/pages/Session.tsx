@@ -182,7 +182,7 @@ export function Session() {
           </form>
         </div>
 
-        <aside className="xl:sticky xl:top-[76px] xl:self-start">
+        <aside className="xl:sticky xl:top-[76px] xl:flex xl:max-h-[calc(100vh-92px)] xl:flex-col xl:self-start">
           <AgentProgress state={progress} />
         </aside>
       </div>
