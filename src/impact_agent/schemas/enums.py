@@ -166,7 +166,8 @@ class VerifyResult(str, Enum):
 
 
 class KpiCategory(str, Enum):
-    QUALITY = "quality"
+    QUALITY = "quality"  # 노드 탐지 (정답 노드 목록 대비)
+    JUDGEMENT = "judgement"  # 판정 품질 (정답 복잡도·난이도·영역·가능 여부 대비, 측정만)
     PERFORMANCE = "performance"
 
 
@@ -196,6 +197,16 @@ class KpiMetricName(str, Enum):
     NODE_PRECISION = "node_precision"  # 노드 정밀도 = TP / (TP + FP)
     EXCLUDED_NODES = "excluded_nodes"  # 평가 제외 노드 수
     OUT_OF_SCOPE_NODES = "out_of_scope_nodes"  # 범위 밖 노드 수
+    # judgement (판정 품질, 측정만. 1 = 일치/해당, 0 = 불일치/해당 없음, 비율은 0~1. 비교값이 없으면 생략)
+    COMPLEXITY_MATCH = "complexity_match"  # Planner 복잡도(재분석이면 재분석 후 값) = 정답 complexity
+    DIFFICULTY_MATCH = "difficulty_match"  # (복잡) 요건 전체 난이도 requirement_difficulty = 정답 difficulty
+    FEASIBILITY_MATCH = "feasibility_match"  # (복잡) 변경 영역 종합 가능 여부 = 정답 expected.feasibility
+    AREA_IMPACT_MATCH = "area_impact_match"  # (복잡) 4개 영역 impact_type 이 정답 expected.areas 와 같은 비율
+    CHANGE_TAG_ACCURACY = "change_tag_accuracy"  # (복잡) 정답 변경·참조 노드 중 Simulator [변경]/[참조] 표시가 맞은 비율
+    WRONG_PATH_ADOPTED = "wrong_path_adopted"  # (복잡) 정답셋 wrong_paths 중 고유 노드를 [변경] 으로 판정한 오답 경로 수
+    DETAIL_RECOMMENDED = "detail_recommended"  # (단순) 상세 분석을 권장했는지
+    COMPLEX_MINOR = "complex_minor"  # (복잡) 변경이 있는데 요건 전체 난이도 Minor (Composer 표시 신호)
+    VERIFIER_UNRESOLVED = "verifier_unresolved"  # (복잡) 재계획 한도 안에 Verifier 보완 필요를 못 메움
     # performance (실행 로그)
     LATENCY_MS = "latency_ms"
     TOOL_CALLS = "tool_calls"

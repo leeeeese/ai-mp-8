@@ -86,7 +86,7 @@ load_inputs → validate → extract → normalize → match → classify → ag
 - 단순/복잡은 검증 단계(Verifier) 유무가 달라 결과 특성이 다르므로 **flow 별로 나눠 집계**한다.
 - 오탐·미탐 원인 추정(그래프 상 인접 노드, 엣지 유형 등)은 LLM 으로 보조할 수 있으나 KPI 값에는 반영하지 않는다.
 
-**출력 `KpiOutput`**: `complexity`, `req_id`, `evaluable`, `skip_reason`, `metrics[KpiMetric]`, `agent_runs`, `final_nodes`, `judgements[NodeJudgement]`, `by_type[GroupKpi]`, `by_stage[GroupKpi]`, `missed_nodes`, `false_positive_nodes`, `distractors_found`, `all_passed`, `warnings`
+**출력 `KpiOutput`**: `complexity`, `req_id`, `evaluable`, `skip_reason`, `metrics[KpiMetric]` (quality · judgement · performance), `agent_runs`, `final_nodes`, `judgements[NodeJudgement]`, `by_type[GroupKpi]`, `by_stage[GroupKpi]`, `missed_nodes`, `false_positive_nodes`, `distractors_found`, `all_passed`, `warnings`, `reanalyzed`(상세 분석 요청으로 다시 분석한 결과인지), `judgement_notes`(판정 품질 불일치 설명)
 
 **한도·예외**: `AnswerKey` 가 없으면 성능 지표만 계산 (`evaluable=false`, 경고 없음). `final_nodes` 가 없으면 평가 불가 사유를 `warnings` 에 기록. threshold 가 있는 지표가 미달이면 `all_passed=false` + `warnings`.
 
@@ -196,13 +196,33 @@ load_inputs → validate → extract → normalize → match → classify → ag
 | 불필요·중복 제시율 | 불필요·중복 검토 항목 ÷ 전체 검토 항목 × 100 | 수동 입력 |
 | 담당자 유용성 평가 | 5점 척도 3항목 평균과 의견 | 수동 입력 |
 
-**확장 KPI 후보 (미확정)**
+**판정 품질 KPI (judgement, 측정만 · threshold 없음 · `all_passed` 에 영향 없음)**
 
-| 후보 | 산출 | 필요 데이터 |
-|---|---|---|
-| Planner 복잡도 판정 정확도 | `planner.complexity` 와 정답 `complexity` 일치율 | 정답셋, 로그 |
-| 목표 역할 일치율 | Planner 항목별 `target_role` 과 정답 기대값 일치율 | 정답셋에 기대값 필요, 로그 |
-| 난이도 판정 일치율 | Simulator 요건 전체 난이도(Major/Medium/Minor)와 정답 `difficulty` 일치율 | 정답셋, 로그 ([SE_agent_design.md](SE_agent_design.md) 9장) |
+노드를 찾았는지(quality)와 별도로, 에이전트의 **판정**이 정답과 맞는지 본다. 비교값은 정답셋에서 읽고(`load_answer_key`), 비교값이 없거나 해당 flow 가 아니면 그 지표를 생략한다. 값은 1 = 일치/해당, 0 = 불일치/해당 없음, 비율은 0~1, 건수는 그대로. 불일치는 `judgement_notes` 에 사람이 읽을 문장으로 남긴다.
+
+| 지표 (`KpiMetricName`) | flow | 산출 | 정답셋 비교값 |
+|---|---|---|---|
+| `complexity_match` | 공통 | `planner.complexity` = 정답 `complexity` (재분석이면 재분석 후 값. 재분석 여부는 `reanalyzed`) | `complexity` |
+| `difficulty_match` | 복잡 | `requirement_difficulty(area_impacts)` = 정답 | `difficulty` |
+| `feasibility_match` | 복잡 | 변경 영역의 종합 가능 여부(가장 나쁜 값, Composer 요약과 같은 규칙) = 정답. 변경 영역이 없으면 생략 | `expected.feasibility` |
+| `area_impact_match` | 복잡 | 4개 영역 `impact_type` 이 정답과 같은 비율 | `expected.areas` |
+| `change_tag_accuracy` | 복잡 | 정답 변경 노드(`impacted` 중 modify·add)는 `[변경]`, 참조 노드(`reference_only`, `impacted` 중 reference_only)는 `[참조]` 로 판정한 비율. Simulator 가 표시를 하나도 안 했으면 생략. 두 목록에 겹치면 변경 우선 | `expected.impacted`·`reference_only` |
+| `wrong_path_adopted` | 복잡 | 오답 경로의 고유 노드(정답 경로·영향 노드와 겹치지 않는 노드)를 `[변경]` 으로 판정한 오답 경로 수 | `wrong_paths` |
+| `detail_recommended` | 단순 | Composer 가 상세 분석을 권장했는지 | (배치 집계에서 정답 `complexity` 와 함께 해석) |
+| `complex_minor` | 복잡 | 변경이 있는데 요건 전체 난이도 Minor (Composer 요약 표시 신호) | - |
+| `verifier_unresolved` | 복잡 | 재계획 한도 안에 Verifier 보완 필요를 못 메움 | - |
+
+배치 집계(`summary.json` 의 `judgement`)에서는 일치율·평균(지표가 있는 사례만)과 건수 합계를 낸다. 상세 분석 권장은 둘로 나눈다:
+- `detail_catch_rate`: 정답 complex 인데 단순 처리된 사례 중 권장한 비율 (놓친 복잡 요건을 붙잡았는가, [planner_detail_analysis_to-be.md](planner_detail_analysis_to-be.md))
+- `detail_over_rate`: 정답 simple 이고 단순 처리된 사례 중 권장한 비율 (과한 권장)
+
+**자동 비교하지 않는 정답 필드** ([SE_agent_design.md](SE_agent_design.md) 8장 대조표 중)
+
+| 정답 필드 | 이유 |
+|---|---|
+| `expected.new` ↔ `new_elements` | Simulator `new_elements` 미구현 |
+| `conclusion.correct / wrong`, `expected.open_items`, `analysis_limits` | 문장 비교라 규칙으로 판정하지 않음 (리포트를 사람이 대조) |
+| 목표 역할(`target_role`) 일치 | 정답셋에 기대값 없음 |
 
 ### 1-5. 출력 예시
 
@@ -241,10 +261,10 @@ load_inputs → validate → extract → normalize → match → classify → ag
 | 파일 | 내용 |
 |---|---|
 | `judgements.csv` | 사례별 노드 판정표: case_id, agent_version, node_id, 유형, 단계, 중요도, 판정, 출력 여부 |
-| `cases.csv` | 사례별 KPI (시스템 · SM 파트 · flow · Agent 버전) |
-| `summary.json` | 합산 · 시스템 · SM 파트 · flow · 노드 유형 · 단계별 KPI |
-| 리포트 (md, 예정) | 요약 수치, 미탐 노드(Critical 우선), 오탐 노드, 평가 제외·범위 밖 건수, 유형별 탐지율 |
-| 버전 비교표 (예정) | 같은 정답셋에 대한 Agent 버전 간 KPI 차이 |
+| `cases.csv` | 사례별 KPI (시스템 · SM 파트 · flow · 정답 복잡도 · Agent 버전) + 판정 품질 지표 · 재분석 여부 · 불일치 설명 |
+| `summary.json` | 합산 · 시스템 · SM 파트 · flow · 노드 유형 · 단계별 KPI + `judgement`(판정 품질 집계) |
+| `report.md` | 노드 탐지 수치, 판정 품질, 미탐 노드(Critical 우선), 오탐 노드, 판정 불일치(사례별), 평가 제외. 건수는 숫자, 비율은 % |
+| 버전 비교 (`--compare <이전 summary.json>`) | `report.md` 끝에 지표별 이전 · 현재 · 차이 표 (탐지율·Critical 미탐률·정밀도, 판정 품질 집계) |
 
 ---
 
@@ -290,7 +310,8 @@ load_inputs → validate → extract → normalize → match → classify → ag
 python -m impact_agent --case L-1 --answer-key eval/ground_truth/L-1.json --out L-1.state.json   # Composer → KPI 까지 (state.kpi)
 python scripts/eval_kpi.py outputs/runs/YJ/<run_id>                         # 폴더 안 *.state.json 전체
 python scripts/eval_kpi.py a/SC-001.state.json b/H-1.state.json --agent-version v0.3 --out outputs/kpi/v0.3
-pytest tests/test_kpi.py                                                    # 판정·집계 (LLM·Neo4j 불필요)
+python scripts/eval_kpi.py outputs/runs/v0.4 --agent-version v0.4 --compare outputs/kpi/v0.3/summary.json   # 버전 비교
+pytest tests/test_kpi.py tests/test_kpi_judgement.py                        # 판정·집계·판정 품질·리포트 (LLM·Neo4j 불필요)
 ```
 
 | 확인 | 내용 |
@@ -299,12 +320,15 @@ pytest tests/test_kpi.py                                                    # �
 | 정답 로드 | `must_find`·`reference_only`·pending 경로 → 정답/제외 분류, DBIO 단계 2/3 산출 |
 | flow | 단순 = Retriever 노드, 복잡 = Simulator hop 노드, 결과 없음 → `evaluable=false` |
 | 지표 | 분모 0 생략, threshold 미달 → `all_passed=false` + `warnings` |
+| 판정 품질 | 실제 Simulator·Verifier·Composer 출력(tos·swing)에 대해 일치/불일치·설명, 표시 없는 Simulator 출력은 표시 지표 생략, 단순 flow 권장 catch/miss/over, 재분석·Verifier 미해결, 변경 노드 우선 |
+| swing | 노드 유형·단계(DBIO: TP·배치 직접 2, Module 경유 3)·시스템 추정·노드 판정 |
+| 배치 | 판정 품질 집계, 리포트 절·건수/비율 표시, 버전 비교 행 |
 
 ## 7. 구현 단계
 
 1. 실행 로그 스키마를 Supervisor 담당과 합의하고, 정답셋 스키마와 노드 ID 체계를 확정한다. 사례 2~3건으로 수작업 판정과 결과가 일치하는지 확인한다. — ✅
 2. extract~aggregate 로직을 구현하고 CSV 를 출력한다. — ✅ (`agents/kpi.py`, `scripts/eval_kpi.py`)
-3. 평가 모드 토글과 리포트(md) 생성을 연결한다.
+3. 평가 모드 토글과 리포트(md) 생성을 연결한다. — 리포트·버전 비교 ✅ (`report.md`, `--compare`)
 4. 사례를 시스템별 5~8건 이상으로 확대하고 (현재 swing 10 · tos 6), 버전 비교표와 참고 KPI 를 연동한다.
 
 ## 8. 남은 과제
@@ -316,8 +340,8 @@ pytest tests/test_kpi.py                                                    # �
 5. **`eval_target_labels` 지정 규칙**: 요건 유형별 기본값을 둘지, 사례별로 지정할지 (현재 비우면 전체)
 6. **Critical 분류 기준**: 장애·과금 영향 사례 목록 사전 합의
 7. **정답셋 작성·승인 담당**: swing / tos 각각의 담당과 승인 절차
-8. **확장 KPI 포함 여부**: Planner 판정 정확도, 목표 역할 일치율, 난이도 판정 일치율
+8. **판정 품질 KPI 기준값**: 지금은 측정만 (threshold 없음). 실제 16건 실행 결과를 본 뒤 기준값을 둘지 결정. 목표 역할 일치는 정답셋 기대값이 없어 보류
 9. **엣지 정확도 측정 여부**: 현재 범위 밖. 필요 시 정답셋에 엣지 추가
 10. **swing Batch → DBIO, TP → DBIO 엣지 라벨**: 다이어그램에 라벨 미표기 (그래프는 `INVOKES`). 평가에는 영향 없음
 11. **구현 프레임워크·실행 환경**: KPI Agent 는 Supervisor(LangGraph) 노드로 구현됨. 배치 평가 실행 환경(주기·저장 위치)은 미정
-12. **리포트(md)·버전 비교표**: 미구현
+12. **자동 비교하지 않는 정답 필드**: `expected.new`(Simulator `new_elements` 미구현), `conclusion`·`open_items`·`analysis_limits`(문장) — 1-4 표

@@ -2172,6 +2172,7 @@
     "KpiCategory": {
       "enum": [
         "quality",
+        "judgement",
         "performance"
       ],
       "title": "KpiCategory",
@@ -2185,6 +2186,15 @@
         "node_precision",
         "excluded_nodes",
         "out_of_scope_nodes",
+        "complexity_match",
+        "difficulty_match",
+        "feasibility_match",
+        "area_impact_match",
+        "change_tag_accuracy",
+        "wrong_path_adopted",
+        "detail_recommended",
+        "complex_minor",
+        "verifier_unresolved",
         "latency_ms",
         "tool_calls",
         "explore_loops",
@@ -2553,6 +2563,20 @@
             "type": "string"
           },
           "title": "Warnings",
+          "type": "array"
+        },
+        "reanalyzed": {
+          "default": false,
+          "description": "사용자 상세 분석 요청(reanalysis)으로 다시 분석한 결과인지",
+          "title": "Reanalyzed",
+          "type": "boolean"
+        },
+        "judgement_notes": {
+          "description": "판정 품질 불일치 설명 (평가 리포트용)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Judgement Notes",
           "type": "array"
         }
       },
@@ -2925,6 +2949,68 @@
             "type": "string"
           },
           "title": "Distractor Nodes",
+          "type": "array"
+        },
+        "expected_difficulty": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Difficulty"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "정답 요건 난이도 (difficulty)"
+        },
+        "expected_feasibility": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Feasibility"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "정답 구현 가능 여부 (expected.feasibility)"
+        },
+        "expected_areas": {
+          "additionalProperties": {
+            "$ref": "#/$defs/ImpactType"
+          },
+          "description": "정답 영역별 영향 유형 (expected.areas)",
+          "propertyNames": {
+            "$ref": "#/$defs/Area"
+          },
+          "title": "Expected Areas",
+          "type": "object"
+        },
+        "change_nodes": {
+          "description": "정답 변경 노드 (impacted 중 modify·add) → [변경] 기대",
+          "items": {
+            "type": "string"
+          },
+          "title": "Change Nodes",
+          "type": "array"
+        },
+        "reference_nodes": {
+          "description": "정답 참조 노드 (reference_only, impacted 중 reference_only) → [참조] 기대",
+          "items": {
+            "type": "string"
+          },
+          "title": "Reference Nodes",
+          "type": "array"
+        },
+        "wrong_paths": {
+          "description": "오답 경로의 고유 노드 (정답 경로·영향 노드에 없는 노드만, wrong_paths)",
+          "items": {
+            "items": {
+              "type": "string"
+            },
+            "type": "array"
+          },
+          "title": "Wrong Paths",
           "type": "array"
         }
       },

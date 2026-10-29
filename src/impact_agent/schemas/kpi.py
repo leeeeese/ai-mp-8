@@ -2,7 +2,19 @@
 
 from pydantic import BaseModel, Field
 
-from .enums import Complexity, Domain, KpiCategory, KpiMetricName, NodeSeverity, NodeVerdict, SmPart
+from .enums import (
+    Area,
+    Complexity,
+    Difficulty,
+    Domain,
+    Feasibility,
+    ImpactType,
+    KpiCategory,
+    KpiMetricName,
+    NodeSeverity,
+    NodeVerdict,
+    SmPart,
+)
 
 
 class KpiMetric(BaseModel):
@@ -51,6 +63,15 @@ class AnswerKey(BaseModel):
     answer_nodes: list[AnswerNode] = Field(default_factory=list, description="반드시 찾아야 하는 노드 (탐지율 분모)")
     excluded_nodes: list[ExcludedNode] = Field(default_factory=list)
     distractor_nodes: list[str] = Field(default_factory=list, description="키워드가 겹치지만 영향이 없는 노드 (오탐 분석용)")
+    # 판정 품질 비교값 (정답셋 expected·difficulty·wrong_paths, 없으면 해당 지표 생략)
+    expected_difficulty: Difficulty | None = Field(default=None, description="정답 요건 난이도 (difficulty)")
+    expected_feasibility: Feasibility | None = Field(default=None, description="정답 구현 가능 여부 (expected.feasibility)")
+    expected_areas: dict[Area, ImpactType] = Field(default_factory=dict, description="정답 영역별 영향 유형 (expected.areas)")
+    change_nodes: list[str] = Field(default_factory=list, description="정답 변경 노드 (impacted 중 modify·add) → [변경] 기대")
+    reference_nodes: list[str] = Field(default_factory=list,
+                                       description="정답 참조 노드 (reference_only, impacted 중 reference_only) → [참조] 기대")
+    wrong_paths: list[list[str]] = Field(default_factory=list,
+                                         description="오답 경로의 고유 노드 (정답 경로·영향 노드에 없는 노드만, wrong_paths)")
 
 
 class NodeJudgement(BaseModel):
@@ -93,3 +114,5 @@ class KpiOutput(BaseModel):
     distractors_found: list[str] = Field(default_factory=list, description="출력에 섞인 distractor 노드")
     all_passed: bool = Field(description="threshold 가 있는 지표를 모두 충족했는지")
     warnings: list[str] = Field(default_factory=list, description="미달 지표·평가 불가 설명 (평가 리포트용)")
+    reanalyzed: bool = Field(default=False, description="사용자 상세 분석 요청(reanalysis)으로 다시 분석한 결과인지")
+    judgement_notes: list[str] = Field(default_factory=list, description="판정 품질 불일치 설명 (평가 리포트용)")

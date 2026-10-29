@@ -362,9 +362,9 @@ Supervisor 의 `Supervisor.followup(session_id, FollowupInput)` 이 진입점을
 
 ## 4. KPI Agent
 
-**역할**: Composer 이후 PoC 평가. 정답 노드 목록과 실행 로그를 대조해 노드 판정(탐지·미탐·오탐·제외·범위 밖)과 탐지율·미탐률·Critical 미탐률·정밀도, 실행 성능을 낸다 (LLM 미사용). 상세는 [SE_kpi-agent-design.md](SE_kpi-agent-design.md).
+**역할**: Composer 이후 PoC 평가. 정답 노드 목록과 실행 로그를 대조해 노드 판정(탐지·미탐·오탐·제외·범위 밖)과 탐지율·미탐률·Critical 미탐률·정밀도, **판정 품질**(복잡도·난이도·가능 여부·영역 영향 유형·[변경]/[참조] 판정·오답 경로·상세 분석 권장, 측정만), 실행 성능을 낸다 (LLM 미사용). 상세는 [SE_kpi-agent-design.md](SE_kpi-agent-design.md).
 
-**출력 `KpiOutput`**: `metrics`, `judgements`, `by_type`, `by_stage`, `missed_nodes`, `false_positive_nodes`, `all_passed`, `warnings` (Composer 에 전달하지 않음)
+**출력 `KpiOutput`**: `metrics`(quality·judgement·performance), `judgements`, `by_type`, `by_stage`, `missed_nodes`, `false_positive_nodes`, `all_passed`, `warnings`, `reanalyzed`, `judgement_notes` (Composer 에 전달하지 않음)
 
 ---
 
@@ -489,6 +489,8 @@ pytest (LLM·Neo4j 불필요, 가짜 LLM `Fixed` 또는 LLM 없음, tos·swing �
 | `expected.open_items` | Composer 체크리스트 |
 | `analysis_limits` | Composer 분석 한계 |
 
+위 표에서 `expected.areas`·`feasibility`·`difficulty`·`reference_only`·`wrong_paths` 와 정답 `complexity` 는 KPI 판정 품질 지표로 자동 비교한다 ([SE_kpi-agent-design.md](SE_kpi-agent-design.md) 1-4). `expected.new`·`conclusion`·`open_items`·`analysis_limits` 는 자동 비교하지 않는다.
+
 ## 9. 남은 과제
 
 1. `new_elements` 반영: 스키마(`NewElement`) → Simulator 보정 → Verifier `evidence_missing` 예외 → Composer "신규 개발 요소" 절·체크리스트 → 프론트 목업
@@ -502,5 +504,5 @@ pytest (LLM·Neo4j 불필요, 가짜 LLM `Fixed` 또는 LLM 없음, tos·swing �
 8. `hard`·대안 사례 검증: 정답셋 16건 모두 feasible. 정답셋은 그대로 두고 `tests/` 가상 노드 fixture 로 검증
 9. swing 정의서 채움률: 데이터는 그대로 두고 LLM 이 `code` 본문으로 판단. 설명 없는 노드가 판정 품질에 주는 영향을 실행 결과로 확인
 10. LLM 입력 길이 상한 (노드당 원문, 전체 상한, 요약 여부), PDF 변환(weasyprint 한글 폰트·사내 설치 가능 여부)
-11. `new_elements` KPI 일치 기준을 KPI 설계서에 반영할지
+11. `new_elements` KPI 일치 기준: `new_elements` 가 구현되면 KPI 판정 품질에 추가 (지금은 KPI 설계서 1-4 "자동 비교하지 않는 정답 필드")
 12. 검증: `run_scenarios.py` 를 Composer 까지 돌려 `state.json` 저장 → `eval_kpi.py` 로 KPI, 1-2 난이도 대조표를 실행 결과로 갱신

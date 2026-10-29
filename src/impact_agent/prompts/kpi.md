@@ -37,6 +37,11 @@ PoC 평가용 에이전트. **Composer 이후** 실행하며, 결과는 Composer
 
 분모가 0 이면 해당 지표를 생략한다 (해당 없음). 비율은 0~1 로 저장한다.
 
+## 판정 품질 (judgement, 측정만)
+정답셋의 복잡도·난이도·가능 여부·영역 영향 유형·변경/참조 노드·오답 경로와 실행 결과의 판정을 비교한다. 기준값(threshold)이 없어 `all_passed` 에 영향을 주지 않는다.
+비교값이 없거나 해당 flow 가 아니면 생략한다 (단순: complexity_match · detail_recommended / 복잡: 그 밖). 불일치는 `judgement_notes`, 재분석 여부는 `reanalyzed`.
+지표 정의는 `docs/SE_kpi-agent-design.md` 1-4 "판정 품질 KPI".
+
 ## 성능 지표 (performance, 실행 로그)
 | 지표 | 계산 | 기준 |
 |---|---|---|
