@@ -246,7 +246,7 @@ data: {"node": "retriever", "status": "done", ..., "evidence": [{"nodeId": "SCR:
 |---|---|
 | `tests/test_api.py` | 세션·결과물·체크리스트·SSE·KPI·501(관리(권한)) (가짜 Planner·Explorer·Retriever, LLM·Neo4j 없음) |
 | `tests/test_graph_api.py` | 적재 현황 (작은 CSV 그래프 + 임시 소스 루트): 집계·품질 점검·master 대비(변경·추가·삭제)·검색 순위·2 hop·404·재적재 요청·연결 끊김(200 + `connected:false`, 검색 503) |
-| 시나리오 | Neo4j + LLM 으로 UI 에서 tos SC-003 · swing L-4 실행 (결과: 로컬 문서 `API_시나리오_테스트.md`) |
+| 시나리오 | Neo4j + LLM 으로 UI 에서 tos SC-003 · swing L-4 실행 (결과: [api_integration_test.md](api_integration_test.md)) |
 
 ```bash
 PYTHONPATH=src pytest tests/test_api.py tests/test_graph_api.py -q
