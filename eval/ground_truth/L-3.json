@@ -26,7 +26,7 @@
         "node_id": "DBIO:RomProcHstSql.selectProcHstList",
         "area": "db",
         "impact_type": "modify",
-        "reason": "<if test=\"procTypCd == '01'\"> 조건 제거 → 업무구분과 무관하게 R.RCMD_ID 조회",
+        "reason": "CASE WHEN p_proc_typ_cd = '01' THEN R.RCMD_ID END 조건 제거 → 업무구분과 무관하게 R.RCMD_ID 조회",
         "must_find": true
       },
       {
