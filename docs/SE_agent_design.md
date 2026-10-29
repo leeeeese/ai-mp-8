@@ -35,7 +35,8 @@
 | 구분 | 기술 | 반영 위치 |
 |---|---|---|
 | 페르소나 | 시스템 공통(`_common.md`, BaseAgent 가 모든 프롬프트 앞에 붙임) + 에이전트별 역할 | `prompts/{simulator,verifier,composer}.md` |
-| Simulator | Few-shot (Brown et al. 2020): 판정 예시 3개 (feasible·Minor 1건, 대안이 있는 Major 1건, 주석 없는 원문·Oracle SQL 에서 경로는 지나가지만 참조만인 `reference_only` 1건). 예시는 가상 노드만 (정답셋 노드 금지) | `prompts/simulator.md` |
+| Simulator | Few-shot (Brown et al. 2020): 판정 예시 4개, tos 형 2 · swing 형 2 (feasible·Minor 1건, 대안이 있는 Major 1건, 주석 없는 원문·Oracle SQL 에서 경로는 지나가지만 참조만인 `reference_only` 1건, swing 온라인 연계 + 화면·배치 공유 노드 1건). 예시 1·2 는 swing 형일 때의 차이를 한두 줄 덧붙임. 예시는 가상 노드만 (정답셋 노드 금지) | `prompts/simulator.md` |
+| Simulator | 시스템 공통 판단 틀: 라벨이 아니라 역할·변경 지점 유형으로 판단하고, 시스템별 원문 형태는 표로만 구분 (1-3) | `prompts/simulator.md`, `agents/simulator.py` |
 | Simulator | 판정 순서 고정: 요건 항목별 바뀔 것 정리 → hop `[변경]`/`[참조]` 구분 → 영역 `impact_type` → 가능성·난이도 → 대안·경로 제외 | `prompts/simulator.md` |
 | 공통 (담당 범위) | 출력 전 자체 점검: 프롬프트마다 ID·근거·형식 점검 항목을 두고 하나라도 어긋나면 고친 뒤 출력. `_common.md` 는 파트너 에이전트와 공유하므로 넣지 않는다 | `prompts/{simulator,verifier,composer}.md` |
 | Verifier | 규칙 우선: 점검은 코드, LLM 은 `alternative_basis`(대안이 근거를 가리키는지)만 | `agents/verifier.py`, `prompts/verifier.md` |
@@ -78,6 +79,8 @@
    - 같은 노드 순서의 경로는 하나로 합친다. 경로 id `P<item_id>-<n>`
    - `cross_domain`: 경로 노드의 `domain` 이 둘 이상 (swing ↔ tos, `rules.SM_PART_DOMAINS`)
    - DB hop 의 컬럼 단위 정보 (예정): DataAccess → Table hop 은 엣지 `columns` 를 LLM 입력에 넣는다. 요건 컬럼이 `WRITES.columns` 에 있으면 변경 후보, `READS.columns` 에만 있으면 조회 영향, 둘 다 없으면 "컬럼 미사용" (PL/SQL DBIO 하나가 여러 테이블을 다루기 때문)
+   - 노드 메타 한 줄 (예정): 경로 노드마다 시스템·역할과 판단에 쓰는 속성을 `[노드 메타]` 로 붙인다 (1-3 의 "LLM 에 넘길 속성" 열). 원문이 잘려도 화면 이미지·배치 주기·인터페이스·컬럼 타입·코드값은 보이게 하기 위해서다
+   - 영향 범위 (예정): 경로 노드마다 **진입점 수**(`explorer.paths` 에서 그 노드를 지나는 서로 다른 Entry 수)와 `is_common` 을 계산해 `[공유 노드]` 로 넘긴다 (1-3 (c))
 2. **영역 배정 (규칙, `rules.path_areas`)**: 1-1 영역 분류 규칙.
 3. **영향 판정 (LLM)**: 영역별로 경로·원문·요건 항목을 주고 `SimulatorDraft` 를 받는다.
    - hop 별 `impact` (이 노드에서 무엇이 바뀌는지 / 확인만 필요한지). 문장 앞에 `[변경]`(코드·데이터·구조를 고침) / `[참조]`(경로에 있지만 확인만) 를 붙이고, `[변경]` 은 원문 근거(분기·상수·SQL 위치)를 인용
@@ -88,11 +91,13 @@
    - 요청안과 대안이 갈리면 `requested_vs_alternative` (예: SC-001 신규 컬럼 추가 vs 기존 광고여부 변환). 원문에서 보일 때만
    - 요건과 무관한 경로는 **제외 제안** + 사유 (4단계 가드 통과 시에만 제외). 노드명·원문에 요건 키워드(상품명·코드값·컬럼·화면명)가 하나라도 보이면 제안하지 않음
    - 신규 요소 (예정): 그래프에 없는 컬럼·DBIO·배치·코드 데이터가 필요하면 `new_elements`(`suggested_id`·`area`·`reason`). 정답셋 `expected.new` 와 같은 형식이며, 있는 영역은 `impact_type=add` 가능
-   - 원문 읽는 법: 소스에 **주석이 없으므로** 노드 요약이 이름 수준이면 요약 대신 `code` 본문으로 판단한다 (프로그램: 조건 분기·하드코딩 상수·코드값·호출 / DBIO: Oracle SQL 의 `WHERE`·`JOIN`·`SELECT`·`INSERT`·`UPDATE`·`MERGE` 컬럼, `NVL`·`DECODE`·`CASE` 코드값, 바인드 변수 / 화면: 이벤트 사전 검증·메시지·표시 항목). 이름만으로 역할을 추측하지 않고, 잘린 원문은 단정하지 않는다
+   - 원문 읽는 법: 소스에 **주석이 없으므로** 노드 요약이 이름 수준이면 요약 대신 `code` 본문으로 판단한다 (프로그램: 조건 분기·하드코딩 상수·코드값·호출 / DBIO: Oracle SQL 의 `WHERE`·`JOIN`·`SELECT`·`INSERT`·`UPDATE`·`MERGE` 컬럼, `NVL`·`DECODE`·`CASE` 코드값, 바인드 변수 / 화면: 이벤트 사전 검증·메시지·표시 항목). 이름만으로 역할을 추측하지 않고, 잘린 원문은 단정하지 않는다. 역할별로 시스템마다 어디를 보는지는 1-3 (a)
+   - 변경 지점은 **유형**(코드 로직 / 화면 정의 / SQL / 스키마 / 데이터 / 연계)으로 먼저 분류하고, 유형에서 `impact_type`·난이도 행을 고른다 (1-3 (b)). 같은 요건이라도 시스템에 따라 변경 지점 유형이 다를 수 있다 (예: 배치 주기 = tos Job 정의 / swing `TB_BAT_JOB` 데이터)
 4. **판정 보정 (규칙)**: LLM 결과를 그대로 믿지 않는다.
    - 그래프에 없는 노드를 hop 에 넣으면 버린다 (경로는 골격 노드만). `new_elements.suggested_id` 가 이미 그래프에 있으면 신규가 아니므로 버린다 (예정)
    - 영역 hop 이 전부 `inferred` 이면 `feasible` 로 확정하지 않고 `review`
    - 영역 `confidence` = hop 이 모두 `confirmed` 일 때만 `confirmed`
+   - 영향 범위 보정 (예정): `[변경]` hop 이 공유 노드(진입점 2개 이상 또는 `is_common`)이면 그 영역 난이도를 최소 Medium 으로 올리고, 일정 영향 요인에 "공유 노드 회귀 테스트 (진입점 n개)" 를 넣는다 (1-3 (c))
    - **경로 제외 가드**: 하나라도 해당하면 제외 제안을 거절하고 경로를 남긴다.
      - 목표 역할에 도달한 경로(`stop_reason=target_reached`)의 마지막 노드에 근거(`confirmed`)가 있음
      - 사용자가 확정한 노드(`Mention.confirmed_node`)가 경로에 있음
@@ -138,8 +143,11 @@ Simulator·Verifier·Composer 가 같은 함수(`rules.path_areas`)를 쓴다.
 | Medium | 기존 테이블에 컬럼 추가 · 업무 로직 변경이 2개 이상 노드 · 화면 항목 추가 + 저장 로직 변경 · 신규 DBIO | `new_elements` 의 `COL:`·`DBIO:`, Logic·DataAccess 다수 |
 | Minor | 데이터·설정값·문구·이미지 변경 · 공통코드 값 추가 · 배치 주기(`cron`) 변경 · 단일 노드 변경 | Screen `images`, Column `code_values`, Batch `cron`, Table 데이터만 |
 
+- 영향 범위 보정 (1-3 (c)): `[변경]` 노드가 공유 노드(진입점 2개 이상 또는 `is_common`)이면 영역 난이도 최소 Medium. 프롬프트 기준표 Medium 행에 반영됨, 코드 보정(LLM 결과 강제)은 예정. 변경 노드가 몇 단계(depth)에 있는지는 난이도에 쓰지 않는다.
 - 요건 전체 난이도 (`simulator.requirement_difficulty(area_impacts)`, 출력 필드가 아니라 Composer 요약·정답셋 비교 때 계산): 영역 난이도 중 최고. 단 변경 영역 3개 이상 · 도메인 간 연계 → Major, Medium 이상 영역이 2개 → Medium 이상 (Minor 영역끼리는 개수로 올리지 않음).
 - 일정 영향 요인: 영역당 3개 이내 (Simulator), 레포트 전체 8개 + "외 n건" (Composer).
+
+규칙 반영: LLM 없을 때 db 영역은 `column_spec_change` Major · `data_add` Medium (`DB_DIFFICULTY_BY_CHANGE`), 프롬프트 기준표(`prompts/simulator.md`)도 같은 표. 아래 사례 모양은 `test_requirement_difficulty_ground_truth_shapes` 로 고정.
 
 정답셋 대조 (정답 `expected.areas`·`new` 에 기준표를 손으로 적용, 실행 결과 아님). 이전 기준(컬럼 추가 = Major, 변경 영역 2개 = Medium)에서 어긋난 5건:
 
@@ -152,6 +160,53 @@ Simulator·Verifier·Composer 가 같은 함수(`rules.path_areas`)를 쓴다.
 | SC-002 권한 만료 장애 | Major | Medium | Medium | **미해결** (9장) |
 
 나머지 11건은 두 기준 모두 일치한다.
+
+### 1-3. 시스템 공통 판단 틀 (tos · swing)
+
+Simulator 는 시스템을 나눠 판단하지 않는다. **역할 → 변경 지점 유형 → 영역·`impact_type`·난이도** 순서로 판단하고, 시스템 차이는 "원문에서 어디를 보는가"(아래 (a))에만 둔다. 프롬프트의 판정 순서 2단계(hop `[변경]`/`[참조]`)에서 이 표를 쓴다.
+
+**(a) 역할별로 원문에서 볼 곳**
+
+| 역할 | tos 원문 | swing 원문 | 볼 것 | LLM 에 넘길 속성 (`[노드 메타]`) |
+|---|---|---|---|---|
+| Entry · Screen | jsp + 연결 js | `.scr`: `AREA`·`INPUT`·`COMBO … CODE=`·`GRID … COLUMN … VISIBLE`·`EVENT … END EVENT`·`OPEN`/`POPUP`, 출력 화면은 `REPORT`·`BACKGROUND` | 입력·표시 항목, 표시 조건(`visible = …`), 이벤트 사전 검증·메시지, 호출 서비스, 출력 이미지 | `events`, `images` |
+| Entry · Batch | Job 정의(`steps`, `group`) + Pro*C `.pc` | `.bat`: `JOB`·`PROGRAM`·`LAUNCHER`·`SCHEDULE CRON`·`TARGET … WHERE`·`ON_ERROR` + 실행 함수(`program/*.pgm`) | 대상 조건, 주기, 처리 단계, 오류 처리, 연계 송신 단계 | `cycle`, `cron`, `program`, `steps`, `interfaces` |
+| EntryHandler | Controller 메서드 (`url`·`http_method`) | TP 함수 (화면 `EVENT` 가 `CALL`) | 입력 검증, 호출 순서, 트랜잭션 경계 | `url`, `interfaces`, `is_common` |
+| Logic | Service 메서드 | Module 함수, 프로그램 머리의 `CONST`, `THROW BizException('<코드>', '<메시지>')` | 조건 분기, 하드코딩 상수·상품 ID·코드값, 오류 코드·메시지, 호출하는 함수 | `interfaces`, `is_common` |
+| DataAccess | SQL (MyBatis XML · Pro*C `#n`), DBIO (배치 직접 호출) | DBIO = PL/SQL 패키지 `FUNCTION … RETURN SYS_REFCURSOR`(조회) / `PROCEDURE`(변경), 파라미터 `p_*` | `WHERE`·`JOIN`, `SELECT`·`INSERT`·`UPDATE`·`MERGE` 컬럼, `CASE`·`DECODE`·`NVL` 코드값 | 엣지 `READS`/`WRITES.columns`, `stmt_type`, `dbio_type` |
+| Table · Column | DDL + 정의서, 공통코드는 `TCP_CMM_CD` 테이블 데이터 | DDL(`table/*.sql`) + 정의서, 공통코드는 `TB_COMM_CD_DTL` 등록 데이터(`code/*.sql`) | 컬럼 타입·길이·NULL, 코드값 목록, 참조 관계 | `data_type`, `nullable`, `code_grp`, `code_values`, `REFERENCES.via` (tos) |
+| 인터페이스 | 배치 STEP 의 파일 송신 (`EAI_FILE_SEND IF-TOS-…`), 레이아웃 = 정의서 | 온라인 호출 `IfClient.send('<IF_ID>', {필드…})`, 정의서 `docs/swing/interface/*.if` | 송신 항목·레이아웃·호출 시점 | `interfaces` |
+
+**(b) 변경 지점 유형 → 영역·`impact_type`·난이도 행**
+
+| 변경 지점 유형 | 예 (tos / swing) | 영역 | 난이도 행 (1-2) |
+|---|---|---|---|
+| 코드 로직 (분기·상수·호출 추가) | Service 분기 / Module `IF`·`CONST`·`BizException` | 진입 영역 | 단일 노드 Minor, 2개 이상 노드 Medium |
+| 화면 정의 (항목·표시 조건·문구·이미지) | jsp·js / `.scr` `COLUMN … VISIBLE`, `LABEL`, `BACKGROUND` | screen | 문구·이미지·단일 노드 Minor, 항목 추가 + 저장 로직 Medium |
+| SQL (조건·조회 컬럼) | MyBatis·Pro*C SQL / PL/SQL DBIO | db | 단일 노드 Minor, 여러 SQL Medium |
+| 스키마 (DDL) | 컬럼 추가 / 길이·타입 / 신규 테이블 | db | 컬럼 추가 Medium, 길이·타입·신규 테이블·`REFERENCES` 컬럼 Major |
+| 데이터 (설정·코드·상품 등록) | `TCP_CMM_CD` 코드 / `TB_COMM_CD_DTL` 코드, `TB_BAT_JOB.CRON_EXPR` 주기, `TB_PROD` 상품 | db (데이터만 바뀌면 hop 은 Table·Column) | Minor |
+| 연계 (전문 항목·레이아웃) | 배치 파일 레이아웃 / `IfClient.send` 메시지 필드 | interface (+ 송신 노드의 영역) | 전문 레이아웃 변경 Major. 호출만 경로에 있고 전문이 같으면 `reference_only` (정답 M-2) |
+
+- 스키마 변경 없이 데이터만 바꾸는 요건(배치 주기·코드값·상품 등록)이 swing 에 많다. "DB 영역 변경 = 스키마 변경"으로 보지 않는다 (정답 L-1: db `modify` 이지만 Minor).
+- 하드코딩 상수(swing `CONST`, 상품 ID 리터럴)로 처리할지 데이터(공통코드·관계 테이블)로 처리할지가 갈리면 `requested_vs_alternative` 와 개발 체크리스트 "하드코딩 위치"로 낸다 (정답 M-2 관계유형 코드 설계안).
+
+**(c) 영향 범위 (공유 노드)**
+
+- 공유 노드 = 진입점이 2개 이상인 노드(서로 다른 Screen·Batch 가 호출) 또는 `is_common` 노드. swing 은 배치가 화면 서비스(TP)를 재사용하고(Batch→TP, 예: 구비서류 자동처리 → `joinComb`), Module 이 여러 TP 에서 호출되는 일이 많다.
+- `[변경]` hop 이 공유 노드이면 영역 난이도 최소 Medium, 일정 영향 요인 "공유 노드 회귀 테스트 (진입점 n개)", 개발 체크리스트 "함께 영향받는 진입점".
+- 근거 (정답셋 16건, 그래프 전체 기준 진입점 수): Minor 정답(L-1~4, SC-005·006)의 변경 코드 노드는 진입점 1개 이하. 진입점 2개 이상인 노드를 바꾸는 정답(H-1 `validateCombMbr` 3개·`joinComb` 2개, H-2 `checkScrbAvail` 4개, M-2 `termProd` 2개, M-3 `selectRentEqpList` 3개)은 모두 Medium 이상. 이 규칙으로 어긋나는 정답은 없다.
+- 진입점 수는 Explorer 가 찾은 경로 안에서 센다 (그래프 전체보다 적을 수 있음 → 적게 세는 쪽이라 난이도를 과하게 올리지 않는다).
+- 공통 노드 자체는 Explorer 가 확장하지 않으므로(6-3), 공통 노드를 **바꾸는** 요건은 경로 끝에 공통 노드만 남는다. 이때도 같은 보정을 쓴다.
+
+**(d) 시스템별로 영역 모양이 다른 곳**
+
+| 영역 | tos | swing | 판단 |
+|---|---|---|---|
+| batch | Job → SQL/DBIO 직접 (Logic 없음), 연계 송신이 배치 STEP | Job → 실행 함수 → Module·TP·DBIO, 기동기(`LAUNCHER`)가 실행 이력 DBIO 기록, 주기는 `TB_BAT_JOB` 데이터 | 기동기 경로(`DBIO:BatJobSql.*`)는 주기·실행 이력 요건일 때만 `[변경]`, 나머지는 `[참조]` 또는 제외 후보 |
+| interface | 파일 연계 (배치) | 온라인 연계 (TP·배치에서 `IfClient.send`) | swing 화면 경로에도 interface 영역이 붙는다. 송신 항목이 바뀌지 않으면 `reference_only` |
+| screen | Screen → Controller | Screen → TP (TP → TP 호출 있음), 출력 화면(`RR`) 은 이미지·필드 배치만 | 출력 화면 이미지 교체는 Screen 단독 경로로 충족 (정답 L-2) |
+| db | SQL 하나 = 문장 하나, `REFERENCES` 있음 | DBIO 하나가 여러 테이블 접근 가능, `REFERENCES` 없음 | swing 컬럼 변경의 참조 테이블은 분석 한계로 남긴다 |
 
 **출력 `SimulationOutput`**: `area_impacts[AreaImpact{area, impact_type, paths[ImpactPath], feasibility, difficulty, difficulty_basis, schedule_factors, infeasible_reason, alternatives, confidence, new_elements(예정)}]`, `requested_vs_alternative`, `unverified_segments`, `dropped_paths`
 
@@ -379,7 +434,7 @@ pytest (LLM·Neo4j 불필요, 가짜 LLM `Fixed` 또는 LLM 없음, tos·swing �
 
 | 대상 | 확인 |
 |---|---|
-| Simulator | 경로 골격(노드 순서·엣지 유형·evidence_ref·확신도), 역할 기준 영역 배정, 경로 모양(`OPENS`·Batch→TP·Screen 단독·Table 시작·고립 노드), 그래프 밖 노드 제거, inferred 영역 review, 경로 제외 가드 3종, 난이도 기준, LLM 없음 출력 |
+| Simulator | 경로 골격(노드 순서·엣지 유형·evidence_ref·확신도), 역할 기준 영역 배정, 경로 모양(`OPENS`·Batch→TP·Screen 단독·Table 시작·고립 노드), 그래프 밖 노드 제거, inferred 영역 review, 경로 제외 가드 3종, 난이도 기준, 영향 범위 보정(tos·swing 각각 공유 노드 / 단일 진입점), `[노드 메타]` 에 시스템별 속성이 들어가는지, LLM 없음 출력 |
 | Verifier | 점검 항목별 보완 필요/통과, 필수 영역 표, `additional_scope` 형식, 같은 사유 반복 시 pass, 재계획 한도 (`test_supervisor`) |
 | Composer | 단순/복잡 필드 조립, SELECT 외 쿼리 차단, 체크리스트 id·후속 답변·stage 전이, `reanalysis_request`, 검토 제외 경로, markdown 렌더링 |
 | 전체 | `Supervisor.run` 이 Composer·KPI 까지 끝나고, 복잡 flow 도 KPI `evaluable=true` |
@@ -407,7 +462,7 @@ pytest (LLM·Neo4j 불필요, 가짜 LLM `Fixed` 또는 LLM 없음, tos·swing �
 ## 9. 남은 과제
 
 1. `new_elements` 반영: 스키마(`NewElement`) → Simulator 보정 → Verifier `evidence_missing` 예외 → Composer "신규 개발 요소" 절·체크리스트 → 프론트 목업
-2. Simulator: 난이도 규칙 조정(1-2) 코드 반영, DB hop 엣지 `columns`·노드 속성(`images`·`cron`·`code_values`·`data_type`)을 LLM 입력에, 고립 노드·swing REFERENCES 분석 한계
+2. Simulator 일반화 (1-3) 코드: `[노드 메타]`(1-3 (a) 속성·엣지 `columns`)·`[공유 노드]`(진입점 수·`is_common`) 입력 생성, 영향 범위 보정(공유 노드 `[변경]` → 최소 Medium) 코드 강제, 고립 노드·swing REFERENCES 분석 한계. 프롬프트(역할별 원문 표·변경 지점 유형·공유 노드·swing 형 예시 4)는 반영됨
 3. Verifier: 화면·배치 공유 TP 경고, 고립 노드 재계획 제외
 4. 난이도 기준 검증: 조정안은 손 대조 결과라 16건 실행 후 재확인. **SC-002(운영 장애, 정답 Major)는 기준표로 설명이 안 됨** → 운영 장애·권한 요건 가중 여부 결정
 5. 공통 노드 처리: 정답셋이 공통 노드를 `reference_only`·경로 시작으로 쓰는 경우(H-2·L-1·SC-003)와 Explorer 공통 제외 규칙을 맞출지 (파트너 합의)

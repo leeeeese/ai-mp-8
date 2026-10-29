@@ -35,7 +35,11 @@ DEFAULT_IMPACT = "영향 검토 필요"
 MAX_CONTEXT_PATHS = 40  # LLM 입력에 보여 줄 경로 수
 CONTEXT_LINES_PER_EVIDENCE = 12  # 노드당 원문 줄 수
 MAX_CONTEXT_CHARS = 16000  # 원문 블록 전체 문자 수 상한
-SCHEMA_CHANGE_TYPES = {ChangeType.COLUMN_SPEC_CHANGE, ChangeType.DATA_ADD}
+# LLM 이 없을 때 db 영역 난이도 (설계서 1-2): 컬럼 길이·타입 변경 Major, 저장 데이터 추가(기존 테이블 컬럼 추가) Medium
+DB_DIFFICULTY_BY_CHANGE: dict[ChangeType, tuple[Difficulty, str]] = {
+    ChangeType.COLUMN_SPEC_CHANGE: (Difficulty.MAJOR, "(규칙) 컬럼 길이·타입 변경"),
+    ChangeType.DATA_ADD: (Difficulty.MEDIUM, "(규칙) 기존 테이블에 컬럼 추가 가능"),
+}
 MAX_SCHEDULE_FACTORS = 3  # 영역당 일정 영향 요인 수
 DIFFICULTY_RANK = [Difficulty.MINOR, Difficulty.MEDIUM, Difficulty.MAJOR]
 
@@ -177,15 +181,18 @@ def rule_difficulty(area: Area, paths: list[ImpactPath], state: AgentState) -> t
     if not paths:
         return Difficulty.MINOR, "변경 경로 없음"
     types = {it.change_type for it in state.planner.items} if state.planner else set()
-    if area is Area.DB and types & SCHEMA_CHANGE_TYPES:
-        return Difficulty.MAJOR, "(규칙) DB 스키마 변경 가능 (컬럼 추가·길이·타입)"
+    if area is Area.DB and (rules := [DB_DIFFICULTY_BY_CHANGE[t] for t in types if t in DB_DIFFICULTY_BY_CHANGE]):
+        return max(rules, key=lambda r: DIFFICULTY_RANK.index(r[0]))
     if area is Area.INTERFACE:
         return Difficulty.MAJOR, "(규칙) 인터페이스 연계 변경"
     return Difficulty.MINOR, "(규칙) 영역 기준 해당 없음 (상세 판단은 원문 확인 필요)"
 
 
 def requirement_difficulty(areas: list[AreaImpact]) -> tuple[Difficulty, str]:
-    """요건 전체 난이도 = max(영역 난이도, 요건 기준). 요건 기준: 변경 영역 3개 이상·도메인 연계 → Major, 2개 → Medium 이상."""
+    """요건 전체 난이도 = max(영역 난이도, 요건 기준). 요건 기준: 변경 영역 3개 이상·도메인 연계 → Major.
+
+    Minor 영역끼리는 개수로 올리지 않는다 (설계서 1-2, 정답셋 L-1·L-3: Minor 영역 2개 → Minor).
+    """
     changed = [a for a in areas if a.impact_type in (ImpactType.ADD, ImpactType.MODIFY)]
     if not changed:
         return Difficulty.MINOR, "변경 영역 없음"
@@ -195,8 +202,6 @@ def requirement_difficulty(areas: list[AreaImpact]) -> tuple[Difficulty, str]:
         return Difficulty.MAJOR, f"변경 영역 {len(changed)}개 (3개 이상)"
     if any(p.cross_domain for a in changed for p in a.paths):
         return Difficulty.MAJOR, "도메인 간 연계"
-    if len(changed) == 2 and level is Difficulty.MINOR:
-        return Difficulty.MEDIUM, "변경 영역 2개"
     return level, basis
 
 

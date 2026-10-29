@@ -174,7 +174,7 @@ def test_rule_only_output():
     a = by_area(out)
     assert [x.area for x in out.area_impacts] == [Area.SCREEN, Area.DB, Area.INTERFACE, Area.BATCH]
     assert all(x.impact_type is ImpactType.MODIFY and x.feasibility is Feasibility.REVIEW for x in out.area_impacts)
-    assert a[Area.DB].difficulty is Difficulty.MAJOR and "스키마" in a[Area.DB].difficulty_basis  # data_add
+    assert a[Area.DB].difficulty is Difficulty.MEDIUM and "컬럼 추가" in a[Area.DB].difficulty_basis  # data_add
     assert a[Area.INTERFACE].difficulty is Difficulty.MAJOR
     assert a[Area.SCREEN].confidence is Confidence.CONFIRMED and a[Area.BATCH].confidence is Confidence.INFERRED
     assert all(h.impact == "영향 검토 필요" for x in out.area_impacts for p in x.paths for h in p.hops)
@@ -193,8 +193,35 @@ def test_rule_difficulty_by_area_count():
     assert a[Area.SCREEN].difficulty is Difficulty.MINOR and a[Area.DB].impact_type is ImpactType.NONE
     assert requirement_difficulty(out.area_impacts) == (Difficulty.MINOR, "영역 중 최고 (screen: (규칙) 영역 기준 해당 없음 (상세 판단은 원문 확인 필요))")
     out = SimulatorAgent(use_llm=False).run(make_state(paths=[(1, P_SCREEN, StopReason.TARGET_REACHED)], items=items))
-    assert by_area(out)[Area.SCREEN].difficulty is Difficulty.MINOR                         # 영역 난이도에 영역 수를 넣지 않음
-    assert requirement_difficulty(out.area_impacts) == (Difficulty.MEDIUM, "변경 영역 2개")  # 요건 전체에서 반영
+    assert by_area(out)[Area.SCREEN].difficulty is Difficulty.MINOR                 # 영역 난이도에 영역 수를 넣지 않음
+    assert requirement_difficulty(out.area_impacts)[0] is Difficulty.MINOR          # Minor 영역 2개는 Minor (정답셋 L-1·L-3)
+
+
+def test_rule_difficulty_column_spec_change():
+    items = [ExploreItem(item_id=1, text="컬럼 길이 변경", change_type=ChangeType.COLUMN_SPEC_CHANGE, mentions=[],
+                         target_role=R.ENTRY, direction=Direction.REVERSE, hop_cap=5),
+             ExploreItem(item_id=2, text="저장 항목 추가", change_type=ChangeType.DATA_ADD, mentions=[],
+                         target_role=R.TABLE, direction=Direction.FORWARD_THEN_REVERSE, hop_cap=10)]
+    out = SimulatorAgent(use_llm=False).run(make_state(items=items))
+    assert by_area(out)[Area.DB].difficulty is Difficulty.MAJOR                     # 길이·타입 변경이 더 무거움
+    assert "길이·타입" in by_area(out)[Area.DB].difficulty_basis
+
+
+@pytest.mark.parametrize(("case", "levels", "expected"), [
+    ("L-1 배치 주기", {Area.DB: Difficulty.MINOR, Area.BATCH: Difficulty.MINOR}, Difficulty.MINOR),
+    ("L-3 그리드 항목", {Area.SCREEN: Difficulty.MINOR, Area.DB: Difficulty.MINOR}, Difficulty.MINOR),
+    ("M-3 컬럼 추가", {Area.SCREEN: Difficulty.MINOR, Area.DB: Difficulty.MEDIUM}, Difficulty.MEDIUM),
+    ("H-1 3개 영역", {Area.SCREEN: Difficulty.MEDIUM, Area.DB: Difficulty.MINOR, Area.BATCH: Difficulty.MEDIUM},
+     Difficulty.MAJOR),
+    ("SC-001 인터페이스", {Area.INTERFACE: Difficulty.MAJOR, Area.BATCH: Difficulty.MEDIUM}, Difficulty.MAJOR),
+])
+def test_requirement_difficulty_ground_truth_shapes(case, levels, expected):
+    """정답셋 영역 판정 모양 (설계서 1-2 대조표). levels 에 없는 영역은 변경 없음."""
+    out = SimulatorAgent(use_llm=False).run(make_state())
+    for a in out.area_impacts:
+        a.impact_type = ImpactType.MODIFY if a.area in levels else ImpactType.REFERENCE_ONLY
+        a.difficulty = levels.get(a.area, Difficulty.MINOR)
+    assert requirement_difficulty(out.area_impacts)[0] is expected, case
 
 
 def test_requirement_difficulty():
