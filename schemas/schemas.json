@@ -1439,7 +1439,7 @@
           "$ref": "#/$defs/RequestType"
         },
         "business_terms": {
-          "description": "공통코드 매핑이 필요한 현업 용어 (예: 안보폰)",
+          "description": "공통코드·상품 코드 매핑이 필요한 현업 용어 (현업 약칭, 상품 별칭 등)",
           "items": {
             "type": "string"
           },

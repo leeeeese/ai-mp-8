@@ -23,7 +23,8 @@ from impact_agent.state import AgentState
 from test_explore import Fixed, analyze, item, plan
 
 NULLS = dict(item_id=None, terms=None, labels=None, node_ids=None, direction=None, target_role=None)
-R_NULLS = dict(item_id=None, node_ids=None, context_lines=None, target_role=None, direction=None, reason=None)
+R_NULLS = dict(item_id=None, node_ids=None, context_lines=None, target_role=None, direction=None, reason=None,
+               key_evidence=None)
 
 
 class ScriptLLM:
@@ -204,3 +205,20 @@ def test_reexplore_round_does_not_repeat_explorer_tokens(env):
                              explorer_llm=llm))
     runs = [r for r in state.agent_runs if r.agent == "explorer"]
     assert len(runs) == 2 and runs[0].input_tokens == 10 and runs[1].input_tokens is None
+
+
+def test_retriever_key_evidence_goes_first(env):
+    # finish 에서 고른 핵심 근거: 원문에 있는 줄이면 그 앞뒤를 잘라 [핵심] 근거로 맨 앞에, 원문에 없는 인용은 버림
+    from impact_agent.agents.retriever import KeyEvidence
+
+    finish = RetrieverDecision(thought="끝", action="finish", **{**R_NULLS, "key_evidence": [
+        KeyEvidence(node_id="SVC:OrdService.save", quote="saveItem();", note="저장은 saveItem 으로 이어진다"),
+        KeyEvidence(node_id="SVC:OrdService.save", quote="deleteAll(); // 원문에 없음", note="지어낸 인용")]})
+    mentions = [Mention(kind=MentionKind.SCREEN, phrase="주문 등록")]
+    state = analyze(sup_with(env, plan([item(ChangeType.DATA_ADD, mentions, Direction.FORWARD, NodeRole.TABLE)]),
+                             retriever_llm=ScriptLLM([finish])))
+    first = state.retriever.evidence[0]
+    assert first.summary == "[핵심] 저장은 saveItem 으로 이어진다" and first.node_id == "SVC:OrdService.save"
+    assert first.location == "L2-4" and "saveItem();" in first.content
+    assert sum(e.summary.startswith("[핵심]") for e in state.retriever.evidence) == 1
+    assert sum(e.node_id == "SVC:OrdService.save" for e in state.retriever.evidence) == 2  # 원래 근거도 유지

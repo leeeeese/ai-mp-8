@@ -4,7 +4,11 @@ LLM 은 요건 항목 분리·변경 유형·언급 표현(동의어·의미 힌
 복잡도는 프롬프트의 판정 예시로 기준을 준다 (Few-shot, Brown et al. 2020).
 재계획이면 이전 탐색 명세와 누적된 누락 사유(replan_feedback)를 함께 넘긴다 (Reflexion, Shinn et al. 2023).
 목표 역할·방향·hop 상한(rules.CHANGE_TYPE_RULES), 실행 계획, 탐색 영역(rules.SM_PART_DOMAINS)은 코드가 정한다.
-노드 ID 는 정하지 않는다 (그래프를 모르는 상태에서 판단).
+노드 ID 는 정하지 않는다 (그래프를 모르는 상태에서 판단). 복잡도는 요건 문장에서 확인되는 것만으로 판정한다.
+
+사용자 상세 분석 요청: 마지막 후속 입력이 reanalysis(결과 화면의 상세 분석 권장을 사용자가 확인)면
+LLM 판정과 관계없이 complex 로 정하고 실행 계획에 Simulator·Verifier 를 넣는다 (코드 규칙, docs/planner_detail_analysis_to-be.md).
+Verifier 재계획 라운드(이전 판정 complex + replan_feedback)도 complex 를 유지한다 (복잡 흐름 도중 단순 응답으로 빠지지 않게).
 """
 
 from pydantic import BaseModel, Field
@@ -17,6 +21,7 @@ from ..schemas import (
     Complexity,
     ExcludeOption,
     ExploreItem,
+    FollowupType,
     Mention,
     MentionKind,
     OpenItem,
@@ -102,6 +107,28 @@ def build_output(draft: PlannerDraft, state: AgentState) -> PlannerOutput:
     )
 
 
+REANALYSIS_REASON = "사용자 상세 분석 요청"
+REPLAN_REASON = "재계획 (복잡 흐름 유지)"
+
+
+def apply_reanalysis(out: PlannerOutput, state: AgentState) -> PlannerOutput:
+    """사용자 상세 분석 요청(마지막 후속 입력 reanalysis) 또는 Verifier 재계획이면 complex 로 정하고 Simulator·Verifier 를 넣는다."""
+    last = state.followups[-1] if state.followups else None
+    if last is not None and last.type is FollowupType.REANALYSIS:
+        prefix = f"{REANALYSIS_REASON}: {last.content.strip()}"
+    elif state.replan_feedback and state.planner is not None and state.planner.complexity is Complexity.COMPLEX:
+        prefix = f"{REPLAN_REASON} {len(state.replan_feedback)}차"
+    else:
+        return out
+    if out.complexity is not Complexity.COMPLEX:
+        out.complexity_reason = f"{prefix} / (LLM 판단 {out.complexity.value}) {out.complexity_reason}"
+    else:
+        out.complexity_reason = f"{prefix} / {out.complexity_reason}"
+    out.complexity = Complexity.COMPLEX
+    out.plan = [PlanStep(agent=a, purpose=p) for a, p in PLAN_STEPS[Complexity.COMPLEX]]
+    return out
+
+
 def user_message(state: AgentState) -> str:
     lines = [f"[SM 선택] {state.user_input.sm_part.value}", "[요청]", state.user_input.request_text.strip()]
     if state.followups:
@@ -134,4 +161,4 @@ class PlannerAgent(BaseAgent[PlannerOutput]):
 
     def run(self, state: AgentState) -> PlannerOutput:
         draft, self.last_usage = self.llm.parse(self.system_prompt, user_message(state), PlannerDraft)
-        return build_output(draft, state)
+        return apply_reanalysis(build_output(draft, state), state)

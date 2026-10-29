@@ -12,6 +12,8 @@
   탐색 범위(Explorer 노드) 안은 직접 더 읽고, 범위 밖 연결은 next_target 재탐색 요청으로만 넘긴다.
   같은 노드를 다시 읽으면 이미 보여 준 줄 다음부터 이어서 보여 주고, 끝까지 본 노드는 tool 을 부르지 않고 오류로 돌려준다.
   경로 테이블의 컬럼(경로에 없는 것)을 입력에 함께 보여 줘, 원문이 쓰는 컬럼을 재탐색으로 그래프 경로에 되돌린다.
+- 핵심 근거: ReAct 를 끝낼 때 LLM 이 판단에 꼭 필요한 원문 위치(노드 + 원문에서 그대로 옮긴 코드 한 줄 + 사실 한 문장)를 고르면,
+  그 줄 앞뒤만 잘라 "[핵심]" 근거로 만들어 근거 목록 맨 앞에 둔다 (뒤 단계는 근거마다 앞부분만 보므로, 깊은 곳의 근거도 전달되게).
 근거 요약은 노드 설명·코멘트를 쓴다.
 """
 
@@ -45,6 +47,16 @@ MAX_BOUNDARY = 30  # ReAct 입력에 보여 줄 경로 밖 연결 수
 MAX_TABLE_COLUMNS_CHARS = 2500  # ReAct 입력의 경로 테이블 컬럼 목록 길이
 OBSERVATION_CHARS = 2400  # read_source 결과 길이 (노드 여러 개면 나눠 씀)
 SINGLE_NODE_OBSERVATION_CHARS = 6000  # 노드 1개만 읽을 때
+MAX_KEY_EVIDENCE = 5
+KEY_BEFORE, KEY_AFTER = 3, 8  # 핵심 근거로 잘라 낼 줄 (찾은 줄 앞뒤)
+KEY_TAG = "[핵심]"
+ATTACHED = re.compile(r"^// ---- (.+?) ----$")
+
+
+class KeyEvidence(BaseModel):
+    node_id: str = Field(description="탐색 범위 안 노드")
+    quote: str = Field(description="Observation 에 나온 원문 코드 한 줄을 그대로 (20~120자)")
+    note: str = Field(description="그 줄로 확인한 사실 한 문장")
 
 
 class RetrieverDecision(BaseModel):
@@ -58,6 +70,7 @@ class RetrieverDecision(BaseModel):
     target_role: NodeRole | None = Field(description="request_reexplore: 다음 목표 역할")
     direction: Literal["forward", "reverse"] | None = Field(description="request_reexplore: 탐색 방향")
     reason: str | None = Field(description="request_reexplore: 원문에서 본 연결 근거 (파일·위치)")
+    key_evidence: list[KeyEvidence] | None = Field(description="finish: 뒤 단계가 꼭 봐야 할 원문 위치 1~5개. 그 외 null")
 
 
 class RetrieverAgent(BaseAgent[RetrieverOutput]):
@@ -179,6 +192,11 @@ class RetrieverAgent(BaseAgent[RetrieverOutput]):
             max_steps=RETRIEVER_MAX_REACT_STEPS, max_observation=observation_len)
         out.react_trace = trace
         out.tool_call_count = max(out.tool_call_count, base)
+        keys = [k for k in (trace[-1].args.get("key_evidence") or []) if isinstance(k, dict)] if trace else []
+        explored = {n.node_id for n in state.explorer.nodes}
+        found = [ev for k in keys[:MAX_KEY_EVIDENCE] if k.get("node_id") in explored
+                 and (ev := self._key_evidence(k, out.evidence)) is not None]
+        out.evidence = found + out.evidence
 
     def _react_context(self, state: AgentState, out: RetrieverOutput) -> str:
         exp, plan = state.explorer, state.planner
@@ -240,6 +258,32 @@ class RetrieverAgent(BaseAgent[RetrieverOutput]):
             used += len(line)
             lines.append(line)
         return lines
+
+    def _key_evidence(self, key: dict, evidence: list[Evidence]) -> Evidence | None:
+        """quote 가 나오는 줄 앞뒤를 잘라 [핵심] 근거로. 원문에 없는 quote(지어낸 인용)는 버린다."""
+        quote = " ".join(str(key.get("quote") or "").split())
+        if len(quote) < 8:
+            return None
+        for e in evidence:
+            if e.node_id != key["node_id"] or e.summary.startswith(KEY_TAG):
+                continue
+            # 근거 원문 = 본문 + "// ---- <파일> ----" 로 붙은 파일들. 줄 번호는 파일별로 센다
+            part_file, part_start, lines = e.file_path, _start_line(e), (e.content or "").splitlines()
+            prefix = e.file_path[: -len(node.source_file)] if (node := self.store.node(e.node_id)) and node.source_file \
+                and e.file_path.endswith(node.source_file) else ""
+            offset = 0
+            for i, ln in enumerate(lines):
+                if (m := ATTACHED.match(ln)):
+                    part_file, part_start, offset = prefix + m.group(1), 1, i + 1
+                    continue
+                if quote in " ".join(ln.split()):
+                    end = next((j - 1 for j in range(i + 1, len(lines)) if ATTACHED.match(lines[j])), len(lines) - 1)
+                    lo, hi = max(i - KEY_BEFORE, offset), min(i + KEY_AFTER, end)
+                    return Evidence(node_id=e.node_id, file_path=part_file,
+                                    location=f"L{part_start + lo - offset}-{part_start + hi - offset}",
+                                    summary=f"{KEY_TAG} {key.get('note') or ''}".strip(), symbol=e.symbol,
+                                    source_kind=e.source_kind, domain=e.domain, content="\n".join(lines[lo:hi + 1]))
+        return None
 
     def _fully_shown(self, node_id: str, out: RetrieverOutput) -> bool:
         evs = [e for e in out.evidence if e.node_id == node_id]
@@ -320,11 +364,12 @@ def _start_line(e: Evidence) -> int:
 
 
 def _merge(evidence: list[Evidence]) -> list[Evidence]:
-    """같은 노드·파일·종류의 근거는 가장 넓은 범위(원문이 긴 것) 하나만 남긴다. 처음 나온 순서 유지."""
+    """같은 노드·파일·종류의 근거는 가장 넓은 범위(원문이 긴 것) 하나만 남긴다 ([핵심] 근거는 위치별로 따로). 처음 나온 순서 유지."""
     best: dict[tuple, Evidence] = {}
     for e in evidence:
-        k = (e.node_id, e.file_path, e.source_kind)
+        k = (e.node_id, e.file_path, e.source_kind, e.location if e.summary.startswith(KEY_TAG) else None)
         if k not in best or len(e.content or "") > len(best[k].content or ""):
             best[k] = e
-    order = list(dict.fromkeys((e.node_id, e.file_path, e.source_kind) for e in evidence))
+    order = list(dict.fromkeys((e.node_id, e.file_path, e.source_kind, e.location if e.summary.startswith(KEY_TAG) else None)
+                               for e in evidence))
     return [best[k] for k in order]

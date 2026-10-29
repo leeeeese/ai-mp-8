@@ -6,6 +6,7 @@
                                                                                               └(통과·한도 초과)→ composer
 
 - 재계획 사유(Verifier 의 reason·additional_scope)는 replan_feedback 에 누적해 Planner 가 다음 계획에 반영한다 (Reflexion).
+- Planner 실행마다(첫 분석·Verifier 재계획·사용자 재분석) 탐색 루프 수와 tool 호출 한도를 새로 시작한다.
 - Planner 가 탐색 항목을 하나도 만들지 않으면(분석 대상 없음) 탐색·시뮬레이션 없이 Composer 로 바로 간다.
 - 재탐색은 남은 tool 호출이 MIN_CALLS_FOR_REEXPLORE 이상일 때만 (Explorer 탐색 + Retriever 새 노드 읽기). 한도 계산은 AgentState.tools_left 하나.
 - 상태(AgentState)는 checkpointer 에 세션(thread_id)별로 보관해 후속 입력에 재사용한다. 후속 입력은 최근 MEMORY_WINDOW_N 개만 유지.
@@ -145,6 +146,7 @@ class Supervisor:
         state.planner = self._call("planner", self.planner, state)
         self._apply_confirmed(state)
         state.explore_loop_count = 0
+        state.tool_call_count = 0  # Planner 실행(첫 분석·재계획·재분석)마다 새 분석 라운드 → tool 한도도 새로 (누적은 agent_runs)
         state.explorer = state.retriever = None  # 재계획 라운드는 새로 탐색
         return _updates(state)
 

@@ -8,6 +8,9 @@
     forward_then_reverse  정방향으로 목표(수정 대상)를 찾고, 그 대상(언급된 컬럼이 있으면 그 컬럼)에서 진입점까지 역방향
 - 재탐색: Retriever 의 reexplore_request 를 받아 이전 결과에 이어 붙인다 (hop 상한으로 끊긴 경로는 이어서 하나로 합침)
 - out_of_graph·매칭 실패·신규 후보는 unresolved 로 넘긴다
+- 경로 정리 (_arrange_paths, 규칙 단계·ReAct·재탐색 뒤마다): 같은 처리에서 컬럼만 다른 경로는 언급·선택된 컬럼만 남기고 테이블까지로 합치고,
+  다른 경로 안에 그대로 들어 있는 짧은 경로는 뺀 뒤, 보완(ReAct·재탐색)으로 찾은 경로 → 진입점에서 시작 → 목표 도달 순으로 항목을 번갈아 정렬한다.
+  뒤 단계(Retriever 읽기 상한, Simulator 입력 경로 수 상한)는 앞쪽 경로부터 쓰므로 순서가 곧 전달 우선순위다.
 - ReAct 보완 (Yao et al. 2023, LLM 이 있을 때 첫 라운드만): 규칙 탐색 결과를 Observation 으로 주고,
   LLM 이 Thought → Action(search_graph_nodes / traverse_graph / get_node_detail / finish) 을 골라 매칭 실패·끊긴 경로를 보완한다.
   규칙 결과에서 점검 신호(매칭 실패·목표 미도달·진입점 없음·언급 값의 컬럼 없음·공통 제외)를 먼저 계산해,
@@ -44,6 +47,7 @@ from ..schemas import (
 )
 from ..state import AgentState
 from ..tools import GraphStore, get_graph_store, get_node_detail, search_graph_nodes, traverse_graph
+from ..tools.graph import term_score
 from .base import BaseAgent
 from .react import InvalidAction, run_react
 
@@ -51,7 +55,8 @@ MIN_SCORE = 0.5  # 이보다 낮은 후보는 시작 노드로 쓰지 않음
 RELATIVE_SCORE = 0.8  # 1등 점수 대비 이 비율 이상인 후보까지 시작 노드로 채택
 MAX_START_PER_MENTION = 3
 MAX_CONTEXT_PATHS = 40  # ReAct 입력에 보여 줄 경로 수
-VALUE_MENTIONS = {MentionKind.COLUMN, MentionKind.TERM}  # 값·여부·코드·사유를 말하는 언급 (컬럼까지 확인 대상)
+VALUE_MENTIONS = {MentionKind.COLUMN, MentionKind.TERM}
+FOCUS_COLUMN_SCORE = 1.0  # 경로 정리 때 남길 컬럼: 언급 표현(동의어 포함)이 이름·설명에 통째로 들어 있음 (2글자 일치는 "여부" 같은 흔한 말에 걸림)  # 값·여부·코드·사유를 말하는 언급 (컬럼까지 확인 대상)
 
 
 class ExplorerDecision(BaseModel):
@@ -104,16 +109,21 @@ class ExplorerAgent(BaseAgent[ExplorerOutput]):
         requests = state.retriever.reexplore_request if state.retriever else []
         if state.explorer is not None and requests:
             out = state.explorer.model_copy(deep=True)
+            before = len(out.paths)
             for req in requests:
                 self._guard(out, lambda: self._reexplore(req, plan, out))
+            self._arrange_paths(plan, out, supplements=out.paths[before:])
         else:
             out = ExplorerOutput(start_nodes=[], nodes=[], edges=[])
             for item in plan.items:
                 self._guard(out, lambda: self._explore_item(item, plan, out))
+            self._arrange_paths(plan, out)
             signals = self._signals(plan, out)
             if self.llm is not None and signals and self._budget - self._calls > RESERVED_FOR_RETRIEVER:
                 self._reserve = RESERVED_FOR_RETRIEVER
+                before = len(out.paths)
                 self._guard(out, lambda: self._react(plan, out, signals))
+                self._arrange_paths(plan, out, supplements=out.paths[before:])
         out.tool_call_count = self._calls
         out.hops_used = max((r.hops_used for r in out.item_results), default=0)
         return out
@@ -246,6 +256,57 @@ class ExplorerAgent(BaseAgent[ExplorerOutput]):
                 continue
             out.paths.append(ExplorePath(item_id=item_id, nodes=nodes, direction=direction,
                                          reached_role=p.reached_role, stop_reason=p.stop_reason))
+
+    def _arrange_paths(self, plan: PlannerOutput, out: ExplorerOutput, supplements: list[ExplorePath] = ()) -> None:
+        focus = {s.node_id for s in out.start_nodes}  # 언급으로 찾았거나 ReAct·재탐색이 고른 노드
+        boosted = {(p.item_id, tuple(p.nodes)) for p in supplements}
+        terms = {it.item_id: [t for m in it.mentions for t in (m.phrase, *m.synonyms)] for it in plan.items}
+
+        def mentioned(item_id: int, node_id: str) -> bool:
+            """시작 노드이거나, 요건 언급(동의어 포함)이 이름·설명(컬럼 코멘트 포함)에 통째로 들어 있는 노드."""
+            node = self.store.node(node_id)
+            text = (node.properties.get("search_text") or node.name) if node else ""
+            return node_id in focus or any(term_score(t, text) >= FOCUS_COLUMN_SCORE for t in terms.get(item_id, []))
+
+        # 1) 같은 처리(마지막 컬럼만 다름)에서 갈라진 컬럼 경로: 고른 컬럼만 남기고, 고른 것이 없으면 테이블까지 한 경로로
+        groups: dict[tuple, list[ExplorePath]] = {}
+        for p in out.paths:
+            if len(p.nodes) > 1 and (n := self.store.node(p.nodes[-1])) and n.label == "Column":
+                groups.setdefault((p.item_id, tuple(p.nodes[:-1])), []).append(p)
+        merged: list[ExplorePath] = []
+        for p in out.paths:
+            key = (p.item_id, tuple(p.nodes[:-1]))
+            group = groups.get(key) if len(p.nodes) > 1 else None
+            if not group or len(group) == 1 or mentioned(p.item_id, p.nodes[-1]):
+                merged.append(p)
+            elif (p is next((g for g in group if not mentioned(g.item_id, g.nodes[-1])), None)
+                  and not any(mentioned(g.item_id, g.nodes[-1]) for g in group)):
+                merged.append(p.model_copy(update={"nodes": p.nodes[:-1], "reached_role": NodeRole.TABLE}))
+                if (p.item_id, tuple(p.nodes)) in boosted:
+                    boosted.add((p.item_id, tuple(p.nodes[:-1])))
+
+        # 2) 같은 항목의 다른 경로 안에 연속으로 그대로 들어 있는 경로·중복 경로는 뺀다
+        def inside(a: list[str], b: list[str]) -> bool:
+            return len(a) < len(b) and any(b[i:i + len(a)] == a for i in range(len(b) - len(a) + 1))
+        kept, seen = [], set()
+        for p in merged:
+            key = (p.item_id, tuple(p.nodes))
+            if key in seen or any(q.item_id == p.item_id and inside(p.nodes, q.nodes) for q in merged):
+                continue
+            seen.add(key)
+            kept.append(p)
+
+        # 3) 항목마다 우선순위로 정렬하고 항목을 번갈아 배치
+        def rank(p: ExplorePath) -> tuple:  # 보완 경로 → 언급 노드를 많이 지남 → 진입점에서 시작 → 목표 도달 → 긴 경로
+            entry = (n := self.store.node(p.nodes[0])) is not None and n.role is NodeRole.ENTRY
+            hits = sum(n in focus for n in p.nodes)
+            return ((p.item_id, tuple(p.nodes)) not in boosted, -hits, not entry,
+                    p.stop_reason is not StopReason.TARGET_REACHED, -len(p.nodes))
+        by_item: dict[int, list[ExplorePath]] = {}
+        for p in kept:
+            by_item.setdefault(p.item_id, []).append(p)
+        queues = [sorted(ps, key=rank) for _, ps in sorted(by_item.items())]
+        out.paths = [q[i] for i in range(max(map(len, queues), default=0)) for q in queues if i < len(q)]
 
     def _update_result(self, out: ExplorerOutput, result: ItemExploreResult) -> None:
         mine = [p for p in out.paths if p.item_id == result.item_id]

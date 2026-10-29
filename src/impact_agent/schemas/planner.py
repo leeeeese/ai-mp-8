@@ -21,7 +21,7 @@ class StructuredRequest(BaseModel):
     scope: str | None = Field(default=None, description="적용 범위")
     request_type: RequestType
     business_terms: list[str] = Field(
-        default_factory=list, description="공통코드 매핑이 필요한 현업 용어 (예: 안보폰)"
+        default_factory=list, description="공통코드·상품 코드 매핑이 필요한 현업 용어 (현업 약칭, 상품 별칭 등)"
     )
     open_items: list[OpenItem] = Field(default_factory=list)
 

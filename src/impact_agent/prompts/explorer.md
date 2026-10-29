@@ -24,8 +24,18 @@
 3. **시작 노드가 엉뚱함**: 시작 노드 이름·설명이 요건 업무 영역과 다름 → 더 맞는 후보를 검색해 그 노드에서 `traverse_graph`.
 4. **진입점이 없음**: 항목의 경로가 모두 처리 노드(EntryHandler·Logic)에서 시작해 화면·배치(Entry)가 없음 → 그 처리 노드에서 `reverse`, 목표 `Entry`. 현업은 화면·배치 단위로 확인하므로 진입점이 빠지면 영향 범위를 설명할 수 없다.
 5. **요건이 말한 값의 컬럼이 없음**: 경로가 테이블에서 끝났는데, 요건이 특정 값·여부·코드·사유를 말함 → 그 테이블의 컬럼을 `search_graph_nodes`(labels `["Column"]`, 요건 표현과 시스템 용어) 로 찾아 해당 컬럼까지 `traverse_graph` (목표 `Column`).
-6. **공통으로 빠진 노드가 요건 대상임**: `[공통이라 확장 안 함]` 노드가 요건이 바꾸거나 묻는 문구·코드값·코드명을 다룸 (예: 공통코드 조회) → 그 노드에서 직접 `traverse_graph` (시작 노드는 공통 제외의 예외). 요건과 무관한 공통 유틸은 그대로 둔다.
+6. **공통으로 빠진 노드가 요건 대상임**: `[공통이라 확장 안 함]` 노드가 요건이 바꾸거나 묻는 문구·코드값·코드명을 다룸 (예: 공통코드 조회, 여러 업무가 쓰는 공통 계산 모듈) → 그 노드에서 직접 `traverse_graph` (시작 노드는 공통 제외의 예외). 요건과 무관한 공통 유틸은 그대로 둔다.
 7. 위가 모두 해당 없으면 바로 `finish`. **결과가 충분하면 tool 을 더 부르지 않는 것이 정답이다.**
+
+### 영역별 노드 유형 (역할이 같으면 탐색 규칙도 같다)
+
+| 역할 | 마케팅 (tos) | 상품 (swing) |
+|---|---|---|
+| Entry | Screen(JSP·JS), Batch(Job + Pro*C) | Screen(.scr 이벤트), Batch(JOB) |
+| EntryHandler | Controller (`CTL:`) | TP (`TP:`) |
+| Logic | Service (`SVC:`) | Module (`MOD:`) — 없이 TP 가 DBIO 를 바로 부르는 경로도 정상 |
+| DataAccess | SQL (`SQL:` MyBatis·Pro*C), DBIO | DBIO (`DBIO:` PL/SQL 패키지 함수, SQL 조건 로직이 여기 있음) |
+| Table / Column | `TBL:` / `COL:` | `TBL:` / `COL:` |
 
 ### tool
 - `search_graph_nodes(terms, labels)`: 노드명·설명·컬럼 코멘트·용어사전 검색. 영역은 시스템이 SM 선택으로 정한다.
@@ -40,9 +50,12 @@
 - 사용하지 않는 필드는 null.
 - `traverse_graph` 의 `node_ids` 는 Observation 이나 입력에 나온 ID 만 쓴다.
 
-## 예시 (가상 그래프, 형식 참고용)
+## 예시 (가상 그래프, 형식 참고용. 영역마다 하나)
+
+### 예시 A — 마케팅 (tos)
 
 입력 요지: 항목 1 `data_add` → 목표 Table. 언급 `Column:자동이체 미신청 여부 [신규 가능]` 매칭 실패, `Screen:요금 안내 화면` 은 `SCR:BIL0100` 에서 `nearest_role` 로 `CTL:BilController.init` 에서 멈춤.
+`[점검 신호]` ① 매칭 실패, ② 목표 미도달.
 
 ```
 Thought 1: 미신청 여부는 신규 값이라 노드가 없다. 반대 개념인 자동이체 신청 정보가 저장된 컬럼을 찾아 저장 테이블을 확인한다.
@@ -56,4 +69,17 @@ Action 3: traverse_graph {"item_id": 1, "node_ids": ["CTL:BilController.save"], 
 Observation 3: target_reached: CTL:BilController.save > SVC:BilService.save > SQL:BilMapper.update > TBL:TBL_PAY_MTHD
 Thought 4: 저장 테이블과 기존 신청 여부 컬럼을 확인했다. 더 볼 근거가 없다.
 Action 4: finish
+```
+
+### 예시 B — 상품 (swing)
+
+입력 요지: 항목 1 `logic_change` → 목표 Logic. 언급 `Function:할부금 계산` 은 `MOD:InstSvc.calcInstAmt` 에 매칭, 경로는 `MOD:InstSvc.calcInstAmt > DBIO:InstSql.selectInstRate > TBL:TB_INST_RATE` 뿐.
+`[점검 신호]` ④ 진입점 없음.
+
+```
+Thought 1: 계산 모듈에서만 시작해 어느 화면·배치가 이 계산을 쓰는지 없다. 모듈에서 진입점까지 역방향으로 찾는다.
+Action 1: traverse_graph {"item_id": 1, "node_ids": ["MOD:InstSvc.calcInstAmt"], "direction": "reverse", "target_role": "Entry"}
+Observation 1: target_reached: SCR:ZORDSS0100010 > TP:OrdScrbSvc.joinDvc > MOD:InstSvc.calcInstAmt / target_reached: BAT:ZBILBB0100010 > TP:BillSvc.makeInstBill > MOD:InstSvc.calcInstAmt
+Thought 2: 가입 화면과 청구 배치가 같은 계산을 쓴다. 계산을 바꾸면 두 진입점 모두 영향이므로 경로로 충분하다.
+Action 2: finish
 ```

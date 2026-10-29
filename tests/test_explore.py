@@ -273,3 +273,28 @@ def test_same_search_runs_once(env):
     state = analyze(supervisor(env, plan(items)))
     assert state.explorer.tool_call_count == 3  # 검색 1 + 항목별 탐색 2
     assert {s.item_id for s in state.explorer.start_nodes} == {1, 2}
+
+
+def test_column_fanout_is_merged_unless_mentioned(env):
+    # 같은 처리에서 컬럼만 다른 경로는 테이블까지 한 경로로 합치고, 요건이 말한 컬럼은 남긴다
+    screen = [Mention(kind=MentionKind.SCREEN, phrase="주문 등록")]
+    state = analyze(supervisor(env, plan([item(ChangeType.STRUCTURE_QUERY, screen, Direction.FORWARD, NodeRole.COLUMN)])))
+    ends = [p.nodes[-1] for p in state.explorer.paths if p.stop_reason is StopReason.TARGET_REACHED]
+    assert ends == ["TBL:TOR_ORD"]  # (공통이라 멈춘 CmmCd 경로는 그대로)
+    assert {"COL:TOR_ORD.ADVT_YN", "COL:TOR_ORD.ORD_ID"} <= {n.node_id for n in state.explorer.nodes}  # 노드는 유지
+
+    mentioned = screen + [Mention(kind=MentionKind.TERM, phrase="광고여부")]
+    state = analyze(supervisor(env, plan([item(ChangeType.STRUCTURE_QUERY, mentioned, Direction.FORWARD, NodeRole.COLUMN)])))
+    assert "COL:TOR_ORD.ADVT_YN" in [p.nodes[-1] for p in state.explorer.paths]
+    assert "COL:TOR_ORD.ORD_ID" not in [p.nodes[-1] for p in state.explorer.paths]
+
+
+def test_paths_alternate_items_and_drop_contained(env):
+    a = item(ChangeType.DATA_ADD, [Mention(kind=MentionKind.SCREEN, phrase="주문 등록")], Direction.FORWARD, NodeRole.TABLE)
+    b = item(ChangeType.BATCH_CHANGE, [Mention(kind=MentionKind.BATCH, phrase="주문 전송 배치")], Direction.FORWARD,
+             NodeRole.DATA_ACCESS).model_copy(update={"item_id": 2})
+    state = analyze(supervisor(env, plan([a, b])))
+    assert [p.item_id for p in state.explorer.paths][:2] == [1, 2]  # 항목을 번갈아
+    paths = [p.nodes for p in state.explorer.paths]
+    assert not any(len(x) < len(y) and any(y[i:i + len(x)] == x for i in range(len(y))) for x in paths for y in paths)
+

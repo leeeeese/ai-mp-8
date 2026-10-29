@@ -124,3 +124,39 @@ def test_reexplore_needs_budget_left():
                                                  tool_call_count=config.MAX_TOOL_CALLS - MIN_CALLS_FOR_REEXPLORE + 1))
     run(sup)
     assert sup.explorer.calls == 1
+
+
+def test_reanalysis_followup_runs_detail_analysis():
+    # simple 결과 → 사용자 상세 분석 요청(reanalysis) → Planner complex 강제 → Simulator·Verifier → 복잡 결과물
+    from impact_agent.agents import PlannerAgent
+    from impact_agent.schemas import FollowupInput, FollowupType
+    from test_planner import FakeLLM
+
+    sup = make_supervisor(Complexity.SIMPLE)
+    sup.planner = PlannerAgent(llm=FakeLLM(Complexity.SIMPLE))
+    seen = []
+    sup.composer = Fake(lambda s: (seen.append((s.planner.complexity, s.simulation is not None)),
+                                   ComposerOutput(complexity=s.planner.complexity, markdown="ok"))[1])
+    state = sup.analyze(UserInput(request_text="요청", sm_part=SmPart.PRODUCT))
+    assert state.planner.complexity is Complexity.SIMPLE and sup.simulator.calls == 0
+    state = sup.followup(sup.last_session_id, FollowupInput(type=FollowupType.REANALYSIS, content="여러 진입점에서 호출"))
+    assert state.planner.complexity is Complexity.COMPLEX
+    assert sup.simulator.calls == 1 and sup.verifier.calls == 1 and sup.explorer.calls == 2  # 재분석은 탐색부터 다시
+    assert seen == [(Complexity.SIMPLE, False), (Complexity.COMPLEX, True)]
+    assert state.composer.complexity is Complexity.COMPLEX
+
+
+def test_each_planner_round_gets_fresh_tool_budget():
+    # 첫 분석에서 한도를 다 써도 재분석 라운드의 Explorer 는 한도를 새로 받는다
+    from impact_agent.agents import PlannerAgent
+    from impact_agent.schemas import FollowupInput, FollowupType
+    from test_planner import FakeLLM
+
+    sup = make_supervisor(Complexity.SIMPLE)
+    sup.planner = PlannerAgent(llm=FakeLLM(Complexity.SIMPLE))
+    left = []
+    sup.explorer = Fake(lambda s: (left.append(s.tools_left()),
+                                   ExplorerOutput(start_nodes=[], nodes=[], edges=[], tool_call_count=config.MAX_TOOL_CALLS))[1])
+    sup.analyze(UserInput(request_text="요청", sm_part=SmPart.PRODUCT))
+    sup.followup(sup.last_session_id, FollowupInput(type=FollowupType.REANALYSIS, content="r"))
+    assert left == [config.MAX_TOOL_CALLS, config.MAX_TOOL_CALLS]
