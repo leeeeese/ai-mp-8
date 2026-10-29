@@ -169,7 +169,7 @@ python scripts/eval_kpi.py outputs/runs/YJ/<run_id>   # 저장된 *.state.json �
 ## 웹 UI 실행 (Neo4j → 백엔드 → 프론트)
 
 `frontend/` (React 18 + TypeScript + Vite) + 백엔드 API `src/impact_agent/api/` (FastAPI).
-화면 설계서: [docs/ui_design.md](docs/ui_design.md), API 설계서: [docs/api_design.md](docs/api_design.md), Agent 설계서: [docs/YJ_agent_design.md](docs/YJ_agent_design.md)
+화면 설계서: [docs/ui_design.md](docs/ui_design.md), API 설계서: [docs/api_design.md](docs/api_design.md), API 통합 테스트: [docs/api_integration_test.md](docs/api_integration_test.md), Agent 설계서: [docs/YJ_agent_design.md](docs/YJ_agent_design.md)
 
 | 모드 | 필요한 것 | 용도 |
 |---|---|---|
@@ -319,9 +319,12 @@ PYTHONPATH=src $PY -m pytest tests/test_api.py tests/test_graph_api.py -q
 
 ## TODO
 
-- [ ] LLM 프로바이더 선택 및 각 에이전트 `run()` 구현 (structured output)
-- [ ] 그래프 DB / 소스 직접 조회 연결 (`tools/graph.py`, `tools/source.py`)
-- [ ] 후속 입력(`FollowupInput`) 및 `ReanalysisRequest` 처리, MEMORY_WINDOW_N 기반 대화 메모리
-- [ ] MAX_TOOL_CALLS 강제
-- [ ] 회신 메일 초안 / PDF 저장 구현
-- [ ] KPI 기준값(KPI_MIN_*)·MAX_HOPS_* 확정, Simulator 구현 후 복잡 flow KPI 평가 확인, LLM 토큰 사용량 기록
+완료 (2026-10-29 기준): 에이전트 LLM 호출 · Neo4j/소스 조회 연결 · 후속 입력(재분석 포함)·MEMORY_WINDOW_N 대화 메모리 · MAX_TOOL_CALLS 예산 · 회신 메일 초안/MD·PDF 저장(백엔드) · KPI Agent(토큰 포함) · UI 백엔드 API(세션·SSE·KPI·적재 현황) · API 통합 테스트 v0.1 ([docs/api_integration_test.md](docs/api_integration_test.md))
+
+- [ ] 에이전트 품질: 1차 복잡도 판정(SC-003 이 단순으로 판정됨), 미탐 노드, 정답 단순 요건의 과한 "상세 분석 권장"(L-4)
+- [ ] 관리(권한) API `/api/admin/*` (현재 501) · 인증(401)/권한(403) 백엔드 검증 ([docs/api_design.md](docs/api_design.md) 5장)
+- [ ] 회신 메일 초안 · PDF 저장을 UI 버튼과 연결하는 API
+- [ ] 결과물 버전(v2 현업 답변 반영 …) 조회 (`GET …/report?version=` 은 지금 v1 만)
+- [ ] 세션 영속 저장 (지금은 메모리, 서버 재시작 시 사라짐)
+- [ ] KPI 페이지 문구 다듬기 ("놓친 복잡 요건 붙잡음", "과한 권장" 등)
+- [ ] KPI 기준값(KPI_MIN_*) · MAX_HOPS_* 확정 (잠정값)
