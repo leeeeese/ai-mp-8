@@ -1,13 +1,15 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="1680" height="1400" viewBox="0 0 840 700" font-family="Noto Sans CJK KR, sans-serif">
+<svg xmlns="http://www.w3.org/2000/svg" width="1760" height="1440" viewBox="0 0 880 720" font-family="Noto Sans CJK KR, sans-serif">
 <defs>
 <marker id="a" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M2 1L8 5L2 9" fill="none" stroke="#6b6b6b" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></marker>
 <style>
 .l{stroke:#8a8a8a;stroke-width:1.2;fill:none}
+.x{stroke:#8a8a8a;stroke-width:1.2;fill:none;stroke-dasharray:4 3}
 .t{font-size:13px;font-weight:700;fill:#1f1f1f}
 .s{font-size:10.5px;fill:#555}
 .e{font-size:10px;fill:#777}
 .h{font-size:13px;font-weight:700;fill:#444}
 .g{font-size:10.5px;fill:#555}
+.r{font-size:9.5px;fill:#888;font-family:JetBrains Mono, monospace}
 .d0{fill:#fde4d8;stroke:#d9784f}
 .d1{fill:#fdf0cf;stroke:#c99a2e}
 .d2{fill:#ecebfc;stroke:#7b74d6}
@@ -15,69 +17,73 @@
 .d4{fill:#dcf3ec;stroke:#3f9d86}
 .d5{fill:#e6f4d9;stroke:#6aa33f}
 .main{stroke-width:2}
-.aux{stroke-width:0.8;stroke-dasharray:none}
-.gr{fill:#efefef;stroke:#aaa;stroke-width:0.8}
+.aux{stroke-width:0.8}
 .lane{fill:#fafafa;stroke:#ccc;stroke-width:0.8;stroke-dasharray:4 4}
 </style>
 </defs>
-<rect width="840" height="700" fill="#ffffff"/>
-<text x="420" y="26" text-anchor="middle" style="font-size:15px;font-weight:700;fill:#1f1f1f">영향도 그래프 노드 구조 (0~5단계)</text>
+<rect width="880" height="720" fill="#ffffff"/>
+<text x="440" y="26" text-anchor="middle" style="font-size:15px;font-weight:700;fill:#1f1f1f">영향도 그래프 노드 구조 (0~5단계 = 공통 역할)</text>
 
 <rect class="lane" x="150" y="48" width="350" height="402" rx="10"/>
-<rect class="lane" x="515" y="48" width="320" height="402" rx="10"/>
+<rect class="lane" x="515" y="48" width="355" height="402" rx="10"/>
 <text class="h" x="325" y="68" text-anchor="middle">tos</text>
-<text class="h" x="675" y="68" text-anchor="middle">swing</text>
+<text class="h" x="692" y="68" text-anchor="middle">swing</text>
 
-<!-- depth gutter -->
+<!-- 단계 = 공통 역할 (scripts/graph/model.py LABEL_ROLE) -->
 <circle class="d0 aux" cx="24" cy="110" r="12"/><circle class="d1 aux" cx="24" cy="210" r="12"/><circle class="d2 aux" cx="24" cy="310" r="12"/><circle class="d3 aux" cx="24" cy="410" r="12"/><circle class="d4 aux" cx="24" cy="520" r="12"/><circle class="d5 aux" cx="24" cy="620" r="12"/>
 <g class="t" text-anchor="middle" dominant-baseline="central"><text x="24" y="110">0</text><text x="24" y="210">1</text><text x="24" y="310">2</text><text x="24" y="410">3</text><text x="24" y="520">4</text><text x="24" y="620">5</text></g>
-<g class="g" dominant-baseline="central"><text x="44" y="110">진입</text><text x="44" y="210">처리 진입</text><text x="44" y="310">업무 로직</text><text x="44" y="410">데이터 접근</text><text x="44" y="520">테이블</text><text x="44" y="620">컬럼</text></g>
+<g class="g"><text x="44" y="106">진입</text><text x="44" y="206">처리 진입</text><text x="44" y="306">업무 로직</text><text x="44" y="406">데이터 접근</text><text x="44" y="516">테이블</text><text x="44" y="616">컬럼</text></g>
+<g class="r"><text x="44" y="120">Entry</text><text x="44" y="220">EntryHandler</text><text x="44" y="320">Logic</text><text x="44" y="420">DataAccess</text><text x="44" y="530">Table</text><text x="44" y="630">Column</text></g>
 
 <!-- tos -->
 <rect class="d0 main" x="175" y="84" width="140" height="52" rx="8"/><text class="t" x="245" y="105" text-anchor="middle">Screen</text><text class="s" x="245" y="123" text-anchor="middle">화면 ID</text>
-<path class="l" d="M315 100 C333 100 333 122 317 122" marker-end="url(#a)"/><text class="e" x="337" y="115">OPENS</text>
+<path class="l" d="M175 100 C157 100 157 122 173 122" marker-end="url(#a)"/><text class="e" x="153" y="146" text-anchor="start">OPENS</text>
 <line class="l" x1="245" y1="136" x2="245" y2="182" marker-end="url(#a)"/><text class="e" x="252" y="163">CALLS</text>
 <rect class="d1 aux" x="175" y="184" width="140" height="52" rx="8"/><text class="t" x="245" y="205" text-anchor="middle">Controller</text><text class="s" x="245" y="223" text-anchor="middle">메서드</text>
 <line class="l" x1="245" y1="236" x2="245" y2="282" marker-end="url(#a)"/><text class="e" x="252" y="263">INVOKES</text>
+<path class="x" d="M190 236 C160 280 160 360 190 382" marker-end="url(#a)"/>
 <rect class="d2 aux" x="175" y="284" width="140" height="52" rx="8"/><text class="t" x="245" y="305" text-anchor="middle">Service</text><text class="s" x="245" y="323" text-anchor="middle">메서드 · 자기 호출</text>
-<path class="l" d="M175 300 C157 300 157 322 173 322" marker-end="url(#a)"/>
+<path class="l" d="M315 300 C333 300 333 322 317 322" marker-end="url(#a)"/>
 <line class="l" x1="245" y1="336" x2="245" y2="382" marker-end="url(#a)"/><text class="e" x="252" y="363">EXECUTES</text>
 <rect class="d3 aux" x="175" y="384" width="140" height="52" rx="8"/><text class="t" x="245" y="405" text-anchor="middle">SQL</text><text class="s" x="245" y="423" text-anchor="middle">XML 쿼리 · Pro*C SQL</text>
 
-<rect class="d1 main" x="340" y="184" width="140" height="52" rx="8"/><text class="t" x="410" y="205" text-anchor="middle">Batch</text><text class="s" x="410" y="223" text-anchor="middle">Job ID · Pro*C (.pc)</text>
-<line class="l" x1="360" y1="236" x2="300" y2="382" marker-end="url(#a)"/><text class="e" x="318" y="372" text-anchor="start">EXECUTES</text>
-<line class="l" x1="415" y1="236" x2="415" y2="282" marker-end="url(#a)"/><text class="e" x="422" y="263">INVOKES</text>
-<rect class="d2 aux" x="350" y="284" width="130" height="52" rx="8"/><text class="t" x="415" y="305" text-anchor="middle">DBIO</text><text class="s" x="415" y="323" text-anchor="middle">직접 호출</text>
-<line class="l" x1="425" y1="336" x2="488" y2="492" marker-end="url(#a)"/>
+<rect class="d0 main" x="345" y="84" width="140" height="52" rx="8"/><text class="t" x="415" y="105" text-anchor="middle">Batch</text><text class="s" x="415" y="123" text-anchor="middle">Job ID · Pro*C (.pc)</text>
+<line class="l" x1="372" y1="136" x2="312" y2="382" marker-end="url(#a)"/><text class="e" x="352" y="250">EXECUTES</text>
+<line class="l" x1="430" y1="136" x2="430" y2="382" marker-end="url(#a)"/><text class="e" x="437" y="263">INVOKES</text>
+<rect class="d3 aux" x="355" y="384" width="130" height="52" rx="8"/><text class="t" x="420" y="405" text-anchor="middle">DBIO</text><text class="s" x="420" y="423" text-anchor="middle">배치 DBIO (.dbio.xml)</text>
 
 <!-- swing -->
-<rect class="d0 main" x="680" y="84" width="140" height="52" rx="8"/><text class="t" x="750" y="105" text-anchor="middle">Screen</text><text class="s" x="750" y="123" text-anchor="middle">화면 ID</text>
-<path class="l" d="M680 100 C662 100 662 122 678 122" marker-end="url(#a)"/><text class="e" x="658" y="115" text-anchor="end">OPENS</text>
-<line class="l" x1="750" y1="136" x2="750" y2="182" marker-end="url(#a)"/><text class="e" x="757" y="163">CALLS</text>
-<rect class="d1 main" x="525" y="184" width="140" height="52" rx="8"/><text class="t" x="595" y="205" text-anchor="middle">Batch</text><text class="s" x="595" y="223" text-anchor="middle">Job ID</text>
-<rect class="d1 aux" x="680" y="184" width="140" height="52" rx="8"/><text class="t" x="750" y="205" text-anchor="middle">TP</text><text class="s" x="750" y="223" text-anchor="middle">서비스명 · 자기 호출</text>
-<path class="l" d="M820 200 C838 200 838 222 822 222" marker-end="url(#a)"/>
-<line class="l" x1="595" y1="236" x2="595" y2="282" marker-end="url(#a)"/>
-<line class="l" x1="710" y1="236" x2="632" y2="282" marker-end="url(#a)"/>
-<line class="l" x1="750" y1="236" x2="750" y2="282" marker-end="url(#a)"/><text class="e" x="757" y="263">INVOKES</text>
-<rect class="d2 aux" x="525" y="284" width="140" height="52" rx="8"/><text class="t" x="595" y="305" text-anchor="middle">DBIO</text><text class="s" x="595" y="323" text-anchor="middle">직접 호출</text>
-<rect class="d2 aux" x="680" y="284" width="140" height="52" rx="8"/><text class="t" x="750" y="305" text-anchor="middle">Module</text><text class="s" x="750" y="323" text-anchor="middle">공통 모듈 · 자기 호출</text>
-<path class="l" d="M820 300 C838 300 838 322 822 322" marker-end="url(#a)"/>
-<line class="l" x1="750" y1="336" x2="750" y2="382" marker-end="url(#a)"/><text class="e" x="757" y="363">INVOKES</text>
-<rect class="d3 aux" x="680" y="384" width="140" height="52" rx="8"/><text class="t" x="750" y="405" text-anchor="middle">DBIO</text><text class="s" x="750" y="423" text-anchor="middle">Module 경유</text>
+<rect class="d0 main" x="525" y="84" width="140" height="52" rx="8"/><text class="t" x="595" y="105" text-anchor="middle">Batch</text><text class="s" x="595" y="123" text-anchor="middle">Job ID</text>
+<rect class="d0 main" x="690" y="84" width="140" height="52" rx="8"/><text class="t" x="760" y="105" text-anchor="middle">Screen</text><text class="s" x="760" y="123" text-anchor="middle">화면 ID</text>
+<path class="l" d="M830 100 C848 100 848 122 832 122" marker-end="url(#a)"/><text class="e" x="836" y="94">OPENS</text>
+<line class="l" x1="760" y1="136" x2="760" y2="182" marker-end="url(#a)"/><text class="e" x="767" y="163">CALLS</text>
+<rect class="d1 aux" x="690" y="184" width="140" height="52" rx="8"/><text class="t" x="760" y="205" text-anchor="middle">TP</text><text class="s" x="760" y="223" text-anchor="middle">서비스명 · 자기 호출</text>
+<path class="l" d="M830 200 C848 200 848 222 832 222" marker-end="url(#a)"/>
+<line class="l" x1="760" y1="236" x2="760" y2="282" marker-end="url(#a)"/><text class="e" x="767" y="263">INVOKES</text>
+<rect class="d2 aux" x="690" y="284" width="140" height="52" rx="8"/><text class="t" x="760" y="305" text-anchor="middle">Module</text><text class="s" x="760" y="323" text-anchor="middle">공통 모듈 · 자기 호출</text>
+<path class="l" d="M830 300 C848 300 848 322 832 322" marker-end="url(#a)"/>
+<line class="l" x1="760" y1="336" x2="760" y2="382" marker-end="url(#a)"/><text class="e" x="767" y="363">INVOKES</text>
+<path class="l" d="M830 226 C866 250 866 390 832 410" marker-end="url(#a)"/>
+<rect class="d3 aux" x="690" y="384" width="140" height="52" rx="8"/><text class="t" x="760" y="405" text-anchor="middle">DBIO</text><text class="s" x="760" y="423" text-anchor="middle">SQL 패키지 함수</text>
+<!-- Batch → TP, Module, DBIO -->
+<line class="x" x1="650" y1="136" x2="698" y2="182" marker-end="url(#a)"/>
+<line class="x" x1="625" y1="136" x2="688" y2="292" marker-end="url(#a)"/>
+<line class="l" x1="595" y1="136" x2="694" y2="384" marker-end="url(#a)"/>
+<text class="e" x="612" y="250" text-anchor="end">INVOKES</text>
 
 <!-- DB -->
-<line class="l" x1="285" y1="436" x2="468" y2="494" marker-end="url(#a)"/>
-<line class="l" x1="595" y1="336" x2="545" y2="492" marker-end="url(#a)"/>
-<line class="l" x1="720" y1="436" x2="575" y2="494" marker-end="url(#a)"/>
-<text class="e" x="640" y="476">READS · WRITES</text>
+<line class="l" x1="270" y1="436" x2="468" y2="494" marker-end="url(#a)"/>
+<line class="l" x1="420" y1="436" x2="500" y2="492" marker-end="url(#a)"/>
+<line class="l" x1="730" y1="436" x2="575" y2="494" marker-end="url(#a)"/>
+<text class="e" x="650" y="478">READS · WRITES</text>
 <rect class="d4 aux" x="450" y="494" width="140" height="52" rx="8"/><text class="t" x="520" y="515" text-anchor="middle">Table</text><text class="s" x="520" y="533" text-anchor="middle">테이블</text>
 <path class="l" d="M590 508 C616 508 616 532 592 532" marker-end="url(#a)"/><text class="e" x="620" y="524">REFERENCES</text>
 <line class="l" x1="520" y1="546" x2="520" y2="592" marker-end="url(#a)"/><text class="e" x="527" y="573">HAS_COLUMN</text>
 <rect class="d5 aux" x="450" y="594" width="140" height="52" rx="8"/><text class="t" x="520" y="615" text-anchor="middle">Column</text><text class="s" x="520" y="633" text-anchor="middle">컬럼 · 코멘트</text>
 
 <!-- legend -->
-<rect class="d0 main" x="60" y="664" width="22" height="12" rx="3"/><text class="s" x="88" y="674">주 노드 (굵은 테두리)</text>
-<rect class="d0 aux" x="210" y="664" width="22" height="12" rx="3"/><text class="s" x="238" y="674">보조 노드 (얇은 테두리) · 색은 단계(depth)별</text>
-<text class="s" x="60" y="694">tos / swing 영역은 업무 시스템 구분을 위해 나눠 그린 것으로, 실제로는 같은 라벨 체계의 하나의 그래프로 저장한다.</text>
+<rect class="d0 main" x="60" y="664" width="22" height="12" rx="3"/><text class="s" x="88" y="674">진입 노드 (굵은 테두리) · 색 = 단계(공통 역할)</text>
+<line class="x" x1="330" y1="670" x2="360" y2="670"/><text class="s" x="366" y="674">확장 관계 (tos Controller→SQL, swing Batch→TP·Module)</text>
+<text class="s" x="60" y="694">같은 라벨은 영역마다 한 단계에만 둔다 (Batch = 0 진입, DBIO = 3 데이터 접근). 화면 범례·Planner target_role 과 같은 기준.</text>
+<text class="s" x="60" y="710">tos / swing 영역은 업무 시스템 구분을 위해 나눠 그린 것으로, 실제로는 같은 라벨 체계의 하나의 그래프로 저장한다.</text>
 </svg>

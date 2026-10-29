@@ -60,20 +60,26 @@ data/
 ![영향도 그래프 노드 구조](impact_graph_structure.svg)
 
 - 0 진입 → 1 처리 진입 → 2 업무 로직 → 3 데이터 접근 → 4 테이블 → 5 컬럼 단계로, tos·swing 은 같은 라벨 체계의 하나의 그래프에 저장한다 (공통 역할 라벨: Entry · EntryHandler · Logic · DataAccess · Table · Column).
-- 그림은 기본 구조(화면 이동 OPENS 포함)이며, 그림에 없는 ★ 확장 패턴(tos Controller→SQL, swing Batch→Module·TP)은 아래 영역별 표에 있다.
+- 같은 라벨은 영역마다 한 단계에만 둔다: Batch 는 Screen 과 같은 0 진입(Entry), Batch 가 부르는 DBIO 도 3 데이터 접근(DataAccess). 화면 범례·Planner `target_role` 과 같은 기준 (`scripts/graph/model.py` `LABEL_ROLE`).
+- ★ 확장 패턴(tos Controller→SQL, swing Batch→Module·TP)은 그림에서 점선, 아래 영역별 표에서 ★ 로 표시한다.
 
 ## 그래프 모델 (swing)
 
 ```
-   Screen ──OPENS──▶ Screen
-0  Screen ──CALLS──▶ TP ◀─CALLS─┐ (TP 자기 호출)
-1  Batch                │       │
-       │           INVOKES──────┘
-2      ├─INVOKES─▶ Module ◀─INVOKES─ Module (자기 호출)
-       │   TP ─INVOKES─▶ DBIO ◀─INVOKES─ Module
-3      └─INVOKES─▶ DBIO
-4                   DBIO ─READS/WRITES─▶ Table
-5                                        Table ─HAS_COLUMN─▶ Column
+단계 (공통 역할)   swing 라벨
+0 Entry           Screen, Batch
+1 EntryHandler    TP
+2 Logic           Module
+3 DataAccess      DBIO
+4 Table           Table
+5 Column          Column
+
+Screen ──OPENS──▶ Screen
+Screen ──CALLS──▶ TP ──CALLS──▶ TP (자기 호출)
+TP ──INVOKES──▶ Module ──INVOKES──▶ Module (자기 호출)
+TP ──INVOKES──▶ DBIO          Module ──INVOKES──▶ DBIO
+Batch ──INVOKES──▶ DBIO       Batch ──INVOKES ★──▶ TP · Module
+DBIO ──READS/WRITES──▶ Table ──HAS_COLUMN──▶ Column      Table ──REFERENCES──▶ Table
 ```
 
 | Label | ID 형식 | 예 | 출처 (코드 관례) |
@@ -144,10 +150,19 @@ SQL(`sql/*.sql`) 은 PL/SQL `CREATE OR REPLACE PACKAGE BODY <패키지>` 안의 
 `scripts/graph/parse_tos.py` 가 실제 코드 관례를 읽어 노드/엣지를 만듭니다 (근거 목록은 파일 머리말).
 
 ```
-0  Screen ──CALLS──▶ Controller ──INVOKES──▶ Service ──EXECUTES──▶ SQL ──READS/WRITES──▶ Table ──HAS_COLUMN──▶ Column
-   Screen ──OPENS──▶ Screen          │ (EXECUTES ★)      └─ Service (자기 호출)          Table ──REFERENCES──▶ Table
-1  Batch ──EXECUTES──▶ SQL           └──────────────▶ SQL
-   Batch ──INVOKES───▶ DBIO ──READS/WRITES──▶ Table
+단계 (공통 역할)   tos 라벨
+0 Entry           Screen, Batch
+1 EntryHandler    Controller
+2 Logic           Service
+3 DataAccess      SQL, DBIO
+4 Table           Table
+5 Column          Column
+
+Screen ──OPENS──▶ Screen
+Screen ──CALLS──▶ Controller ──INVOKES──▶ Service ──INVOKES──▶ Service (자기 호출)
+Service ──EXECUTES──▶ SQL     Controller ──EXECUTES ★──▶ SQL
+Batch ──EXECUTES──▶ SQL       Batch ──INVOKES──▶ DBIO
+SQL · DBIO ──READS/WRITES──▶ Table ──HAS_COLUMN──▶ Column      Table ──REFERENCES──▶ Table
 ```
 
 | 엣지 | 근거 |

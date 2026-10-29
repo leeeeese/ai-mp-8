@@ -292,6 +292,25 @@ $PY -c "import json; print(json.load(open('eval/ground_truth/SC-003.json'))['req
 4. `/kpi`: 세션별 KPI 기록. 반복 테스트 전에는 **기록 초기화**
 5. `/graph`: Neo4j 연결 · master 반영률 · 품질 점검 · 노드 검색(예: `TOSCP0210M`) → 2 hop 미리보기
 
+**적재 현황(`/graph`) 노드 검색 테스트**
+
+화면 위 "적재 기준 SM 파트"를 고른 뒤 2 hop 미리보기의 검색창에 입력한다. node_id·이름·설명 부분 일치이며 접두어(`SCR:`, `TBL:` 등)는 빼도 된다 (최대 12건). 결과를 누르면 그 노드 기준 2 hop 으로 다시 그리고 노드 상세가 열린다.
+
+| SM | 입력 | 기대 결과 |
+|---|---|---|
+| DBM | (처음 화면) | 기본 노드 `DBIO:DCP_MSGSCRT_S02` 기준 2 hop |
+| DBM | `TOSCP0210M` | `SCR:TOSCP0210M` (메시지 등록 화면, Entry) |
+| DBM | `TCH_MMS_SND_TGT` / `TCH_EXT_SND_TGT` | SC-006 자사·타사 발송 대상 테이블 (Table) |
+| DBM | `TCP_MSG_SCRT` | `TBL:TCP_MSG_SCRT` (메시지스크립트 테이블). 연결이 많아 "컬럼 노드 표시" 체크 전후 비교에 적합 |
+| DBM | `TBCH1020` | 배치 (자사 MMS 발송결과 반영). 프로그램 소스 미제공이라 연결 없이 노드 1개만 (품질 점검 "미제공 소스 영역"과 같은 노드) |
+| 상품 | (처음 화면) | 기본 노드 `TP:CombScrbSvc.joinComb` 기준 2 hop |
+| 상품 | `joinComb` | `TP:CombScrbSvc.joinComb` (결합 가입 서비스, EntryHandler) |
+| 상품 | `TB_COMB_GRP` / `TB_COMB_MBR` | 결합 그룹·구성원 테이블 |
+| 상품 | `ZCMBSS0100010` | 결합상품 가입 화면 (Entry) |
+| 상품 | `ZDOCBB0100010` | 구비서류 자동처리 배치 (Entry) |
+| 공통 | `MMS`, `발송` 등 단어 일부 | 이름·설명에 포함된 노드 목록 |
+| 공통 | 다른 SM 노드 (예: DBM 에서 `joinComb`) | 결과 없음 (SM 별 영역만 검색) |
+
 ### 5. 종료
 
 | 대상 | 방법 |

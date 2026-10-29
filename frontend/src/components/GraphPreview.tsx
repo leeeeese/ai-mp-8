@@ -3,13 +3,14 @@ import { useEffect, useRef } from 'react';
 import type { Neighborhood } from '@/api/types';
 import { useTheme } from '@/store/theme';
 
+/** 역할 색 = docs/impact_graph_structure.svg 단계 테두리 색 */
 const ROLE_COLOR: Record<string, string> = {
-  Entry: '#E8743B',
-  EntryHandler: '#F2B134',
+  Entry: '#D9784F',
+  EntryHandler: '#C99A2E',
   Logic: '#7B74D6',
   DataAccess: '#4F8FD1',
   Table: '#3F9D86',
-  Column: '#9CCB6B',
+  Column: '#6AA33F',
 };
 
 /** 2 hop 미리보기 (Cytoscape). 노드 색 = 공통 역할, 테두리 = 시작 노드. 컬럼은 기본 숨김, 2 hop 노드 이름은 선택 시 표시 */
