@@ -153,8 +153,6 @@ Simulator·Verifier·Composer 가 같은 함수(`rules.path_areas`)를 쓴다.
 
 나머지 11건은 두 기준 모두 일치한다.
 
-> 현재 `prompts/simulator.md` 기준표와 `requirement_difficulty` 코드는 **이전 기준**(Major 에 컬럼 추가 포함, 변경 영역 2개면 Medium 이상)이다. 위 기준은 9장 2번에서 프롬프트·코드에 함께 반영한다.
-
 **출력 `SimulationOutput`**: `area_impacts[AreaImpact{area, impact_type, paths[ImpactPath], feasibility, difficulty, difficulty_basis, schedule_factors, infeasible_reason, alternatives, confidence, new_elements(예정)}]`, `requested_vs_alternative`, `unverified_segments`, `dropped_paths`
 
 **한도·예외**: LLM 없음 → 3단계를 건너뛰고 `impact` = "영향 검토 필요", `impact_type` = 경로 있음 `modify` / 없음 `none`, `feasibility=review`, `difficulty` = 규칙 판정, `new_elements` 비움, 경로 제외 안 함. LLM 입력은 경로 `MAX_CONTEXT_PATHS`·원문 `MAX_CONTEXT_CHARS` 까지 (swing Batch `code` 는 Job 정의 + 실행 함수라 길다). KPI 평가 노드 = `area_impacts[].paths[].hops[].node` (`dropped_paths`·`new_elements` 제외), 재계획이 있었으면 마지막 라운드.
@@ -411,7 +409,7 @@ pytest (LLM·Neo4j 불필요, 가짜 LLM `Fixed` 또는 LLM 없음, tos·swing �
 ## 9. 남은 과제
 
 1. `new_elements` 반영: 스키마(`NewElement`) → Simulator 보정 → Verifier `evidence_missing` 예외 → Composer "신규 개발 요소" 절·체크리스트 → 프론트 목업
-2. Simulator: 난이도 규칙 조정(1-2) 프롬프트 기준표·코드 반영, hop `[변경]`/`[참조]` 표시를 영역 `impact_type` 규칙 보정에 연결, 주석이 빠져 코드 본문으로만 판단하므로 노드당 원문 줄 수(`CONTEXT_LINES_PER_EVIDENCE` 12) 재검토, DB hop 엣지 `columns`·노드 속성(`images`·`cron`·`code_values`·`data_type`)을 LLM 입력에, 고립 노드·swing REFERENCES 분석 한계
+2. Simulator: 난이도 규칙 조정(1-2) 코드 반영, DB hop 엣지 `columns`·노드 속성(`images`·`cron`·`code_values`·`data_type`)을 LLM 입력에, 고립 노드·swing REFERENCES 분석 한계
 3. Verifier: 화면·배치 공유 TP 경고, 고립 노드 재계획 제외
 4. 난이도 기준 검증: 조정안은 손 대조 결과라 16건 실행 후 재확인. **SC-002(운영 장애, 정답 Major)는 기준표로 설명이 안 됨** → 운영 장애·권한 요건 가중 여부 결정
 5. 공통 노드 처리: 정답셋이 공통 노드를 `reference_only`·경로 시작으로 쓰는 경우(H-2·L-1·SC-003)와 Explorer 공통 제외 규칙을 맞출지 (파트너 합의)
@@ -419,6 +417,6 @@ pytest (LLM·Neo4j 불필요, 가짜 LLM `Fixed` 또는 LLM 없음, tos·swing �
 7. 두 시스템에 걸친 요건: Planner 탐색 영역이 SM 선택 하나로 고정. 필요하면 `SM_PART_DOMAINS` 확장 (파트너 합의)
 8. `hard`·대안 사례 검증: 정답셋 16건 모두 feasible. 정답셋은 그대로 두고 `tests/` 가상 노드 fixture 로 검증
 9. swing 정의서 채움률: 데이터는 그대로 두고 LLM 이 `code` 원문으로 판단. 설명 없는 노드가 판정 품질에 주는 영향을 실행 결과로 확인
-10. LLM 입력 길이 상한 (노드당 원문, 전체 상한, 요약 여부), PDF 변환(weasyprint 한글 폰트·사내 설치 가능 여부), 확인 쿼리 DB 문법 (DBIO Oracle SQL 통일에 맞춰 프롬프트는 Oracle 문법으로 안내, tos MyBatis·Pro*C 원문과의 차이는 실행 결과로 확인)
+10. LLM 입력 길이 상한 (노드당 원문, 전체 상한, 요약 여부), PDF 변환(weasyprint 한글 폰트·사내 설치 가능 여부), 확인 쿼리 DB 문법 차이 (swing PL/SQL Oracle, tos MyBatis·Pro*C)
 11. `new_elements` KPI 일치 기준을 KPI 설계서에 반영할지
 12. 검증: `run_scenarios.py` 를 Composer 까지 돌려 `state.json` 저장 → `eval_kpi.py` 로 KPI, 1-2 난이도 대조표를 실행 결과로 갱신
