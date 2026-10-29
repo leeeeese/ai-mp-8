@@ -74,7 +74,7 @@
 **처리**
 1. **경로 골격 (규칙, `rules.build_impact_paths`)**: `explorer.paths` 마다 `ImpactPath`.
    - hop: `node` = 경로 노드 ID, `relation` = 앞 노드 → 이 노드 엣지 유형 (첫 hop 은 `ENTRY`), `evidence_ref` = 노드 Evidence 의 `file_path#location` (예: `program/ProdScrbSvc.pgm#L40-88`)
-   - `confidence`: Evidence 가 있으면 `confirmed`, 없으면 `inferred`
+   - `confidence`: Evidence 가 있으면 `confirmed`, 없으면 `inferred`. LLM 입력(`[영역별 경로]`)에서는 `inferred` 노드 뒤에 `*` 를 붙인다 (**`*` 노드 = 원문 근거가 없는 노드**)
    - 같은 노드 순서의 경로는 하나로 합친다. 경로 id `P<item_id>-<n>`
    - `cross_domain`: 경로 노드의 `domain` 이 둘 이상 (swing ↔ tos, `rules.SM_PART_DOMAINS`)
    - DB hop 의 컬럼 단위 정보 (예정): DataAccess → Table hop 은 엣지 `columns` 를 LLM 입력에 넣는다. 요건 컬럼이 `WRITES.columns` 에 있으면 변경 후보, `READS.columns` 에만 있으면 조회 영향, 둘 다 없으면 "컬럼 미사용" (PL/SQL DBIO 하나가 여러 테이블을 다루기 때문)
@@ -82,7 +82,7 @@
 3. **영향 판정 (LLM)**: 영역별로 경로·원문·요건 항목을 주고 `SimulatorDraft` 를 받는다.
    - hop 별 `impact` (이 노드에서 무엇이 바뀌는지 / 확인만 필요한지). 문장 앞에 `[변경]`(코드·데이터·구조를 고침) / `[참조]`(경로에 있지만 확인만) 를 붙이고, `[변경]` 은 원문 근거(분기·상수·SQL 위치)를 인용
    - 영역별 `impact_type`(add / modify / reference_only / none): 그 영역에 `[변경]` hop 이 있을 때만 modify / add, 경로가 지나가기만 하면 `reference_only`, 경로가 없으면 `none`
-   - `feasibility`: 원문에서 변경 지점(분기·SQL·컬럼)이 확인되면 `feasible` (근거가 있는데 `review` 로 미루지 않음), `*` 노드뿐이면 확정하지 않음, `hard` 는 원문에 구조상 막히는 사실이 있을 때만
+   - `feasibility`: 원문에서 변경 지점(분기·SQL·컬럼)이 확인되면 `feasible` (근거가 있는데 `review` 로 미루지 않음), `*` 노드(원문 근거 없음)뿐이면 확정하지 않음, `hard` 는 원문에 구조상 막히는 사실이 있을 때만
    - `difficulty` + `difficulty_basis`(기준표 행 인용), `schedule_factors`
    - `feasibility=hard` 면 `infeasible_reason` 과 `alternatives`(가능성·난이도·장단점) 필수
    - 요청안과 대안이 갈리면 `requested_vs_alternative` (예: SC-001 신규 컬럼 추가 vs 기존 광고여부 변환). 원문에서 보일 때만
@@ -308,8 +308,6 @@ Supervisor 의 `Supervisor.followup(session_id, FollowupInput)` 이 진입점을
 | `data/source`, `data/docs`, `data/graph`, Neo4j | 읽기만. 설명 누락·`REFERENCES` 없음·적재 범위 밖 소스는 에이전트 규칙·분석 한계로 처리 |
 | `eval/ground_truth` | 읽기만. 정답셋에 없는 사례(예: `hard`·대안)는 `tests/` 의 가상 노드 fixture 로 검증 |
 
-> 2026-10-29 공용 데이터 변경 (로컬, 보안상 저장소 밖): 소스 원문의 **주석(annotation) 제거** — LLM 이 코드 본문으로 영향 경로를 판단하도록, DBIO SQL 을 **Oracle SQL 로 통일**. 소스 내용 자체는 같다. Simulator·Verifier·Composer 프롬프트는 이 기준으로 맞췄다 (1장 3단계, 2장 4번, 3장).
-
 ### 6-1. 노드·엣지 (노드 688 · 관계 850)
 
 | 단계 | 역할 | swing (366) | tos (322) |
@@ -334,8 +332,8 @@ Supervisor 의 `Supervisor.followup(session_id, FollowupInput)` 이 진입점을
 
 | 속성 | 있는 노드·엣지 | 사용처 |
 |---|---|---|
-| `code` | Column 제외 전부 (Batch 는 Job 정의 + 실행 함수 원문) | LLM 판단 원문 (근거가 없을 때 보조) |
-| `desc`, `program_name`, `program_desc` | swing 은 정의서에서 채움, 채움률 낮음 (DBIO 15/60, TP 22/34, Module 18/24) | 노드 설명. 비면 이름 + `code` 앞부분 |
+| `code` | Column 제외 전부 (Batch 는 Job 정의 + 실행 함수 원문). 소스에 주석이 없고 DBIO SQL 은 Oracle SQL | **LLM 판단의 주 원문.** 조건 분기·상수·코드값·SQL 컬럼을 본문에서 읽는다 (1장 3단계 "원문 읽는 법") |
+| `desc`, `program_name`, `program_desc` | swing 은 정의서에서 채움, 채움률 낮음 (DBIO 15/60, TP 22/34, Module 18/24) | 노드 이름·용도 안내만. 이름 수준이거나 비어 있으면 기능 판단은 `code` 본문으로 (이름으로 추측하지 않음) |
 | `interfaces` (`"<IF_ID> <이름>"`) | swing TP 5 (`IF_PAY_0010/0020/0030`), swing Batch 2 (`IF_SMS_0010`, `IF_CDTS_0010`), tos Batch 4 (`IF-TOS-MMS-011/012`, `IF-TOS-EXT-041`, `IF-TOS-TWD-021`) | interface 영역 |
 | `images` | swing Screen 2 (`ZROMRR0700090`, `ZROMRR0700340`) | 이미지·문구 교체 → Minor (L-2) |
 | `cron`, `cycle` (tos `steps`·`group`) | Batch 전부 | 배치 주기 변경 (L-1, swing 실제 주기는 `TB_BAT_JOB.CRON_EXPR`) |
@@ -416,7 +414,7 @@ pytest (LLM·Neo4j 불필요, 가짜 LLM `Fixed` 또는 LLM 없음, tos·swing �
 6. 자동 재분석: 지금은 사용자 확인 후 `reanalysis` 후속 입력. 자동화가 필요하면 Supervisor 에 `reanalysis_request` 라우팅 추가 (파트너 합의)
 7. 두 시스템에 걸친 요건: Planner 탐색 영역이 SM 선택 하나로 고정. 필요하면 `SM_PART_DOMAINS` 확장 (파트너 합의)
 8. `hard`·대안 사례 검증: 정답셋 16건 모두 feasible. 정답셋은 그대로 두고 `tests/` 가상 노드 fixture 로 검증
-9. swing 정의서 채움률: 데이터는 그대로 두고 LLM 이 `code` 원문으로 판단. 설명 없는 노드가 판정 품질에 주는 영향을 실행 결과로 확인
-10. LLM 입력 길이 상한 (노드당 원문, 전체 상한, 요약 여부), PDF 변환(weasyprint 한글 폰트·사내 설치 가능 여부), 확인 쿼리 DB 문법 차이 (swing PL/SQL Oracle, tos MyBatis·Pro*C)
+9. swing 정의서 채움률: 데이터는 그대로 두고 LLM 이 `code` 본문으로 판단. 설명 없는 노드가 판정 품질에 주는 영향을 실행 결과로 확인
+10. LLM 입력 길이 상한 (노드당 원문, 전체 상한, 요약 여부), PDF 변환(weasyprint 한글 폰트·사내 설치 가능 여부)
 11. `new_elements` KPI 일치 기준을 KPI 설계서에 반영할지
 12. 검증: `run_scenarios.py` 를 Composer 까지 돌려 `state.json` 저장 → `eval_kpi.py` 로 KPI, 1-2 난이도 대조표를 실행 결과로 갱신
