@@ -63,6 +63,7 @@
 - **복잡도(simple / complex)를 다시 판정하거나 바꾸지 않는다.** 복잡도는 Planner(`planner.complexity`)가 정하고, Supervisor 는 그 값으로만 분기한다. Simulator 는 복잡 flow 로 들어온 요건을 그대로 판정하며 `SimulationOutput` 에 복잡도 필드가 없다 (`test_simulator_does_not_touch_complexity`).
 - **경로를 새로 찾지 않는다.** 경로 탐색은 Explorer 몫이고, Simulator 는 받은 경로에 대해서만 판정한다. 빠진 경로는 분석 한계로 남기고, 보완 요청은 Verifier → Supervisor → Planner 재계획으로 간다.
 - 여기서 내는 `difficulty`(Major / Medium / Minor)는 영역별 **구현 난이도**로, 복잡도와 다른 값이다 (1-2).
+- 복잡도와 난이도를 비교하지 않는다. 복잡도를 읽지 않으므로 "complex 인데 Minor" 같은 표시는 Composer 가 한다 (3-2).
 
 **입력**
 
@@ -76,6 +77,7 @@
 | `retriever.evidence[]` (`content` 원문) | hop 근거(`evidence_ref`)·확신도, LLM 판단 근거 |
 | `retriever.nodes_without_evidence` | 해당 hop 은 `inferred` |
 | `replan_feedback` | 재계획 라운드면 이전 누락 사유 (같은 누락 반복 방지) |
+| `followups` 중 `type=reanalysis` | 사용자가 단순 응답의 "상세 분석 권장"을 보고 요청한 재분석이면 그 사유 (1-4) |
 
 **처리**
 1. **경로 골격 (규칙, `rules.build_impact_paths`)**: `explorer.paths` 마다 `ImpactPath`.
@@ -85,7 +87,8 @@
    - `cross_domain`: 경로 노드의 `domain` 이 둘 이상 (swing ↔ tos, `rules.SM_PART_DOMAINS`)
    - DB hop 의 컬럼 단위 정보 (예정): DataAccess → Table hop 은 엣지 `columns` 를 LLM 입력에 넣는다. 요건 컬럼이 `WRITES.columns` 에 있으면 변경 후보, `READS.columns` 에만 있으면 조회 영향, 둘 다 없으면 "컬럼 미사용" (PL/SQL DBIO 하나가 여러 테이블을 다루기 때문)
    - 노드 메타 (`node_meta_lines`): LLM 입력의 `[노드 메타]` 에 보이는 경로 노드마다 `노드 (시스템·역할) 속성…` 한 줄과, 경로 위 READS/WRITES 엣지의 `columns` 를 넣는다. 속성은 `META_KEYS`(1-3 (a) "LLM 에 넘길 속성" 열)만, 값 하나는 `MAX_META_VALUE`(120자)까지, `code`·`search_text` 는 넣지 않는다. 원문이 잘려도 화면 이미지·배치 주기·인터페이스·컬럼 타입·코드값은 보이게 하기 위해서다
-   - 영향 범위 (`shared_nodes`): **진입점 수**(`explorer.paths` 에서 그 노드를 지나는 서로 다른 Entry 수)와 `is_common` 으로 공유 노드를 정하고, 보이는 경로에 있는 것만 `[공유 노드]` 블록으로 넘긴다 (없으면 블록 생략, 1-3 (c))
+   - 영향 범위 (`rules.shared_nodes`): **진입점 수**(`explorer.paths` 에서 그 노드를 지나는 서로 다른 Entry 수)와 `is_common` 으로 공유 노드를 정하고, 보이는 경로에 있는 것만 `[공유 노드]` 블록으로 넘긴다 (없으면 블록 생략, 1-3 (c))
+   - 재분석 요청 (`reanalysis_request`): 재분석으로 들어온 요건이면 가장 최근 `reanalysis` 후속 입력의 사유를 `[요건 항목]` 다음 `[재분석 요청]` 블록으로 넘긴다. 다른 유형의 후속 입력·빈 사유는 넣지 않는다 (1-4)
 2. **영역 배정 (규칙, `rules.path_areas`)**: 1-1 영역 분류 규칙.
 3. **영향 판정 (LLM)**: 영역별로 경로·원문·요건 항목을 주고 `SimulatorDraft` 를 받는다.
    - hop 별 `impact` (이 노드에서 무엇이 바뀌는지 / 확인만 필요한지). 문장 앞에 `[변경]`(코드·데이터·구조를 고침) / `[참조]`(경로에 있지만 확인만) 를 붙이고, `[변경]` 은 원문 근거(분기·상수·SQL 위치)를 인용
@@ -108,6 +111,7 @@
      - 목표 역할에 도달한 경로(`stop_reason=target_reached`)의 마지막 노드에 근거(`confirmed`)가 있음
      - 사용자가 확정한 노드(`Mention.confirmed_node`)가 경로에 있음
      - 그 경로를 빼면 요건 항목(`item_id`)의 경로가 하나도 남지 않음
+     - 재분석 사유에 나온 노드가 경로에 있음 (사용자가 확인을 요청한 범위, `reanalysis_nodes`, 1-4)
    - 제외한 경로는 `dropped_paths` 에 사유와 함께 남긴다 → Composer 레포트 "검토 제외 경로"
 5. **분석 한계 (`unverified_segments`)**: `explorer.unresolved`, `item_results` 의 미도달·frontier·매칭 실패, 근거 없는 노드, 공통 제외 노드, 고립 노드로 끝난 경로(6-3), swing 컬럼 변경 시 참조 테이블 미확인 (swing 에 `REFERENCES` 없음).
 
@@ -214,6 +218,21 @@ Simulator 는 시스템을 나눠 판단하지 않는다. **역할 → 변경 �
 | screen | Screen → Controller | Screen → TP (TP → TP 호출 있음), 출력 화면(`RR`) 은 이미지·필드 배치만 | 출력 화면 이미지 교체는 Screen 단독 경로로 충족 (정답 L-2) |
 | db | SQL 하나 = 문장 하나, `REFERENCES` 있음 | DBIO 하나가 여러 테이블 접근 가능, `REFERENCES` 없음 | swing 컬럼 변경의 참조 테이블은 분석 한계로 남긴다 |
 
+### 1-4. 재분석으로 들어온 요건 (Simulator 쪽 반영됨, Planner·UI 연동 예정)
+
+[planner_detail_analysis_to-be.md](planner_detail_analysis_to-be.md) 에 따라 complex flow 는 두 경로로 들어온다: Planner 가 처음부터 complex 로 판정한 요건, 그리고 단순 응답의 "상세 분석 권장"(`detail_analysis_reasons`)을 보고 사용자가 요청한 재분석(`FollowupInput(type=reanalysis)` → Planner 가 complex). Simulator 는 두 경우를 같은 방식으로 판정하고, 재분석일 때만 아래를 더한다. 어느 경우든 복잡도는 읽지 않는다.
+
+| 항목 | 내용 |
+|---|---|
+| 입력 (반영됨) | 가장 최근 `reanalysis` 후속 입력의 `content`(권장 사유 요약)를 `[재분석 요청]` 블록으로 넘긴다. 사유는 Composer 가 만든 문장이라 노드 ID 가 들어 있다 (예: "공통 모듈 CTL:… 이 경로에 있어 다른 화면·처리 영향 확인 필요") |
+| 판정 (반영됨, 프롬프트) | 사유에 나온 노드·신호마다 hop 설명에 **확인 결과**를 쓴다. 바꿔야 하면 `[변경]`, 아니면 `[참조] 확인 결과 …` 로 근거와 함께. 사용자가 물어본 것에 답이 비지 않게 하기 위해서다 |
+| 경로 제외 가드 (반영됨) | 사유 문장에서 노드 ID(`NODE_ID_IN_TEXT`, `<접두어>:<키>`)를 뽑아(`reanalysis_nodes`), 그 노드가 있는 경로는 제외 제안을 거절한다 (처리 4) |
+| 공유 노드 정의 | Composer 권장 신호("공통 노드", "여러 진입점")와 Simulator `[공유 노드]` 가 **같은 정의**를 쓴다: `rules.shared_nodes` (반영됨, Simulator 에서 옮김). 단순 응답에서 "공유 노드"라고 알린 노드가 재분석 결과에서도 공유 노드로 판정되게 하기 위해서다 |
+| 결과 해석 | 재분석 결과가 Minor 여도 정상이다 ("확인해 보니 변경 범위가 작다"는 답). Simulator 는 표시하지 않고, 복잡도와 함께 보여 주는 것은 Composer 몫 |
+
+- 재분석 라운드는 Explorer·Retriever 부터 새로 돈다. Simulator 는 이전 라운드의 단순 응답을 입력으로 받지 않는다 (사유 문장만).
+- (반영됨) 사유에 나온 노드가 이번 라운드 경로에 없으면 (Explorer 가 다시 못 찾음) 분석 한계에 "재분석 요청 노드 미탐색: … (이번 탐색 경로에 없어 판정하지 못함)" 을 남긴다.
+
 **출력 `SimulationOutput`**: `area_impacts[AreaImpact{area, impact_type, paths[ImpactPath], feasibility, difficulty, difficulty_basis, schedule_factors, infeasible_reason, alternatives, confidence, new_elements(예정)}]`, `requested_vs_alternative`, `unverified_segments`, `dropped_paths`
 
 **한도·예외**: LLM 없음 → 3단계를 건너뛰고 `impact` = "영향 검토 필요", `impact_type` = 경로 있음 `modify` / 없음 `none`, `feasibility=review`, `difficulty` = 규칙 판정, `new_elements` 비움, 경로 제외 안 함. LLM 입력은 경로 `MAX_CONTEXT_PATHS`·원문 `MAX_CONTEXT_CHARS` 까지 (swing Batch `code` 는 Job 정의 + 실행 함수라 길다). KPI 평가 노드 = `area_impacts[].paths[].hops[].node` (`dropped_paths`·`new_elements` 제외), 재계획이 있었으면 마지막 라운드.
@@ -290,7 +309,7 @@ Simulator 는 시스템을 나눠 판단하지 않는다. **역할 → 변경 �
 | `evidence_table` | 코드. Evidence 마다 `claim`(LLM 요약 또는 노드 설명) · `evidence` · `location` · `confidence`. `claim` 은 원문으로 확인한 조건·코드값·컬럼 |
 | `check_queries` | LLM. 운영 문의일 때 확인용 SQL. **Oracle 문법의 읽기 전용 SELECT 한 문장**(`SELECT`/`WITH`, 세미콜론·PL/SQL 블록·`FOR UPDATE` 없음), 실데이터 대신 바인드 변수(`:svc_mgmt_no`), 건수 제한은 `FETCH FIRST n ROWS ONLY`/`ROWNUM`, 테이블·컬럼은 입력 경로·근거에 있는 것만. **코드에서 SELECT 단일 문장만 통과**. 코드값 해석은 Column `code_values`(swing) / `TCP_CMM_CD` 조회(tos) (SC-006) |
 | `analysis_limits` | 코드. `explorer.unresolved`, `nodes_without_evidence` |
-| `detail_analysis_recommended` | 규칙 + LLM. 변경 유형이 add/modify 이거나 LLM 이 변경 요소를 찾으면 `true` |
+| `detail_analysis_recommended` | 규칙 + LLM. 변경 유형이 add/modify 이거나 LLM 이 변경 요소를 찾으면 `true`. (예정) 탐색 신호(공통 노드·여러 진입점·신규 후보·그래프 밖 연계)를 더하고 사유를 `detail_analysis_reasons` 에 ([planner_detail_analysis_to-be.md](planner_detail_analysis_to-be.md)) |
 
 ### 3-2. 복잡 요건 결과물 (`ComplexReport`)
 
@@ -298,6 +317,7 @@ Simulator 는 시스템을 나눠 판단하지 않는다. **역할 → 변경 �
 
 | 필드 | 작성 |
 |---|---|
+| 복잡도·난이도 표시 (예정) | 코드. 요건 전체 난이도가 Minor 인데 복잡 요건이면 요약에 "확인 결과 변경 범위가 작음" 을 붙인다. 재분석으로 들어온 요건이면 "사용자 상세 분석 요청에 따른 결과" 를 함께 쓴다. 값은 바꾸지 않는다 |
 | `summary_conclusion` | LLM. 가능 여부 → 요건 전체 난이도 → 핵심 영향 영역·노드 → 대안 순서로 3~5문장. 가능 여부·난이도는 영역별 판정·`requirement_difficulty` 값 그대로 (LLM 이 새로 판단하지 않음) |
 | `area_verdicts` | 코드. `simulation.area_impacts` 를 영역별 한 행 (경로 요약 "진입 → … → 끝 노드", 최대 `MAX_PATH_SUMMARY` 개) |
 | `new_elements` (예정) | 코드. 영역별 `new_elements` → 레포트 "신규 개발 요소" 절 + 개발 체크리스트 |
@@ -440,7 +460,7 @@ pytest (LLM·Neo4j 불필요, 가짜 LLM `Fixed` 또는 LLM 없음, tos·swing �
 
 | 대상 | 확인 |
 |---|---|
-| Simulator | 경로 골격(노드 순서·엣지 유형·evidence_ref·확신도), 역할 기준 영역 배정, 경로 모양(`OPENS`·Batch→TP·Screen 단독·Table 시작·고립 노드), 그래프 밖 노드 제거, inferred 영역 review, 경로 제외 가드 3종, 난이도 기준, 영향 범위 보정(tos·swing 각각 공유 노드 / 단일 진입점), `[노드 메타]` 에 시스템별 속성이 들어가는지, LLM 없음 출력 |
+| Simulator | 경로 골격(노드 순서·엣지 유형·evidence_ref·확신도), 역할 기준 영역 배정, 경로 모양(`OPENS`·Batch→TP·Screen 단독·Table 시작·고립 노드), 그래프 밖 노드 제거, inferred 영역 review, 경로 제외 가드 3종, 난이도 기준, 영향 범위 보정(tos·swing 각각 공유 노드 / 단일 진입점), `[노드 메타]` 에 시스템별 속성이 들어가는지, LLM 없음 출력, 재분석: `[재분석 요청]` 블록·사유 노드 경로 제외 거절·사유 노드 미탐색 한계, 복잡도 미변경 |
 | Verifier | 점검 항목별 보완 필요/통과, 필수 영역 표, `additional_scope` 형식, 같은 사유 반복 시 pass, 재계획 한도 (`test_supervisor`) |
 | Composer | 단순/복잡 필드 조립, SELECT 외 쿼리 차단, 체크리스트 id·후속 답변·stage 전이, `reanalysis_request`, 검토 제외 경로, markdown 렌더링 |
 | 전체 | `Supervisor.run` 이 Composer·KPI 까지 끝나고, 복잡 flow 도 KPI `evaluable=true` |
@@ -468,7 +488,8 @@ pytest (LLM·Neo4j 불필요, 가짜 LLM `Fixed` 또는 LLM 없음, tos·swing �
 ## 9. 남은 과제
 
 1. `new_elements` 반영: 스키마(`NewElement`) → Simulator 보정 → Verifier `evidence_missing` 예외 → Composer "신규 개발 요소" 절·체크리스트 → 프론트 목업
-2. Simulator 일반화 (1-3) 남은 것: 고립 노드·swing REFERENCES 분석 한계. 프롬프트(역할별 원문 표·변경 지점 유형·공유 노드·swing 형 예시 4), 영향 범위 보정, `[노드 메타]`·`[공유 노드]` 입력은 반영됨
+2. Simulator 재분석 연동 (1-4): Simulator 쪽은 모두 반영됨 (`shared_nodes` 이동, `[재분석 요청]` 입력·프롬프트, 경로 제외 가드, 사유 노드 미탐색 분석 한계). Planner 재분석 규칙·UI 는 [planner_detail_analysis_to-be.md](planner_detail_analysis_to-be.md) Planner·UI 쪽 To-Be([planner_detail_analysis_to-be.md](planner_detail_analysis_to-be.md))와 같이 진행
+   Simulator 일반화 (1-3) 남은 것: 고립 노드·swing REFERENCES 분석 한계. 프롬프트(역할별 원문 표·변경 지점 유형·공유 노드·swing 형 예시 4), 영향 범위 보정, `[노드 메타]`·`[공유 노드]` 입력은 반영됨
 3. Verifier: 화면·배치 공유 TP 경고, 고립 노드 재계획 제외
 4. 난이도 기준 검증: 조정안은 손 대조 결과라 16건 실행 후 재확인. **SC-002(운영 장애, 정답 Major)는 기준표로 설명이 안 됨** → 운영 장애·권한 요건 가중 여부 결정
 5. 공통 노드 처리: 정답셋이 공통 노드를 `reference_only`·경로 시작으로 쓰는 경우(H-2·L-1·SC-003)와 Explorer 공통 제외 규칙을 맞출지 (파트너 합의)

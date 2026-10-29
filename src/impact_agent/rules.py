@@ -6,6 +6,7 @@
 - MENTION_LABELS: 언급 종류 → 시작 노드로 찾을 영역별 라벨
 - path_areas / build_impact_paths: 역할 → 영역(screen·db·interface·batch) 분류, Explorer 경로 → 영향 경로 골격
   (Simulator · Verifier · Composer 공통)
+- shared_nodes: 공유 노드(진입점 2개 이상·공통 모듈). Simulator 난이도 보정과 Composer 상세 분석 권장이 함께 쓴다
 """
 
 from . import config
@@ -125,6 +126,26 @@ def path_areas(path: list[str], nodes: dict[str, GraphNode], interface_ids: set[
     """경로가 걸치는 영역 (AREA_ORDER 순) = 노드별 영역의 합."""
     areas = set().union(*node_areas(path, nodes, interface_ids))
     return [a for a in AREA_ORDER if a in areas]
+
+
+def shared_nodes(paths: list[ExplorePath], nodes: dict[str, GraphNode]) -> dict[str, str]:
+    """공유 노드 → 사유 (설계서 1-3 (c), 1-4).
+
+    Simulator `[공유 노드]`·난이도 보정과 Composer 상세 분석 권장 신호가 같은 정의를 쓴다. 진입점 = Explorer 경로 첫 노드가 Entry 인 것.
+
+    서로 다른 진입점 2개 이상의 경로가 지나는 노드, 또는 is_common 노드. 진입점 수는 Explorer 가 찾은 경로 안에서 센다
+    (그래프 전체보다 적을 수 있음 → 난이도를 과하게 올리지 않는 쪽).
+    """
+    entries: dict[str, set[str]] = {}
+    for p in paths:
+        if p.nodes and node_role(nodes.get(p.nodes[0])) is NodeRole.ENTRY:
+            for n in p.nodes[1:]:
+                entries.setdefault(n, set()).add(p.nodes[0])
+    out = {n: f"진입점 {len(es)}개" for n, es in entries.items() if len(es) >= 2}
+    for nid, n in nodes.items():
+        if n.properties.get("is_common"):
+            out[nid] = f"{out[nid]}, 공통 모듈" if nid in out else "공통 모듈"
+    return out
 
 
 def evidence_by_node(evidence: list[Evidence]) -> dict[str, Evidence]:

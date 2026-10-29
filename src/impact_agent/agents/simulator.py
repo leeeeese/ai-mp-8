@@ -9,10 +9,12 @@
 LLM 이 없거나 실패하면 3단계를 건너뛰고 규칙 판정(review, 난이도 기준표)으로 낸다. 경로는 제외하지 않는다.
 """
 
+import re
+
 from pydantic import BaseModel, Field
 
 from ..llm import LLM_FAILURES, LLMClient, Usage, analysis_llm
-from ..rules import AREA_ORDER, build_impact_paths, interface_node_ids, node_areas, node_role, path_areas
+from ..rules import AREA_ORDER, build_impact_paths, interface_node_ids, node_areas, node_role, path_areas, shared_nodes
 from ..schemas import (
     Alternative,
     Area,
@@ -23,11 +25,11 @@ from ..schemas import (
     DroppedPath,
     ExplorePath,
     Feasibility,
+    FollowupType,
     GraphEdge,
     GraphNode,
     ImpactPath,
     ImpactType,
-    NodeRole,
     SimulationOutput,
     StopReason,
 )
@@ -51,6 +53,8 @@ REFERENCE_TAG = "[참조]"
 META_KEYS = ["images", "events", "cycle", "cron", "program", "steps", "interfaces", "url", "http_method", "stmt_type",
              "dbio_type", "data_type", "nullable", "pk", "code_grp", "code_values"]
 MAX_META_VALUE = 120  # 속성 값 하나의 글자 수 상한
+# 재분석 사유 문장 안의 그래프 노드 ID (<접두어>:<키>, docs/mock_data.md 노드 ID 규칙)
+NODE_ID_IN_TEXT = re.compile(r"\b(?:SCR|CTL|TP|BAT|SVC|MOD|DBIO|SQL|TBL|COL):[A-Za-z0-9_.#$]+")
 
 
 # --- LLM 응답 형식 (Structured Outputs 호환: 기본값 없이 모든 필드 명시) ---------------------
@@ -125,6 +129,9 @@ class SimulatorAgent(BaseAgent[SimulationOutput]):
         hop_areas = {(p.path_id, i): a for p, _ in built for i, a in enumerate(node_areas([h.node for h in p.hops], nodes, iface))}
         shared = shared_nodes(exp.paths if exp else [], nodes)
         limits = unverified_segments(state, [p for p, _ in built])
+        on_paths = {h.node for p, _ in built for h in p.hops}
+        if missing := [n for n in reanalysis_nodes(state) if n not in on_paths]:
+            limits.append(f"재분석 요청 노드 미탐색: {', '.join(missing)} (이번 탐색 경로에 없어 판정하지 못함)")
 
         draft = None
         if built and self.llm is not None:
@@ -173,24 +180,28 @@ def apply_drops(
     reasons = {d.path_id: d.reason for d in draft.drop_paths}
     confirmed = {m.confirmed_node for it in (state.planner.items if state.planner else [])
                  for m in it.mentions if m.confirmed_node}
+    requested = set(reanalysis_nodes(state))
     kept = list(built)
     dropped = []
     for path, sources in built:
         reason = reasons.get(path.path_id)
-        if reason and not drop_guarded(path, sources, confirmed, kept):
+        if reason and not drop_guarded(path, sources, confirmed, kept, requested):
             kept.remove((path, sources))
             dropped.append(DroppedPath(path=path, reason=reason))
     return [p for p, _ in kept], dropped
 
 
 def drop_guarded(
-    path: ImpactPath, sources: list[ExplorePath], confirmed: set[str], kept: list[tuple[ImpactPath, list[ExplorePath]]]
+    path: ImpactPath, sources: list[ExplorePath], confirmed: set[str], kept: list[tuple[ImpactPath, list[ExplorePath]]],
+    requested: set[str] | None = None,
 ) -> bool:
     """제외하면 안 되는 경로인지 (설계서 1장 경로 제외 가드)."""
     if any(s.stop_reason is StopReason.TARGET_REACHED for s in sources) and path.hops[-1].confidence is Confidence.CONFIRMED:
         return True  # 목표 역할에 도달했고 마지막 노드에 근거가 있음
     if any(h.node in confirmed for h in path.hops):
         return True  # 사용자가 확정한 노드가 있음
+    if requested and any(h.node in requested for h in path.hops):
+        return True  # 사용자가 재분석으로 확인을 요청한 노드가 있음 (설계서 1-4)
     others = {s.item_id for p, ss in kept if p is not path for s in ss}
     return any(s.item_id not in others for s in sources)  # 빼면 그 요건 항목의 경로가 없어짐
 
@@ -222,24 +233,6 @@ def requirement_difficulty(areas: list[AreaImpact]) -> tuple[Difficulty, str]:
     if any(p.cross_domain for a in changed for p in a.paths):
         return Difficulty.MAJOR, "도메인 간 연계"
     return level, basis
-
-
-def shared_nodes(paths: list[ExplorePath], nodes: dict[str, GraphNode]) -> dict[str, str]:
-    """공유 노드 → 사유 (설계서 1-3 (c)). 진입점 = Explorer 경로 첫 노드가 Entry 인 것.
-
-    서로 다른 진입점 2개 이상의 경로가 지나는 노드, 또는 is_common 노드. 진입점 수는 Explorer 가 찾은 경로 안에서 센다
-    (그래프 전체보다 적을 수 있음 → 난이도를 과하게 올리지 않는 쪽).
-    """
-    entries: dict[str, set[str]] = {}
-    for p in paths:
-        if p.nodes and node_role(nodes.get(p.nodes[0])) is NodeRole.ENTRY:
-            for n in p.nodes[1:]:
-                entries.setdefault(n, set()).add(p.nodes[0])
-    out = {n: f"진입점 {len(es)}개" for n, es in entries.items() if len(es) >= 2}
-    for nid, n in nodes.items():
-        if n.properties.get("is_common"):
-            out[nid] = f"{out[nid]}, 공통 모듈" if nid in out else "공통 모듈"
-    return out
 
 
 def apply_shared_floor(
@@ -385,6 +378,22 @@ def node_meta_lines(paths: list[ImpactPath], nodes: dict[str, GraphNode], edges:
     return out
 
 
+def reanalysis_request(state: AgentState) -> str | None:
+    """사용자가 단순 응답의 "상세 분석 권장"을 보고 요청한 재분석 사유 (가장 최근 reanalysis 후속 입력, 설계서 1-4)."""
+    last = next((f for f in reversed(state.followups) if f.type is FollowupType.REANALYSIS), None)
+    if last is None:
+        return None
+    return last.content.strip() or None
+
+
+def reanalysis_nodes(state: AgentState) -> list[str]:
+    """재분석 사유에 나온 노드 ID (문장 끝 마침표는 뗀다, 순서 유지·중복 제거)."""
+    reason = reanalysis_request(state)
+    if reason is None:
+        return []
+    return list(dict.fromkeys(m.rstrip(".") for m in NODE_ID_IN_TEXT.findall(reason)))
+
+
 def user_message(
     state: AgentState, paths: list[ImpactPath], areas_of: dict[str, list[Area]], nodes: dict[str, GraphNode],
     shared: dict[str, str] | None = None,
@@ -392,6 +401,9 @@ def user_message(
     lines = ["[요청]", state.user_input.request_text.strip(), "", "[요건 항목]"]
     if state.planner:
         lines += [f"- 항목 {it.item_id} ({it.change_type.value}) {it.text}" for it in state.planner.items]
+    if reason := reanalysis_request(state):
+        lines += ["", "[재분석 요청] 사용자가 단순 응답을 보고 상세 분석을 요청했다. 아래 사유에 나온 노드·확인 사항마다 판정 결과를 쓴다.",
+                  reason]
 
     lines += ["", "[영역별 경로] path_id: 노드 -관계-> 노드 … (진입 → DB 순서, 근거 없는 노드는 *)"]
     shown = paths[:MAX_CONTEXT_PATHS]

@@ -9,11 +9,11 @@ from impact_agent.agents.simulator import (
     DraftDrop,
     DraftHop,
     SimulatorDraft,
+    reanalysis_nodes,
     requirement_difficulty,
-    shared_nodes,
 )
 from impact_agent.llm import LLMError, Usage
-from impact_agent.rules import build_impact_paths, interface_node_ids, path_areas
+from impact_agent.rules import build_impact_paths, interface_node_ids, path_areas, shared_nodes
 from impact_agent.schemas import (
     AgentName,
     AnswerKey,
@@ -31,6 +31,8 @@ from impact_agent.schemas import (
     ExplorePath,
     ExplorerOutput,
     Feasibility,
+    FollowupInput,
+    FollowupType,
     GraphEdge,
     GraphNode,
     ImpactType,
@@ -416,6 +418,71 @@ def test_llm_input_node_meta_tos_and_no_shared_block():
     # 공통 모듈은 [공유 노드] 에도 나온다 / 진입점이 하나뿐인 swing 경로는 [공유 노드] 블록 없음
     assert "- CTL:CmpCtl.save: 공통 모듈" in user.split("[공유 노드]")[1]
     assert "[공유 노드]" not in llm_input(make_swing_state([(1, SW_SCREEN, StopReason.TARGET_REACHED)]))
+
+
+# --- 재분석으로 들어온 요건 (설계서 1-4) ---------------------------------------------------------------
+
+REANALYSIS_REASON = "공통 모듈 MOD:PntSvc.checkLimit 이 경로에 있어 다른 화면·처리 영향 확인 필요 / TP:PntSvc.savePnt 를 화면·배치 2곳에서 호출"
+
+
+def with_followups(state, *followups):
+    state.followups = [FollowupInput(type=t, content=c) for t, c in followups]
+    return state
+
+
+def test_reanalysis_request_block_in_llm_input():
+    state = with_followups(make_swing_state(SHARED_PATHS),
+                           (FollowupType.BUSINESS_ANSWER, "B-1 답변"),
+                           (FollowupType.REANALYSIS, "이전 사유"),
+                           (FollowupType.REANALYSIS, f"  {REANALYSIS_REASON}  "))
+    user = llm_input(state)
+    block = user.split("[재분석 요청]")[1].split("[영역별 경로]")[0]
+    assert REANALYSIS_REASON in block                                      # 가장 최근 재분석 사유만
+    assert "이전 사유" not in user and "B-1 답변" not in user              # 다른 후속 입력은 넣지 않음
+    assert user.index("[요건 항목]") < user.index("[재분석 요청]") < user.index("[영역별 경로]")
+
+
+@pytest.mark.parametrize("followups", [
+    [],                                                                    # 처음부터 complex
+    [(FollowupType.CHANGE_ANALYSIS, "변경 분석 요청")],                     # 재분석이 아닌 후속 입력
+    [(FollowupType.REANALYSIS, "   ")],                                    # 사유가 비어 있음
+], ids=["no_followup", "other_followup", "empty_reason"])
+def test_no_reanalysis_block(followups):
+    user = llm_input(with_followups(make_swing_state(SHARED_PATHS), *followups))
+    assert "[재분석 요청]" not in user
+
+
+def test_reanalysis_nodes_extracted_from_reason():
+    state = with_followups(make_swing_state(SHARED_PATHS), (FollowupType.REANALYSIS,
+        "공통 모듈 CTL:CmmCdController.selectCdList 확인. SQL:tbch1010.make_snd_tgt#2 와 TP:PntSvc.savePnt. "
+        "TP:PntSvc.savePnt 다시, 노드가 아닌 IF_PNT_0010·TB_PNT_HST 는 제외"))
+    assert reanalysis_nodes(state) == ["CTL:CmmCdController.selectCdList", "SQL:tbch1010.make_snd_tgt#2", "TP:PntSvc.savePnt"]
+    assert reanalysis_nodes(make_swing_state(SHARED_PATHS)) == []
+
+
+POPUP_PATHS = [(1, SW_SCREEN, StopReason.TARGET_REACHED), (1, SW_POPUP, StopReason.DEAD_END)]   # P1-2 는 제외 가능한 경로
+
+
+def test_reanalysis_node_blocks_drop():
+    drop = draft(drops=[DraftDrop(path_id="P1-2", reason="팝업 조회만, 무관")])
+    out = SimulatorAgent(llm=ScriptLLM(drop)).run(make_swing_state(POPUP_PATHS))
+    assert [d.path.path_id for d in out.dropped_paths] == ["P1-2"]                 # 재분석이 아니면 제외됨
+    state = with_followups(make_swing_state(POPUP_PATHS), (FollowupType.REANALYSIS, "SCR:ZPNTSS02 팝업 영향 확인 필요"))
+    out = SimulatorAgent(llm=ScriptLLM(drop)).run(state)
+    assert out.dropped_paths == []                                                  # 사용자가 확인을 요청한 노드가 있어 남김
+    assert "P1-2" in {p.path_id for a in out.area_impacts for p in a.paths}
+
+
+def test_reanalysis_node_missing_from_paths_is_limit():
+    reason = f"{REANALYSIS_REASON} / 공통코드 CTL:CmmCdController.selectCdList 영향 확인"
+    out = SimulatorAgent(use_llm=False).run(with_followups(make_swing_state(SHARED_PATHS), (FollowupType.REANALYSIS, reason)))
+    missing = [x for x in out.unverified_segments if x.startswith("재분석 요청 노드 미탐색")]
+    assert missing == ["재분석 요청 노드 미탐색: CTL:CmmCdController.selectCdList (이번 탐색 경로에 없어 판정하지 못함)"]
+    # 사유의 노드가 모두 경로에 있거나, 재분석이 아니면 남기지 않음
+    out = SimulatorAgent(use_llm=False).run(with_followups(make_swing_state(SHARED_PATHS), (FollowupType.REANALYSIS, REANALYSIS_REASON)))
+    assert not any(x.startswith("재분석 요청 노드 미탐색") for x in out.unverified_segments)
+    out = SimulatorAgent(use_llm=False).run(make_swing_state(SHARED_PATHS))
+    assert not any(x.startswith("재분석 요청 노드 미탐색") for x in out.unverified_segments)
 
 
 def test_swing_kpi_final_nodes():
