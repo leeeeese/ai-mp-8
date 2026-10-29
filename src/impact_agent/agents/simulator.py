@@ -3,7 +3,8 @@
 1. 경로 골격 (규칙): Explorer 경로 → ImpactPath (엣지 유형·근거 위치·확신도), rules.build_impact_paths
 2. 영역 배정 (규칙): 역할 기준 screen / db / interface / batch (rules.path_areas)
 3. 영향 판정 (LLM, 있을 때): hop 별 영향, 영역별 영향 유형·가능성·난이도·대안, 요청안/대안 비교, 무관 경로 제외 제안
-4. 판정 보정 (규칙): 골격 밖 노드 무시, 근거 없는 영역은 review, 사유·대안 없는 hard 는 review, 경로 제외 가드
+4. 판정 보정 (규칙): 골격 밖 노드 무시, 근거 없는 영역은 review, 사유·대안 없는 hard 는 review, 경로 제외 가드,
+   공유 노드(진입점 2개 이상·공통)를 [변경] 하는 영역은 최소 Medium (설계서 1-3 (c))
 5. 분석 한계: unresolved · 목표 미도달 · hop 상한 · 매칭 실패 · 근거 없음 · 공통 제외 → unverified_segments
 LLM 이 없거나 실패하면 3단계를 건너뛰고 규칙 판정(review, 난이도 기준표)으로 낸다. 경로는 제외하지 않는다.
 """
@@ -11,7 +12,7 @@ LLM 이 없거나 실패하면 3단계를 건너뛰고 규칙 판정(review, 난
 from pydantic import BaseModel, Field
 
 from ..llm import LLM_FAILURES, LLMClient, Usage, analysis_llm
-from ..rules import AREA_ORDER, build_impact_paths, interface_node_ids, path_areas
+from ..rules import AREA_ORDER, build_impact_paths, interface_node_ids, node_areas, node_role, path_areas
 from ..schemas import (
     Alternative,
     Area,
@@ -22,9 +23,11 @@ from ..schemas import (
     DroppedPath,
     ExplorePath,
     Feasibility,
+    GraphEdge,
     GraphNode,
     ImpactPath,
     ImpactType,
+    NodeRole,
     SimulationOutput,
     StopReason,
 )
@@ -42,6 +45,12 @@ DB_DIFFICULTY_BY_CHANGE: dict[ChangeType, tuple[Difficulty, str]] = {
 }
 MAX_SCHEDULE_FACTORS = 3  # 영역당 일정 영향 요인 수
 DIFFICULTY_RANK = [Difficulty.MINOR, Difficulty.MEDIUM, Difficulty.MAJOR]
+CHANGE_TAG = "[변경]"  # hop 영향 설명의 변경 / 참조 표시 (prompts/simulator.md)
+REFERENCE_TAG = "[참조]"
+# [노드 메타] 에 넣을 노드 속성 (설계서 1-3 (a) "LLM 에 넘길 속성"). code·search_text 같은 큰 값은 넣지 않는다
+META_KEYS = ["images", "events", "cycle", "cron", "program", "steps", "interfaces", "url", "http_method", "stmt_type",
+             "dbio_type", "data_type", "nullable", "pk", "code_grp", "code_values"]
+MAX_META_VALUE = 120  # 속성 값 하나의 글자 수 상한
 
 
 # --- LLM 응답 형식 (Structured Outputs 호환: 기본값 없이 모든 필드 명시) ---------------------
@@ -113,13 +122,15 @@ class SimulatorAgent(BaseAgent[SimulationOutput]):
             path.cross_domain = len({nodes[h.node].domain for h in path.hops if h.node in nodes and nodes[h.node].domain}) > 1
         iface = interface_node_ids(nodes, evidence)
         areas_of = {p.path_id: path_areas([h.node for h in p.hops], nodes, iface) for p, _ in built}
+        hop_areas = {(p.path_id, i): a for p, _ in built for i, a in enumerate(node_areas([h.node for h in p.hops], nodes, iface))}
+        shared = shared_nodes(exp.paths if exp else [], nodes)
         limits = unverified_segments(state, [p for p, _ in built])
 
         draft = None
         if built and self.llm is not None:
             try:
                 draft, self.last_usage = self.llm.parse(
-                    self.system_prompt, user_message(state, [p for p, _ in built], areas_of, nodes), SimulatorDraft)
+                    self.system_prompt, user_message(state, [p for p, _ in built], areas_of, nodes, shared), SimulatorDraft)
             except LLM_FAILURES as exc:  # LLM 실패는 규칙 판정으로 대체 (분석 흐름을 끊지 않음)
                 limits.append(f"LLM 판정 실패로 규칙 판정 사용: {exc}")
 
@@ -127,7 +138,7 @@ class SimulatorAgent(BaseAgent[SimulationOutput]):
             apply_hop_impacts(draft, [p for p, _ in built])
         kept, dropped = apply_drops(draft, built, state)
         return SimulationOutput(
-            area_impacts=judge_areas(draft, kept, areas_of, state, limits),
+            area_impacts=judge_areas(draft, kept, areas_of, state, limits, (shared, hop_areas)),
             requested_vs_alternative=draft.requested_vs_alternative if draft else None,
             unverified_segments=limits,
             dropped_paths=dropped,
@@ -213,11 +224,77 @@ def requirement_difficulty(areas: list[AreaImpact]) -> tuple[Difficulty, str]:
     return level, basis
 
 
+def shared_nodes(paths: list[ExplorePath], nodes: dict[str, GraphNode]) -> dict[str, str]:
+    """공유 노드 → 사유 (설계서 1-3 (c)). 진입점 = Explorer 경로 첫 노드가 Entry 인 것.
+
+    서로 다른 진입점 2개 이상의 경로가 지나는 노드, 또는 is_common 노드. 진입점 수는 Explorer 가 찾은 경로 안에서 센다
+    (그래프 전체보다 적을 수 있음 → 난이도를 과하게 올리지 않는 쪽).
+    """
+    entries: dict[str, set[str]] = {}
+    for p in paths:
+        if p.nodes and node_role(nodes.get(p.nodes[0])) is NodeRole.ENTRY:
+            for n in p.nodes[1:]:
+                entries.setdefault(n, set()).add(p.nodes[0])
+    out = {n: f"진입점 {len(es)}개" for n, es in entries.items() if len(es) >= 2}
+    for nid, n in nodes.items():
+        if n.properties.get("is_common"):
+            out[nid] = f"{out[nid]}, 공통 모듈" if nid in out else "공통 모듈"
+    return out
+
+
+def apply_shared_floor(
+    values: dict, area: Area, paths: list[ImpactPath], shared: dict[str, str], hop_areas: dict[tuple[str, int], set[Area]]
+) -> None:
+    """공유 노드를 [변경] 하는 영역은 최소 Medium, 일정 영향 요인에 회귀 테스트 (LLM 판정 보정).
+
+    그 hop 이 실제로 속한 영역만 본다 (경로가 interface·db 에도 걸쳐 있어도 Module 변경은 진입 영역).
+    """
+    if values["impact_type"] not in (ImpactType.ADD, ImpactType.MODIFY):
+        return
+    hit = list(dict.fromkeys(
+        h.node for p in paths for i, h in enumerate(p.hops)
+        if h.node in shared and h.impact.startswith(CHANGE_TAG) and area in hop_areas.get((p.path_id, i), set())))
+    if not hit:
+        return
+    why = ", ".join(f"{n} ({shared[n]})" for n in hit)
+    if values["difficulty"] is Difficulty.MINOR:
+        values["difficulty"] = Difficulty.MEDIUM
+        values["difficulty_basis"] = f"(보정) 공유 노드 변경: {why} / LLM: {values['difficulty_basis']}"
+    factor = f"공유 노드 회귀 테스트: {why}"
+    if factor not in values["schedule_factors"] and len(values["schedule_factors"]) < MAX_SCHEDULE_FACTORS:
+        values["schedule_factors"].append(factor)
+
+
+def tag_mismatch(
+    area: Area, impact_type: ImpactType, paths: list[ImpactPath], hop_areas: dict[tuple[str, int], set[Area]]
+) -> str | None:
+    """hop [변경]/[참조] 표시와 영역 impact_type 이 어긋나면 경고 문구 (판정은 바꾸지 않음).
+
+    그 영역에 속한 hop(rules.node_areas)만 본다: [변경] 이 없는데 modify/add, [변경] 이 있는데 reference_only/none.
+    """
+    changed = list(dict.fromkeys(
+        h.node for p in paths for i, h in enumerate(p.hops)
+        if h.impact.startswith(CHANGE_TAG) and area in hop_areas.get((p.path_id, i), set())))
+    if impact_type in (ImpactType.ADD, ImpactType.MODIFY) and not changed:
+        return f"[{area.value}] {impact_type.value} 판정이지만 이 영역에 [변경] hop 이 없음 (판정 확인 필요)"
+    if impact_type in (ImpactType.REFERENCE_ONLY, ImpactType.NONE) and changed:
+        return f"[{area.value}] {impact_type.value} 판정이지만 [변경] hop 이 있음: {', '.join(changed)} (판정 확인 필요)"
+    return None
+
+
 def judge_areas(
     draft: SimulatorDraft | None, paths: list[ImpactPath], areas_of: dict[str, list[Area]], state: AgentState,
-    limits: list[str],
+    limits: list[str], shared: tuple[dict[str, str], dict[tuple[str, int], set[Area]]] | None = None,
 ) -> list[AreaImpact]:
-    """영역 4개의 판정. LLM 판정이 있으면 쓰고 규칙으로 보정, 없으면 규칙 판정."""
+    """영역 4개의 판정. LLM 판정이 있으면 쓰고 규칙으로 보정, 없으면 규칙 판정.
+
+    shared = (공유 노드 → 사유, (path_id, hop 순번) → 그 hop 의 영역). 공유 노드 보정에 쓴다.
+    """
+    shared_by_node, hop_areas = shared or ({}, {})
+    # LLM 이 hop 에 [변경]/[참조] 표시를 하나도 안 했으면 영역별 점검 대신 한 번만 알린다
+    tagged = any(h.impact.startswith((CHANGE_TAG, REFERENCE_TAG)) for p in paths for h in p.hops)
+    if draft is not None and draft.hops and not tagged:
+        limits.append("LLM hop 설명에 [변경]/[참조] 표시가 없어 영역 판정과 대조하지 못함")
     by_area = {a: [p for p in paths if a in areas_of[p.path_id]] for a in AREA_ORDER}
     drafts = {d.area: d for d in draft.areas} if draft else {}
     out = []
@@ -246,6 +323,9 @@ def judge_areas(
             if values["feasibility"] is Feasibility.HARD and not (values["infeasible_reason"] and values["alternatives"]):
                 values["feasibility"] = Feasibility.REVIEW
                 limits.append(f"[{area.value}] hard 판정의 사유·대안이 없어 review 로 둠")
+            apply_shared_floor(values, area, ps, shared_by_node, hop_areas)
+            if tagged and (warning := tag_mismatch(area, values["impact_type"], ps, hop_areas)):
+                limits.append(warning)
         out.append(AreaImpact(area=area, paths=ps, confidence=Confidence.CONFIRMED if all_confirmed else Confidence.INFERRED,
                               **values))
     return out
@@ -280,7 +360,35 @@ def _node_text(node_id: str, nodes: dict[str, GraphNode]) -> str:
     return f"{node_id}({n.label}, {n.name})" if n else node_id
 
 
-def user_message(state: AgentState, paths: list[ImpactPath], areas_of: dict[str, list[Area]], nodes: dict[str, GraphNode]) -> str:
+def _meta_value(value) -> str:
+    text = ", ".join(map(str, value)) if isinstance(value, list) else str(value)
+    return text if len(text) <= MAX_META_VALUE else text[:MAX_META_VALUE] + "…"
+
+
+def node_meta_lines(paths: list[ImpactPath], nodes: dict[str, GraphNode], edges: list[GraphEdge]) -> list[str]:
+    """[노드 메타]: 경로 노드마다 시스템·역할 + META_KEYS 속성, 경로 위 READS/WRITES 엣지의 접근 컬럼 (설계서 1-3 (a))."""
+    out = []
+    for nid in dict.fromkeys(h.node for p in paths for h in p.hops):
+        n = nodes.get(nid)
+        if n is None:
+            continue
+        role = node_role(n)
+        head = f"- {nid} ({n.domain.value if n.domain else '-'}·{role.value if role else n.label})"
+        props = [f"{k}={_meta_value(n.properties[k])}" for k in META_KEYS if n.properties.get(k) not in (None, "", [])]
+        if n.properties.get("is_common"):
+            props.append("공통 모듈")
+        out.append(f"{head} {' / '.join(props)}" if props else head)
+    pairs = {(p.hops[i - 1].node, h.node) for p in paths for i, h in enumerate(p.hops) if i}
+    for e in edges:
+        if (e.from_id, e.to_id) in pairs and e.type in ("READS", "WRITES") and e.properties.get("columns"):
+            out.append(f"- {e.from_id} -{e.type}-> {e.to_id} columns={_meta_value(e.properties['columns'])}")
+    return out
+
+
+def user_message(
+    state: AgentState, paths: list[ImpactPath], areas_of: dict[str, list[Area]], nodes: dict[str, GraphNode],
+    shared: dict[str, str] | None = None,
+) -> str:
     lines = ["[요청]", state.user_input.request_text.strip(), "", "[요건 항목]"]
     if state.planner:
         lines += [f"- 항목 {it.item_id} ({it.change_type.value}) {it.text}" for it in state.planner.items]
@@ -300,10 +408,17 @@ def user_message(state: AgentState, paths: list[ImpactPath], areas_of: dict[str,
     if len(paths) > MAX_CONTEXT_PATHS:
         lines.append(f"- … 외 {len(paths) - MAX_CONTEXT_PATHS}개 (판정은 보이는 경로 기준)")
 
+    path_nodes = {h.node for p in shown for h in p.hops}
+    lines += ["", "[노드 메타] 노드 (시스템·역할) 판단용 속성 / 데이터 접근 엣지의 접근 컬럼"]
+    lines += node_meta_lines(shown, nodes, state.explorer.edges if state.explorer else [])
+    shown_shared = [n for n in dict.fromkeys(h.node for p in shown for h in p.hops) if n in (shared or {})]
+    if shown_shared:
+        lines += ["", "[공유 노드] 여러 진입점(Screen·Batch)에서 호출되거나 공통 모듈. 바꾸면 걸친 영역 모두 영향, 최소 Medium"]
+        lines += [f"- {n}: {shared[n]}" for n in shown_shared]
+
     lines += ["", "[노드 원문]"]
     used = 0
     evidence = state.retriever.evidence if state.retriever else []
-    path_nodes = {h.node for p in shown for h in p.hops}
     for e in evidence:
         if e.node_id not in path_nodes:
             continue

@@ -79,8 +79,8 @@
    - 같은 노드 순서의 경로는 하나로 합친다. 경로 id `P<item_id>-<n>`
    - `cross_domain`: 경로 노드의 `domain` 이 둘 이상 (swing ↔ tos, `rules.SM_PART_DOMAINS`)
    - DB hop 의 컬럼 단위 정보 (예정): DataAccess → Table hop 은 엣지 `columns` 를 LLM 입력에 넣는다. 요건 컬럼이 `WRITES.columns` 에 있으면 변경 후보, `READS.columns` 에만 있으면 조회 영향, 둘 다 없으면 "컬럼 미사용" (PL/SQL DBIO 하나가 여러 테이블을 다루기 때문)
-   - 노드 메타 한 줄 (예정): 경로 노드마다 시스템·역할과 판단에 쓰는 속성을 `[노드 메타]` 로 붙인다 (1-3 의 "LLM 에 넘길 속성" 열). 원문이 잘려도 화면 이미지·배치 주기·인터페이스·컬럼 타입·코드값은 보이게 하기 위해서다
-   - 영향 범위 (예정): 경로 노드마다 **진입점 수**(`explorer.paths` 에서 그 노드를 지나는 서로 다른 Entry 수)와 `is_common` 을 계산해 `[공유 노드]` 로 넘긴다 (1-3 (c))
+   - 노드 메타 (`node_meta_lines`): LLM 입력의 `[노드 메타]` 에 보이는 경로 노드마다 `노드 (시스템·역할) 속성…` 한 줄과, 경로 위 READS/WRITES 엣지의 `columns` 를 넣는다. 속성은 `META_KEYS`(1-3 (a) "LLM 에 넘길 속성" 열)만, 값 하나는 `MAX_META_VALUE`(120자)까지, `code`·`search_text` 는 넣지 않는다. 원문이 잘려도 화면 이미지·배치 주기·인터페이스·컬럼 타입·코드값은 보이게 하기 위해서다
+   - 영향 범위 (`shared_nodes`): **진입점 수**(`explorer.paths` 에서 그 노드를 지나는 서로 다른 Entry 수)와 `is_common` 으로 공유 노드를 정하고, 보이는 경로에 있는 것만 `[공유 노드]` 블록으로 넘긴다 (없으면 블록 생략, 1-3 (c))
 2. **영역 배정 (규칙, `rules.path_areas`)**: 1-1 영역 분류 규칙.
 3. **영향 판정 (LLM)**: 영역별로 경로·원문·요건 항목을 주고 `SimulatorDraft` 를 받는다.
    - hop 별 `impact` (이 노드에서 무엇이 바뀌는지 / 확인만 필요한지). 문장 앞에 `[변경]`(코드·데이터·구조를 고침) / `[참조]`(경로에 있지만 확인만) 를 붙이고, `[변경]` 은 원문 근거(분기·상수·SQL 위치)를 인용
@@ -97,7 +97,8 @@
    - 그래프에 없는 노드를 hop 에 넣으면 버린다 (경로는 골격 노드만). `new_elements.suggested_id` 가 이미 그래프에 있으면 신규가 아니므로 버린다 (예정)
    - 영역 hop 이 전부 `inferred` 이면 `feasible` 로 확정하지 않고 `review`
    - 영역 `confidence` = hop 이 모두 `confirmed` 일 때만 `confirmed`
-   - 영향 범위 보정 (예정): `[변경]` hop 이 공유 노드(진입점 2개 이상 또는 `is_common`)이면 그 영역 난이도를 최소 Medium 으로 올리고, 일정 영향 요인에 "공유 노드 회귀 테스트 (진입점 n개)" 를 넣는다 (1-3 (c))
+   - 표시·판정 대조 (`tag_mismatch`): 영역에 속한 hop(`rules.node_areas`)에 `[변경]` 이 없는데 modify/add 이거나, `[변경]` 이 있는데 reference_only/none 이면 `unverified_segments` 에 "판정 확인 필요" 경고만 남긴다 (판정은 바꾸지 않음). LLM 이 hop 설명은 줬지만 `[변경]`/`[참조]` 표시를 하나도 안 했으면 영역별 대조 대신 한 줄로 알린다
+   - 영향 범위 보정 (`shared_nodes`, `apply_shared_floor`): `[변경]` hop 이 공유 노드(진입점 2개 이상 또는 `is_common`)이면 **그 hop 이 속한 영역**(`rules.node_areas`)의 난이도를 최소 Medium 으로 올리고 `difficulty_basis` 앞에 `(보정) 공유 노드 변경: …` 을 붙이며, 일정 영향 요인에 "공유 노드 회귀 테스트: …" 를 넣는다 (상한 3개 안에서). 경로가 interface·db 에 걸쳐 있어도 Module 변경은 진입 영역만 올린다. LLM 이 없으면 `[변경]` 판단이 없으므로 보정하지 않는다 (1-3 (c))
    - **경로 제외 가드**: 하나라도 해당하면 제외 제안을 거절하고 경로를 남긴다.
      - 목표 역할에 도달한 경로(`stop_reason=target_reached`)의 마지막 노드에 근거(`confirmed`)가 있음
      - 사용자가 확정한 노드(`Mention.confirmed_node`)가 경로에 있음
@@ -143,7 +144,7 @@ Simulator·Verifier·Composer 가 같은 함수(`rules.path_areas`)를 쓴다.
 | Medium | 기존 테이블에 컬럼 추가 · 업무 로직 변경이 2개 이상 노드 · 화면 항목 추가 + 저장 로직 변경 · 신규 DBIO | `new_elements` 의 `COL:`·`DBIO:`, Logic·DataAccess 다수 |
 | Minor | 데이터·설정값·문구·이미지 변경 · 공통코드 값 추가 · 배치 주기(`cron`) 변경 · 단일 노드 변경 | Screen `images`, Column `code_values`, Batch `cron`, Table 데이터만 |
 
-- 영향 범위 보정 (1-3 (c)): `[변경]` 노드가 공유 노드(진입점 2개 이상 또는 `is_common`)이면 영역 난이도 최소 Medium. 프롬프트 기준표 Medium 행에 반영됨, 코드 보정(LLM 결과 강제)은 예정. 변경 노드가 몇 단계(depth)에 있는지는 난이도에 쓰지 않는다.
+- 영향 범위 보정 (1-3 (c)): `[변경]` 노드가 공유 노드(진입점 2개 이상 또는 `is_common`)이면 영역 난이도 최소 Medium. 프롬프트 기준표 Medium 행과 코드 보정(LLM 결과 강제) 모두 반영됨. 변경 노드가 몇 단계(depth)에 있는지는 난이도에 쓰지 않는다.
 - 요건 전체 난이도 (`simulator.requirement_difficulty(area_impacts)`, 출력 필드가 아니라 Composer 요약·정답셋 비교 때 계산): 영역 난이도 중 최고. 단 변경 영역 3개 이상 · 도메인 간 연계 → Major, Medium 이상 영역이 2개 → Medium 이상 (Minor 영역끼리는 개수로 올리지 않음).
 - 일정 영향 요인: 영역당 3개 이내 (Simulator), 레포트 전체 8개 + "외 n건" (Composer).
 
@@ -462,7 +463,7 @@ pytest (LLM·Neo4j 불필요, 가짜 LLM `Fixed` 또는 LLM 없음, tos·swing �
 ## 9. 남은 과제
 
 1. `new_elements` 반영: 스키마(`NewElement`) → Simulator 보정 → Verifier `evidence_missing` 예외 → Composer "신규 개발 요소" 절·체크리스트 → 프론트 목업
-2. Simulator 일반화 (1-3) 코드: `[노드 메타]`(1-3 (a) 속성·엣지 `columns`)·`[공유 노드]`(진입점 수·`is_common`) 입력 생성, 영향 범위 보정(공유 노드 `[변경]` → 최소 Medium) 코드 강제, 고립 노드·swing REFERENCES 분석 한계. 프롬프트(역할별 원문 표·변경 지점 유형·공유 노드·swing 형 예시 4)는 반영됨
+2. Simulator 일반화 (1-3) 남은 것: 고립 노드·swing REFERENCES 분석 한계. 프롬프트(역할별 원문 표·변경 지점 유형·공유 노드·swing 형 예시 4), 영향 범위 보정, `[노드 메타]`·`[공유 노드]` 입력은 반영됨
 3. Verifier: 화면·배치 공유 TP 경고, 고립 노드 재계획 제외
 4. 난이도 기준 검증: 조정안은 손 대조 결과라 16건 실행 후 재확인. **SC-002(운영 장애, 정답 Major)는 기준표로 설명이 안 됨** → 운영 장애·권한 요건 가중 여부 결정
 5. 공통 노드 처리: 정답셋이 공통 노드를 `reference_only`·경로 시작으로 쓰는 경우(H-2·L-1·SC-003)와 Explorer 공통 제외 규칙을 맞출지 (파트너 합의)

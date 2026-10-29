@@ -90,18 +90,19 @@ def interface_node_ids(nodes: dict[str, GraphNode], evidence: list[Evidence]) ->
     return ids | {e.node_id for e in evidence if e.node_id and e.source_kind == "interface_spec"}
 
 
-def path_areas(path: list[str], nodes: dict[str, GraphNode], interface_ids: set[str]) -> list[Area]:
-    """경로가 걸치는 영역 (AREA_ORDER 순).
+def node_areas(path: list[str], nodes: dict[str, GraphNode], interface_ids: set[str]) -> list[set[Area]]:
+    """경로의 노드별 영역 (path 와 같은 순서).
 
     Entry 는 라벨로 screen / batch, DataAccess·Table·Column 은 db, EntryHandler·Logic 은 경로 진입 노드의 영역,
-    interface 는 인터페이스가 걸린 노드가 있으면 추가. 진입 노드 없이 EntryHandler 에서 시작한 경로는 screen 으로 본다.
+    interface 는 인터페이스가 걸린 노드에 추가. 진입 노드 없이 EntryHandler 에서 시작한 경로는 screen 으로 본다.
     """
     roles = [node_role(nodes.get(n)) for n in path]
     entry = next((ENTRY_AREAS.get(nodes[n].label) for n, r in zip(path, roles) if r is NodeRole.ENTRY and n in nodes), None)
     if entry is None and NodeRole.ENTRY_HANDLER in roles:
         entry = Area.SCREEN
-    areas = set()
+    out = []
     for n, r in zip(path, roles):
+        areas = set()
         if r is NodeRole.ENTRY:
             areas.add(ENTRY_AREAS.get(nodes[n].label, entry or Area.SCREEN))
         elif r in DB_ROLES:
@@ -110,6 +111,13 @@ def path_areas(path: list[str], nodes: dict[str, GraphNode], interface_ids: set[
             areas.add(entry)
         if n in interface_ids:
             areas.add(Area.INTERFACE)
+        out.append(areas)
+    return out
+
+
+def path_areas(path: list[str], nodes: dict[str, GraphNode], interface_ids: set[str]) -> list[Area]:
+    """경로가 걸치는 영역 (AREA_ORDER 순) = 노드별 영역의 합."""
+    areas = set().union(*node_areas(path, nodes, interface_ids))
     return [a for a in AREA_ORDER if a in areas]
 
 
