@@ -138,11 +138,19 @@ class SimulatorAgent(BaseAgent[SimulationOutput]):
 
 
 def apply_hop_impacts(draft: SimulatorDraft, paths: list[ImpactPath]) -> None:
-    """LLM 의 hop 영향 설명을 골격 hop 에만 반영한다 (골격 밖 노드·경로는 무시)."""
+    """LLM 의 hop 영향 설명을 골격 hop 에만 반영한다 (골격 밖 노드·경로는 무시).
+
+    경로별 설명이 없으면 같은 노드의 설명을 쓴다 (공유 노드를 한 경로에만 적어도 다른 경로에 반영).
+    같은 노드에 설명이 여러 개면 [변경] 설명을 우선한다.
+    """
     impacts = {(h.path_id, h.node): h.impact for h in draft.hops if h.impact.strip()}
+    by_node: dict[str, str] = {}
+    for h in draft.hops:
+        if h.impact.strip() and (h.node not in by_node or (h.impact.startswith("[변경]") and not by_node[h.node].startswith("[변경]"))):
+            by_node[h.node] = h.impact
     for p in paths:
         for h in p.hops:
-            h.impact = impacts.get((p.path_id, h.node), h.impact)
+            h.impact = impacts.get((p.path_id, h.node)) or by_node.get(h.node, h.impact)
 
 
 def apply_drops(

@@ -266,6 +266,32 @@ def test_llm_judgement_applied_and_ghost_nodes_ignored():
     assert "[영역별 경로]" in user and "P1-1: SCR:CMP01(Screen, CMP01) -CALLS->" in user and "SVC:CmpSvc.save 원문" in user
 
 
+def test_hop_impact_shared_node_filled_by_node():
+    # 화면 경로(P1-1)와 배치 경로(P2-1)가 같은 SQL 을 지남. LLM 은 P1-1 에만 설명 → P2-1 에도 반영
+    shared = ["BAT:TCMP100", "SQL:CmpMapper.insert", "TBL:TCP_CMP"]
+    state = make_state(paths=[(1, P_SCREEN, StopReason.TARGET_REACHED), (2, shared, StopReason.TARGET_REACHED)],
+                       edges=TOS_EDGES + [("BAT:TCMP100", "SQL:CmpMapper.insert", "EXECUTES")])
+    out = SimulatorAgent(llm=ScriptLLM(draft(hops=[
+        DraftHop(path_id="P1-1", node="SQL:CmpMapper.insert", impact="[변경] 컬럼 추가"),
+        DraftHop(path_id="P2-1", node="TBL:TCP_CMP", impact="[참조] 구조 변경 없음"),
+        DraftHop(path_id="P1-1", node="TBL:TCP_CMP", impact="[변경] 컬럼 추가 대상 테이블"),
+    ]))).run(state)
+    hops = {(p.path_id, h.node): h.impact for a in out.area_impacts for p in a.paths for h in p.hops}
+    assert hops[("P2-1", "SQL:CmpMapper.insert")] == "[변경] 컬럼 추가"           # 노드 기준으로 채움
+    assert hops[("P2-1", "TBL:TCP_CMP")] == "[참조] 구조 변경 없음"               # 경로별 설명이 있으면 그대로
+    assert hops[("P1-1", "TBL:TCP_CMP")] == "[변경] 컬럼 추가 대상 테이블"
+    assert hops[("P2-1", "BAT:TCMP100")] == "영향 검토 필요"                      # 설명이 없는 노드는 기본값
+
+
+def test_hop_impact_prefers_change_for_same_node():
+    out = SimulatorAgent(llm=ScriptLLM(draft(hops=[
+        DraftHop(path_id="P9-9", node="SVC:CmpSvc.save", impact="[참조] 호출만"),     # 없는 경로 id
+        DraftHop(path_id="P9-8", node="SVC:CmpSvc.save", impact="[변경] 저장 분기 추가"),
+    ]))).run(make_state())
+    hop = next(h for a in out.area_impacts for p in a.paths for h in p.hops if h.node == "SVC:CmpSvc.save")
+    assert hop.impact == "[변경] 저장 분기 추가"
+
+
 def test_feasible_without_evidence_becomes_review():
     # batch 경로(P2-1) 노드는 전부 근거 없음 → review / screen 경로는 일부만 근거 없음 → feasible 유지, 확신도는 inferred
     state = make_state(evidence_nodes=[n for n in EVIDENCE_NODES if n not in ("BAT:TCMP100", "SQL:tcmp100.C_SEL", "TBL:TCP_CMP")])
