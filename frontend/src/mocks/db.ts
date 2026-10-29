@@ -9,7 +9,17 @@ import type {
   Session,
   User,
 } from '@/api/types';
-import { H1_ANSWER, SC001_ANSWER, SC006_ANSWER, SC006_DETAIL_REASONS, reportFor } from './fixtures/scenarios';
+import {
+  H1_ANSWER,
+  L1_ANSWER,
+  L1_COMPLEX_ANSWER,
+  L1_KEYWORD,
+  L1_REQUEST,
+  SC001_ANSWER,
+  SC006_ANSWER,
+  SC006_DETAIL_REASONS,
+  reportFor,
+} from './fixtures/scenarios';
 
 const now = Date.now();
 const iso = (minAgo: number) => new Date(now - minAgo * 60_000).toISOString();
@@ -40,6 +50,7 @@ export const db = {
   sessions: [
     session('s-sc001', '캠페인 비마케팅 여부 T world 전송', '캠페인 등록 화면에서 비마케팅 여부를 입력받을 수 있게 하고, 이 값을 T world에 같이 전송해 주세요.', SC001_ANSWER, { starred: true, createdAt: iso(90) }),
     session('s-sc006', '캠페인 발송 실패 사유 확인', '자사(C260900301) 309명 중 198명 실패, 타사(C260900302) 444명 중 415명 실패입니다. 실패 고객의 사유를 알고 싶습니다.', SC006_ANSWER, { inputType: 'ops_inquiry', createdAt: iso(60 * 26) }),
+    session('s-l1', '구비서류 자동처리 배치 주기 단축', L1_REQUEST, L1_ANSWER, { smPart: 'prod', createdAt: iso(30) }),
     session('s-h1', '결합상품 A 무선+무선 결합 허용', '결합상품 A(요즘가족결합)를 무선+무선 5회선 이하도 가입 가능하게 하고, 유선이 없으면 상품명을 B 로 노출해 주세요.', H1_ANSWER, { smPart: 'prod', createdAt: iso(60 * 50) }),
   ] as Session[],
   checklists: {} as Record<string, ChecklistItem[]>,
@@ -88,9 +99,12 @@ export function createSession(req: CreateSessionRequest): Session {
 /** 상세 분석(reanalysis)을 요청한 세션: 다음 실행은 Planner 가 complex 로 판정한 것처럼 돈다 */
 const reanalysisRequested = new Set<string>();
 
+/** 상품 단순 요건(L-1): 첫 메시지에 L1_KEYWORD 가 들어간 상품 세션 */
+const isL1 = (s: Session) => s.smPart === 'prod' && !!s.messages[0]?.text?.includes(L1_KEYWORD);
+
 export function plannedComplexity(s: Session) {
   if (reanalysisRequested.has(s.id)) return 'complex';
-  return s.inputType === 'ops_inquiry' ? 'simple' : 'complex';
+  return s.inputType === 'ops_inquiry' || isL1(s) ? 'simple' : 'complex';
 }
 
 export function completeSession(id: string) {
@@ -98,10 +112,14 @@ export function completeSession(id: string) {
   if (!s || s.status === 'done') return;
   const complexAnswer = s.smPart === 'prod' ? H1_ANSWER : SC001_ANSWER;
   const answer = reanalysisRequested.has(id)
-    ? { ...complexAnswer, plannerVerdict: '복잡 — 사용자 상세 분석 요청에 따른 재분석' }
-    : s.inputType === 'ops_inquiry'
-      ? { ...SC006_ANSWER, changeDetected: true, detailReasons: SC006_DETAIL_REASONS }
-      : complexAnswer;
+    ? isL1(s)
+      ? L1_COMPLEX_ANSWER
+      : { ...complexAnswer, plannerVerdict: '복잡 — 사용자 상세 분석 요청에 따른 재분석' }
+    : isL1(s)
+      ? L1_ANSWER
+      : s.inputType === 'ops_inquiry'
+        ? { ...SC006_ANSWER, changeDetected: true, detailReasons: SC006_DETAIL_REASONS }
+        : complexAnswer;
   s.complexity = answer.complexity;
   s.status = 'done';
   s.messages.push({ id: nextId('m-'), role: 'agent', answer, createdAt: new Date().toISOString() });

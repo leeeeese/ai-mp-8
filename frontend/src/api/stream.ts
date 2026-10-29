@@ -3,7 +3,7 @@
  * mock: 타이머로 같은 이벤트 순서를 흉내 내고, 끝나면 mock 저장소에 답변을 붙인다.
  */
 import { USE_MOCK } from '@/config';
-import type { AgentEvent, Complexity } from './types';
+import type { AgentEvent, Complexity, SmPart } from './types';
 
 export function openAgentStream(sessionId: string, onEvent: (e: AgentEvent) => void, onDone: () => void): () => void {
   if (!USE_MOCK) {
@@ -25,7 +25,7 @@ export function openAgentStream(sessionId: string, onEvent: (e: AgentEvent) => v
   void import('@/mocks/db').then(({ db, plannedComplexity, completeSession }) => {
     const s = db.sessions.find((x) => x.id === sessionId);
     if (!s || cancelled) return;
-    const script = mockScript(plannedComplexity(s));
+    const script = mockScript(plannedComplexity(s), s.smPart);
     let t = 0;
     for (const step of script) {
       t += step.after;
@@ -45,7 +45,14 @@ export function openAgentStream(sessionId: string, onEvent: (e: AgentEvent) => v
   };
 }
 
-function mockScript(complexity: Complexity): { after: number; event: AgentEvent }[] {
+/** 상품(swing) 세션의 근거 예 (L-1 배치 주기). 그 밖은 tos 예 */
+const SWING_EVIDENCE = [
+  { nodeId: 'COL:TB_BAT_JOB.CRON_EXPR', file: 'source/swing/batch/BAT_JOB_REG.sql', location: 'L1-5' },
+  { nodeId: 'MOD:BatchLauncher.runJob', file: 'source/swing/program/BatchLauncher.pgm', location: 'L11-23' },
+  { nodeId: 'DBIO:BatJobSql.updateLastRun', file: 'source/swing/sql/BatJobSql.sql', location: 'L36-46' },
+];
+
+function mockScript(complexity: Complexity, sm: SmPart): { after: number; event: AgentEvent }[] {
   const c = (toolCalls: number, exploreLoops = 0, replans = 0) => ({ toolCalls, exploreLoops, replans });
   const complex = complexity === 'complex';
   return [
@@ -63,7 +70,9 @@ function mockScript(complexity: Complexity): { after: number; event: AgentEvent 
         elapsedMs: 900,
         detail: complex ? '근거 74 · 재탐색 요청 없음' : '근거 17',
         counters: c(complex ? 10 : 5, 1),
-        evidence: complex
+        evidence: sm === 'prod'
+          ? SWING_EVIDENCE
+          : complex
           ? [
               { nodeId: 'SQL:tbch1010.make_snd_tgt#2', file: 'source/tos/batch/proc/tbch1010.pc', location: 'L118-154' },
               { nodeId: 'DBIO:DCP_MSGSCRT_S02', file: 'source/tos/batch/dbio/DCP_MSGSCRT_S02.dbio.xml', location: 'L10-52' },

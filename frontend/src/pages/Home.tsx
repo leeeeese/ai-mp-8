@@ -13,6 +13,7 @@ const EXAMPLES: { text: string; sm: SmPart; type: InputType }[] = [
   { text: '캠페인 등록 화면에서 비마케팅 여부를 입력받고 T world 에 같이 전송해 주세요.', sm: 'dbm', type: 'requirement' },
   { text: '캠페인 발송 실패 고객의 실패 사유를 확인하고 싶습니다.', sm: 'dbm', type: 'ops_inquiry' },
   { text: '결합상품 A 를 무선+무선만으로도 가입할 수 있게 해 주세요.', sm: 'prod', type: 'requirement' },
+  { text: '구비서류 자동처리 배치 주기를 30분에서 5분으로 단축해 주세요.', sm: 'prod', type: 'requirement' },
 ];
 
 export function Home() {

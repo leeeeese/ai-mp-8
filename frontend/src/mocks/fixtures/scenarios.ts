@@ -102,6 +102,78 @@ export const SC006_DETAIL_REASONS = [
   '적재 범위 밖 연계(BAT:TBCH1020 결과 반영 프로그램) 확인 필요',
 ];
 
+// --- 상품(swing) 단순 요건: L-1 구비서류 자동처리 배치 주기 단축 → 상세 분석 권장 → 재분석 ------------------------
+
+/** 새 세션에서 이 표현이 들어간 상품 요건은 단순 요건(L-1)으로 응답한다 (mock 분기용) */
+export const L1_KEYWORD = '배치 주기';
+export const L1_REQUEST =
+  '구비서류 처리 자동화 배치 주기를 단축해 주세요. 대상: 법정대리인등록, 세금계산서발생, 장기일시정지, 가족결합, 군할인(히어로). 현재 30분 주기로 돌고 있는데 5분 주기로 변경 요청드립니다.';
+
+export const L1_ANSWER: AgentAnswer = {
+  complexity: 'simple',
+  plannerVerdict: '단순 — 배치 실행 주기(설정값)만 바뀌는 요건 (항목 1개: 배치 처리 변경)',
+  process: [
+    'Planner: 배치 처리 변경 → 목표 DataAccess (정방향, hop 5)',
+    'Explorer: 시작 노드 5개 (구비서류 자동처리 Job 5개), 경로 12개, tool 5회, 공통 노드 제외 1 (MOD:BatchLauncher.runJob)',
+    'Retriever: 근거 14건',
+  ],
+  summary: [
+    '5개 Job 의 실행 주기는 소스가 아니라 TB_BAT_JOB.CRON_EXPR 데이터로 관리됩니다 (기동기가 매 tick 에 이 값을 읽음).',
+    '대상 5개 행의 CRON_EXPR 를 0 0/30 * * * ? 에서 0 0/5 * * * ? 로 바꾸면 됩니다. 스키마·프로그램 변경은 없습니다.',
+    '.bat 의 SCHEDULE 표기는 정의서용이라 함께 맞추면 됩니다 (실제 기동은 TB_BAT_JOB 기준).',
+  ],
+  areas: [],
+  openItemCount: 1,
+  evidence: [
+    { claim: '주기 = TB_BAT_JOB.CRON_EXPR (Job 5개 모두 0 0/30 * * * ?)', evidence: 'Job 등록 데이터', location: 'batch/BAT_JOB_REG.sql L1-5', confidence: 'confirmed' },
+    { claim: '기동기가 CRON_EXPR 로 실행 여부 판단', evidence: 'BatchLauncher.tick CRON_MATCH', location: 'program/BatchLauncher.pgm L3-9', confidence: 'confirmed' },
+    { claim: '실행 후 마지막 실행 시각 기록', evidence: 'BatJobSql.updateLastRun', location: 'sql/BatJobSql.sql L36-46', confidence: 'confirmed' },
+    { claim: 'Job 정의의 SCHEDULE 은 표기용', evidence: 'ZDOCBB0100010.bat SCHEDULE, 배치 정의서 "TB_BAT_JOB.CRON_EXPR 로 관리"', location: 'batch/ZDOCBB0100010.bat L4', confidence: 'inferred' },
+  ],
+  checkQueries: [
+    {
+      title: '대상 Job 현재 주기·최근 실행',
+      sql: `SELECT JOB_ID, JOB_NM, CRON_EXPR, LAST_RUN_DTM, LAST_RUN_RSLT_CD
+  FROM TB_BAT_JOB
+ WHERE JOB_ID IN ('ZDOCBB0100010', 'ZDOCBB0100020', 'ZDOCBB0100030', 'ZDOCBB0100040', 'ZDOCBB0100050')`,
+    },
+  ],
+  changeDetected: true,
+  detailReasons: [
+    '공통 모듈 MOD:BatchLauncher.runJob 이 탐색에서 제외되어 다른 배치·처리 영향 확인 필요',
+    'DBIO:BatJobSql.updateLastRun 을 Job 5개(BAT:ZDOCBB0100010 외 4)가 함께 호출',
+  ],
+};
+
+/** 상세 분석 요청 뒤 복잡 요건으로 다시 분석한 결과 */
+export const L1_COMPLEX_ANSWER: AgentAnswer = {
+  complexity: 'complex',
+  plannerVerdict: '복잡 — 사용자 상세 분석 요청에 따른 재분석 (배치 기동기·실행 이력까지 확인)',
+  process: [
+    'Planner: 상세 분석 요청 → 항목 1개 배치 처리 변경, simulator·verifier 포함',
+    'Explorer: 시작 노드 6개 (Job 5개 + 요청 노드 MOD:BatchLauncher.runJob), 경로 18개, tool 8회',
+    'Retriever: 근거 21건',
+    'Simulator: 요청 노드 2개 확인 — 기동기 중복 실행 방지 없음, 실행 이력 DBIO 공유',
+    'Verifier: 통과',
+  ],
+  summary: [
+    '주기 변경 자체는 TB_BAT_JOB.CRON_EXPR 데이터 5행 수정으로 가능합니다 (Minor).',
+    '확인 결과 BatchLauncher.runJob 에 같은 Job 중복 기동 방지가 없어, 1회 처리가 5분을 넘으면 같은 예약 건을 두 번 처리할 수 있습니다.',
+    'TB_BAT_RUN_HST 로 Job 별 소요시간을 먼저 확인하고, 필요하면 실행중 체크와 기동 시각 분산(0/5, 1/5 …)을 함께 반영하길 권합니다.',
+  ],
+  areas: [
+    { area: 'db', impact: '수정 — TB_BAT_JOB.CRON_EXPR 5행 0 0/30 → 0 0/5 (데이터)', path: ['BAT:ZDOCBB0100010', 'DBIO:BatJobSql.updateLastRun', 'TBL:TB_BAT_JOB', 'COL:TB_BAT_JOB.CRON_EXPR'], requested: { feasibility: 'feasible', difficulty: 'Minor' }, alternative: { feasibility: 'feasible', difficulty: 'Minor' }, confidence: 'confirmed' },
+    { area: 'batch', impact: '확인 필요 — 기동기 중복 실행 방지 없음, 소요시간 5분 초과 시 겹침', path: ['BAT:ZDOCBB0100040', 'MOD:BatchLauncher.runJob', 'DBIO:BatJobSql.insertRunHst', 'TBL:TB_BAT_RUN_HST'], requested: { feasibility: 'review', difficulty: 'Minor' }, alternative: { feasibility: 'feasible', difficulty: 'Medium' }, confidence: 'confirmed' },
+  ],
+  openItemCount: 3,
+};
+
+const L1_CHECKLIST: ChecklistItem[] = [
+  { id: 'b1', owner: 'business', question: '적용 희망일과 24시간 5분 주기 적용 여부 (야간 시간대 제외 필요 여부)', status: 'unconfirmed' },
+  { id: 'd1', owner: 'developer', question: 'TB_BAT_RUN_HST 로 Job 별 평균/최대 소요시간 확인 — 5분 초과 Job 이 있는가 (MOD:BatchLauncher.runJob 중복 기동 방지 없음)', status: 'unconfirmed' },
+  { id: 'd2', owner: 'developer', question: '5개 Job 이 매 5분 0초에 동시 기동됨 — 기동 시각 분산(0/5, 1/5 …) 필요 여부', status: 'unconfirmed' },
+];
+
 export const H1_ANSWER: AgentAnswer = {
   complexity: 'complex',
   plannerVerdict: '복잡 — 결합 조건 검증·결합그룹 생성·할인 배치가 함께 걸림',
@@ -135,6 +207,19 @@ const SC001_CHECKLIST: ChecklistItem[] = [
 ];
 
 export function reportFor(answer: AgentAnswer, version: number): Report {
+  if (answer === L1_COMPLEX_ANSWER) {
+    return {
+      version: 1,
+      versions: [{ version: 1, label: 'v1 상세 분석 (재분석)' }],
+      feasibility: 'review',
+      difficulty: 'Minor',
+      scheduleUncertainty: '중간',
+      areas: answer.areas,
+      scheduleFactors: ['Job 별 소요시간 확인 (TB_BAT_RUN_HST)', '공유 노드 회귀 테스트: MOD:BatchLauncher.runJob (Job 5개)'],
+      limits: ['구비서류 수신·예약 등록 화면은 이번 요건 경로 밖'],
+      checklist: L1_CHECKLIST.map((c) => ({ ...c })),
+    };
+  }
   const v2 = version >= 2;
   const checklist = SC001_CHECKLIST.map((c) =>
     v2 && c.id === 'b1'
