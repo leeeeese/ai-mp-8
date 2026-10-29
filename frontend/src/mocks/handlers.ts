@@ -1,7 +1,7 @@
 import { http, HttpResponse } from 'msw';
 import type { CreateSessionRequest, GraphEdge, GraphNode, GraphStatus, MessageKind, SmPart, User } from '@/api/types';
 import graphSample from './fixtures/graph-sample.json';
-import { addMessage, audit, checklistOf, createSession, db, nextId } from './db';
+import { addMessage, audit, checklistOf, createSession, db, kpiRecords, nextId } from './db';
 
 interface Sample {
   domain: string;
@@ -126,6 +126,17 @@ export const handlers = [
     const item = { ...current.find((c) => c.id === params.itemId)!, ...body };
     db.checklists[id] = current.map((c) => (c.id === item.id ? item : c));
     return HttpResponse.json(item);
+  }),
+
+  // --- KPI (세션별 기록, 최근 순) ---
+  http.get('/api/kpi/records', async () => {
+    await delay();
+    return HttpResponse.json(kpiRecords);
+  }),
+  http.delete('/api/kpi/records', () => {
+    const deleted = kpiRecords.length;
+    kpiRecords.length = 0; // 같은 배열을 비워 세션 종료 시 추가(addKpiRecord)가 계속 이 배열에 쌓이게 한다
+    return HttpResponse.json({ deleted });
   }),
 
   // --- 적재 현황 ---

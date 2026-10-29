@@ -145,6 +145,33 @@ export interface Report {
   checklist: ChecklistItem[];
 }
 
+// --- KPI (개발·운영용 측정, 세션 화면에는 표시하지 않음) -------------------------------------------
+// 백엔드 KpiOutput 과 같은 필드명을 쓴다 (snake_case). 세션 분석이 끝날 때마다 기록 1건 (state.kpi 저장)
+
+/** 백엔드 KpiMetricName 값 */
+export type KpiMetricName =
+  | 'node_recall' | 'node_miss_rate' | 'critical_miss_rate' | 'node_precision' | 'excluded_nodes' | 'out_of_scope_nodes'
+  | 'complexity_match' | 'difficulty_match' | 'feasibility_match' | 'area_impact_match' | 'change_tag_accuracy'
+  | 'wrong_path_adopted' | 'detail_recommended' | 'complex_minor' | 'verifier_unresolved'
+  | 'latency_ms' | 'tool_calls' | 'explore_loops' | 'replans' | 'total_tokens';
+
+export interface KpiRecord {
+  session_id: string;
+  title: string;
+  sm_part: SmPart;
+  complexity: Complexity; // 실행 flow
+  created_at: string;
+  agent_version: string;
+  req_id: string | null; // 정답셋 사례면 요건 ID (그때만 evaluable)
+  evaluable: boolean; // 정답 대비 품질·판정 지표를 계산했는지 (일반 요청은 false → 성능 지표만)
+  metrics: Partial<Record<KpiMetricName, number>>;
+  counts?: { tp: number; fn: number; fp: number; critical_missed: number; critical_total: number }; // 합산 집계용
+  missed_nodes: string[];
+  false_positive_nodes: string[];
+  reanalyzed: boolean;
+  judgement_notes: string[];
+}
+
 // --- 적재 현황 -------------------------------------------------------------------
 
 export interface MasterSync {

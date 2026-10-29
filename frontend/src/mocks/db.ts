@@ -4,6 +4,7 @@ import type {
   AuditLog,
   ChecklistItem,
   CreateSessionRequest,
+  KpiRecord,
   Message,
   ReloadRequest,
   Session,
@@ -70,6 +71,82 @@ export const db = {
   ] as AuditLog[],
 };
 
+/**
+ * KPI 기록 (목업 예시 수치 — 실제 평가 결과 아님). 실제: Supervisor 가 세션마다 state.kpi 를 저장하고 GET /api/kpi/records 로 조회.
+ * 정답셋 사례(req_id)만 품질·판정 지표가 있고, 일반 요청은 성능 지표만 (evaluable=false).
+ */
+const perf = (complexity: 'simple' | 'complex', replans = 0, loops = 1) =>
+  complexity === 'simple'
+    ? { latency_ms: 48_000, tool_calls: 9, explore_loops: loops, replans, total_tokens: 61_000 }
+    : { latency_ms: 131_000, tool_calls: 19, explore_loops: loops, replans, total_tokens: 142_000 };
+
+function seedRecord(sessionId: string, r: Partial<KpiRecord> & Pick<KpiRecord, 'req_id' | 'complexity'>): KpiRecord {
+  const s = db.sessions.find((x) => x.id === sessionId)!;
+  return {
+    session_id: sessionId, title: s.title, sm_part: s.smPart, created_at: s.createdAt, agent_version: 'v0.4 (mock)',
+    evaluable: r.req_id !== null, metrics: {}, missed_nodes: [], false_positive_nodes: [], reanalyzed: false, judgement_notes: [],
+    ...r,
+  };
+}
+
+export const kpiRecords: KpiRecord[] = [
+  seedRecord('s-sc001', {
+    req_id: 'SC-001', complexity: 'complex',
+    counts: { tp: 4, fn: 0, fp: 22, critical_missed: 0, critical_total: 2 },
+    metrics: { node_recall: 1, node_miss_rate: 0, critical_miss_rate: 0, node_precision: 4 / 26, complexity_match: 1,
+      difficulty_match: 1, feasibility_match: 1, area_impact_match: 1, change_tag_accuracy: 0.9, wrong_path_adopted: 0,
+      complex_minor: 0, verifier_unresolved: 0, ...perf('complex') },
+    false_positive_nodes: ['SQL:CmpnMapper.selectCmpn', 'SCR:TOSCP0120M'],
+    judgement_notes: ['[변경]/[참조] 판정 불일치: COL:TCH_MMS_SND_TGT.NON_MKTG_YN(정답 참조)'],
+  }),
+  seedRecord('s-sc006', {
+    req_id: 'SC-006', complexity: 'simple',
+    counts: { tp: 2, fn: 1, fp: 24, critical_missed: 1, critical_total: 3 },
+    metrics: { node_recall: 2 / 3, node_miss_rate: 1 / 3, critical_miss_rate: 1 / 3, node_precision: 2 / 26, complexity_match: 1,
+      detail_recommended: 1, ...perf('simple') },
+    missed_nodes: ['COL:TCP_CMM_CD.CD_NM'],
+    judgement_notes: ['정답 simple 인데 상세 분석 권장 (공통 모듈 CTL:CmmCdController.selectCdList 이 경로에 있어 다른 화면·처리 영향 확인 필요)'],
+  }),
+  seedRecord('s-l1', {
+    req_id: 'L-1', complexity: 'simple',
+    counts: { tp: 7, fn: 0, fp: 16, critical_missed: 0, critical_total: 0 },
+    metrics: { node_recall: 1, node_miss_rate: 0, node_precision: 7 / 23, complexity_match: 1, detail_recommended: 1, ...perf('simple') },
+    judgement_notes: ['정답 simple 인데 상세 분석 권장 (공통 모듈 MOD:BatchLauncher.runJob 이 탐색에서 제외되어 다른 배치·처리 영향 확인 필요)'],
+  }),
+  seedRecord('s-h1', {
+    req_id: 'H-1', complexity: 'complex',
+    counts: { tp: 5, fn: 0, fp: 14, critical_missed: 0, critical_total: 4 },
+    metrics: { node_recall: 1, node_miss_rate: 0, critical_miss_rate: 0, node_precision: 5 / 19, complexity_match: 1,
+      difficulty_match: 1, feasibility_match: 1, area_impact_match: 0.75, change_tag_accuracy: 1, complex_minor: 0,
+      verifier_unresolved: 0, ...perf('complex', 1, 2) },
+    judgement_notes: ['영역 영향 유형 불일치: db 정답 modify/실행 reference_only'],
+  }),
+];
+
+/** 세션 분석이 끝날 때 KPI 기록 1건 추가 (최근 순). 미리 만든 정답셋 세션의 재분석은 평가 지표까지, 그 밖은 성능 지표만 */
+function addKpiRecord(s: Session, answer: AgentAnswer, reanalyzed: boolean) {
+  const caseId = s.id === 's-l1' ? 'L-1' : null;
+  const complex = answer.complexity === 'complex';
+  const evaluable = caseId !== null && reanalyzed;
+  const metrics: KpiRecord['metrics'] = { ...perf(answer.complexity) };
+  if (!complex) metrics.detail_recommended = answer.detail_analysis_recommended ? 1 : 0;
+  if (complex) Object.assign(metrics, { complex_minor: 0, verifier_unresolved: 0 });
+  if (evaluable) {
+    Object.assign(metrics, { node_recall: 1, node_miss_rate: 0, node_precision: 7 / 18, complexity_match: 0,
+      difficulty_match: 1, feasibility_match: 0, area_impact_match: 0.5, change_tag_accuracy: 1, complex_minor: 1 });
+  }
+  kpiRecords.unshift({
+    session_id: s.id, title: s.title, sm_part: s.smPart, complexity: answer.complexity, created_at: new Date().toISOString(),
+    agent_version: 'v0.4 (mock)', req_id: evaluable ? caseId : null, evaluable, metrics,
+    counts: evaluable ? { tp: 7, fn: 0, fp: 11, critical_missed: 0, critical_total: 0 } : undefined,
+    missed_nodes: [], false_positive_nodes: [], reanalyzed,
+    judgement_notes: evaluable
+      ? ['복잡도: 정답 simple / 실행 complex (사용자 상세 분석 요청)', '구현 가능 여부: 정답 feasible / 실행 review',
+         '영역 영향 유형 불일치: batch 정답 modify/실행 review 영역']
+      : [],
+  });
+}
+
 export function checklistOf(sessionId: string, version: number) {
   const s = db.sessions.find((x) => x.id === sessionId);
   const answer = s?.messages.find((m) => m.answer?.complexity === 'complex')?.answer ?? SC001_ANSWER;
@@ -123,6 +200,7 @@ export function completeSession(id: string) {
   s.complexity = answer.complexity;
   s.status = 'done';
   s.messages.push({ id: nextId('m-'), role: 'agent', answer, createdAt: new Date().toISOString() });
+  addKpiRecord(s, answer, reanalysisRequested.has(id));
 }
 
 export function addMessage(id: string, kind: Message['kind'], text: string): Session | undefined {

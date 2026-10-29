@@ -47,6 +47,7 @@ export function Session() {
       () => {
         void qc.invalidateQueries({ queryKey: ['session', id] });
         void qc.invalidateQueries({ queryKey: ['sessions'] });
+        void qc.invalidateQueries({ queryKey: ['kpi-records'] }); // 세션마다 KPI 기록 1건 추가 → KPI 페이지 갱신
       },
     );
     // 세션이 바뀌거나, 처음 불러왔거나, 실행 상태가 바뀔 때만 다시 연결

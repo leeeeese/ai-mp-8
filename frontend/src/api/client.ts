@@ -5,6 +5,7 @@ import type {
   ChecklistItem,
   CreateSessionRequest,
   GraphStatus,
+  KpiRecord,
   MessageKind,
   Neighborhood,
   ReloadRequest,
@@ -75,6 +76,21 @@ export function useAnswerChecklist(id: string) {
     mutationFn: ({ itemId, ...body }: { itemId: string; answer?: string; status: ChecklistItem['status'] }) =>
       request<ChecklistItem>(`/api/sessions/${id}/checklist/${itemId}`, { method: 'PATCH', ...json(body) }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['report', id] }),
+  });
+}
+
+// --- KPI ------------------------------------------------------------------------
+
+/** 세션별 KPI 기록 (최근 순). 세션이 끝나면 Session 화면이 이 쿼리를 무효화해 KPI 페이지가 갱신된다 */
+export const useKpiRecords = () =>
+  useQuery({ queryKey: ['kpi-records'], queryFn: () => request<KpiRecord[]>('/api/kpi/records') });
+
+/** KPI 기록 전체 초기화 (같은 시나리오를 반복 테스트할 때). 되돌릴 수 없다 */
+export function useResetKpiRecords() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: () => request<{ deleted: number }>('/api/kpi/records', { method: 'DELETE' }),
+    onSuccess: () => qc.invalidateQueries({ queryKey: ['kpi-records'] }),
   });
 }
 

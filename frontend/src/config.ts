@@ -7,5 +7,8 @@ export const LIMITS = {
   maxReplan: 2, // MAX_REPLAN
 };
 
+/** KPI 기준값 (백엔드 schemas.json#/constants KPI_MIN_RECALL · KPI_MIN_PRECISION, 잠정). Critical 미탐률은 권장 0 */
+export const KPI_MIN = { recall: 0.8, precision: 0.5 };
+
 /** VITE_USE_MOCK=false 이면 실제 API·SSE 를 호출한다 (기본은 MSW mock). */
 export const USE_MOCK = import.meta.env.VITE_USE_MOCK !== 'false';

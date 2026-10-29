@@ -8,6 +8,7 @@ import { Session } from './pages/Session';
 const Report = lazy(() => import('./pages/Report').then((m) => ({ default: m.Report })));
 const Graph = lazy(() => import('./pages/Graph').then((m) => ({ default: m.Graph })));
 const Admin = lazy(() => import('./pages/Admin').then((m) => ({ default: m.Admin })));
+const Kpi = lazy(() => import('./pages/Kpi').then((m) => ({ default: m.Kpi })));
 
 const page = (el: ReactNode) => <Suspense fallback={<p className="p-6 text-sm text-muted">불러오는 중…</p>}>{el}</Suspense>;
 
@@ -19,6 +20,7 @@ const router = createBrowserRouter([
       { path: '/session/:id', element: <Session /> },
       { path: '/session/:id/report', element: page(<Report />) },
       { path: '/graph', element: page(<Graph />) },
+      { path: '/kpi', element: page(<Kpi />) },
       { path: '/admin', element: page(<Admin />) },
       { path: '*', element: <NotFound /> },
     ],

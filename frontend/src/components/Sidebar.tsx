@@ -1,4 +1,4 @@
-import { ChevronRight, Database, FileText, Home, Shield, Star, X } from 'lucide-react';
+import { ChevronRight, Database, FileText, Gauge, Home, Shield, Star, X } from 'lucide-react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useSessions } from '@/api/client';
 import { SM_LABEL, type SessionSummary } from '@/api/types';
@@ -69,6 +69,9 @@ export function Sidebar() {
             className={() => navCls({ isActive: location.pathname.endsWith('/report') })}
           >
             <FileText size={16} /> 결과물
+          </NavLink>
+          <NavLink to="/kpi" className={navCls}>
+            <Gauge size={16} /> KPI 평가
           </NavLink>
           {user.role === 'admin' && (
             <NavLink to="/admin" className={navCls}>

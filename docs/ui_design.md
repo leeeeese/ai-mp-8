@@ -21,6 +21,7 @@
 | UI-03 | 결과물 | `/session/:id/report` | 기본 | [다크](ui/04-report-dark.png) |
 | UI-04 | 적재 현황 | `/graph` | 기본 (재적재 승인은 슈퍼) | [라이트](ui/05-graph-light.png) |
 | UI-05 | 관리 | `/admin` | 슈퍼 | [다크](ui/06-admin-dark.png) |
+| UI-06 | KPI 평가 | `/kpi` | 기본 (전원 열람) | - |
 
 ## 3. 디자인 시스템
 
@@ -186,6 +187,22 @@ Dribbble "Forge – AI Agent Code Workspace"(라이트) · "AI Knowledge Base Em
 
 권한이 없으면 "권한이 없습니다" 안내 화면.
 
+### UI-06 KPI 평가 (`/kpi`, 전원 열람)
+
+서비스가 잘 동작하는지 확인하는 **개발·운영용 측정**이다. 사용자 세션 화면(진행 패널 포함)에는 KPI 를 보여 주지 않고 이 페이지에서만 본다. 권한 설정 없이 누구나 볼 수 있다 (필요해지면 권한을 붙인다).
+
+| 영역 | 내용 |
+|---|---|
+| 상단 | SM 파트 필터(전체·상품·DBM), **기록 초기화** 버튼(확인 창 → 전체 기록 삭제, 같은 시나리오 반복 테스트용. 세션·분석 결과는 그대로). mock 모드면 "목업 예시 데이터 · 실제 평가 결과 아님" 배지 |
+| 실행 (전체 세션) | 스탯 타일 4개: 평균 소요 시간, 평균 도구 호출, 재계획 발생 비율, 상세 분석 권장·재분석 수 |
+| 노드 탐지 (정답셋 사례) | 미터 3개: 노드 탐지율(기준 ≥ 80%), Critical 미탐률(권장 0), 노드 정밀도(기준 ≥ 50%). 기준선 표시 + "충족/미달" 글자 배지. TP/FN/FP 를 **합산한 뒤** 비율 (배치 평가와 같음) |
+| 판정 품질 (정답셋 사례, 측정만) | 스탯 타일 6개: 복잡도·난이도 일치율, 영역 영향 유형 일치, [변경]/[참조] 판정 정확도, 놓친 복잡 요건 붙잡음(정답 complex 인데 단순 처리 → 권장), 과한 권장 |
+| 세션별 기록 (최근 순) | 시각, 세션(링크, 재분석 배지), SM·flow, 정답셋 요건 ID 또는 "일반 요청", 탐지율, 정밀도, 시간·도구·재계획, 판정 불일치·미탐(펼쳐 보기) |
+
+- **갱신:** 세션 분석이 끝날 때마다 KPI 기록 1건이 쌓이고(백엔드: Supervisor 가 Composer → KPI 이후 `state.kpi` 를 세션 ID 와 함께 저장), 세션 화면이 `kpi-records` 쿼리를 무효화해 KPI 페이지가 갱신된다.
+- **정답셋 사례만 품질 지표:** 탐지율·정밀도·판정 품질은 정답과 비교해야 해서 정답셋 사례(평가 모드)로 실행한 세션만 계산된다. 일반 요청은 실행 성능·결과 형태만 남는다 (`evaluable=false`).
+- 지표 정의: [SE_kpi-agent-design.md](SE_kpi-agent-design.md) 1-4.
+
 ## 6. 권한
 
 | 역할 | 권한 |
@@ -220,6 +237,8 @@ Dribbble "Forge – AI Agent Code Workspace"(라이트) · "AI Knowledge Base Em
 | `GET/POST/PATCH /api/admin/users` | 사용자 목록·추가·수정 |
 | `GET /api/admin/reload-requests`, `POST …/:id/approve\|reject` | 재적재 승인·반려 |
 | `GET /api/admin/audit-logs` | 감사 로그 |
+| `GET /api/kpi/records` | → `KpiRecord[]` (세션별 KPI 기록, 최근 순). 필드는 백엔드 `KpiOutput` 과 같은 이름(`metrics`·`reanalyzed`·`judgement_notes`·`missed_nodes`…) + 세션 정보·합산용 `counts{tp, fn, fp, critical_missed, critical_total}` |
+| `DELETE /api/kpi/records` | KPI 기록 전체 초기화 → `{ deleted }` (세션·분석 결과는 지우지 않음) |
 
 - SSE: `VITE_USE_MOCK=false` 면 `EventSource`, 아니면 같은 이벤트 순서를 타이머로 재생하고 끝나면 mock 저장소에 답변을 붙인다 (`src/api/stream.ts`).
 - 백엔드 `AgentState` 와의 대응: `planner.complexity` → 배지·Planner 판정, `explorer/retriever` 실행 로그 → 진행 패널, `retriever.evidence` → 근거 목록, `state.tool_call_count`·`explore_loop_count`·`replan_count` → 한도 미터.
