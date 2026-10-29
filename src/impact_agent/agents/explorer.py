@@ -1,6 +1,7 @@
 """Explorer: Planner 탐색 명세(items)의 언급 표현을 노드로 매칭하고, 목표 역할까지 경로를 탐색한다.
 
-- 시작 노드: 확정 매핑(confirmed_node) → 용어사전·노드명·설명 검색 (search_graph_nodes)
+- 시작 노드: 확정 매핑(confirmed_node) → 용어사전·노드명·설명 검색 (search_graph_nodes, 같은 표현·라벨 검색은 한 번만)
+- tool 호출: 규칙 단계·재탐색은 Retriever 원문 읽기 1회, ReAct 는 RESERVED_FOR_RETRIEVER 를 남긴다
 - 탐색 (traverse_graph): direction 에 따라
     forward               목표 역할보다 진입 쪽 시작 노드에서 정방향
     reverse               목표 역할보다 DB 쪽 시작 노드에서 역방향
@@ -9,6 +10,8 @@
 - out_of_graph·매칭 실패·신규 후보는 unresolved 로 넘긴다
 - ReAct 보완 (Yao et al. 2023, LLM 이 있을 때 첫 라운드만): 규칙 탐색 결과를 Observation 으로 주고,
   LLM 이 Thought → Action(search_graph_nodes / traverse_graph / get_node_detail / finish) 을 골라 매칭 실패·끊긴 경로를 보완한다.
+  규칙 결과에서 점검 신호(매칭 실패·목표 미도달·진입점 없음·언급 값의 컬럼 없음·공통 제외)를 먼저 계산해,
+  신호가 없으면 ReAct 를 생략하고 있으면 그 신호만 입력에 표시한다. 단계 수는 EXPLORER_MAX_REACT_STEPS 까지.
   결과는 같은 출력에 합치고 단계 기록은 react_trace 에 남긴다.
 요건 유형 판단은 하지 않는다.
 """
@@ -19,7 +22,7 @@ from pydantic import BaseModel, Field
 
 from .. import config
 from ..llm import LLMClient, Usage, react_llm
-from ..rules import MENTION_LABELS, ROLE_RANK
+from ..rules import EXPLORER_MAX_REACT_STEPS, MENTION_LABELS, RESERVED_FOR_RETRIEVER, ROLE_RANK
 from ..schemas import (
     Direction,
     ExploreItem,
@@ -28,6 +31,7 @@ from ..schemas import (
     GetNodeDetailInput,
     ItemExploreResult,
     MatchSource,
+    MentionKind,
     NodeRole,
     PlannerOutput,
     ReexploreMode,
@@ -47,7 +51,7 @@ MIN_SCORE = 0.5  # 이보다 낮은 후보는 시작 노드로 쓰지 않음
 RELATIVE_SCORE = 0.8  # 1등 점수 대비 이 비율 이상인 후보까지 시작 노드로 채택
 MAX_START_PER_MENTION = 3
 MAX_CONTEXT_PATHS = 40  # ReAct 입력에 보여 줄 경로 수
-RESERVED_FOR_RETRIEVER = 3  # ReAct 가 남겨 둘 tool 호출 (Retriever 원문 읽기 1 + ReAct 보완 2)
+VALUE_MENTIONS = {MentionKind.COLUMN, MentionKind.TERM}  # 값·여부·코드·사유를 말하는 언급 (컬럼까지 확인 대상)
 
 
 class ExplorerDecision(BaseModel):
@@ -93,7 +97,10 @@ class ExplorerAgent(BaseAgent[ExplorerOutput]):
     def run(self, state: AgentState) -> ExplorerOutput:
         plan = state.planner
         self._calls = 0
-        self._budget = config.MAX_TOOL_CALLS - state.tool_call_count
+        self.last_usage = None  # 재탐색 라운드는 LLM 을 쓰지 않으므로 이전 라운드 사용량이 다시 기록되지 않게 비움
+        self._budget = state.tools_left()
+        self._reserve = 1  # 규칙 단계·재탐색도 Retriever 원문 읽기 1회는 남긴다
+        self._searches: dict[tuple, list] = {}  # 같은 검색(표현·라벨)은 항목이 달라도 한 번만 호출
         requests = state.retriever.reexplore_request if state.retriever else []
         if state.explorer is not None and requests:
             out = state.explorer.model_copy(deep=True)
@@ -103,9 +110,10 @@ class ExplorerAgent(BaseAgent[ExplorerOutput]):
             out = ExplorerOutput(start_nodes=[], nodes=[], edges=[])
             for item in plan.items:
                 self._guard(out, lambda: self._explore_item(item, plan, out))
-            self.last_usage = None
-            if self.llm is not None and plan.items and self._budget - self._calls > RESERVED_FOR_RETRIEVER:
-                self._guard(out, lambda: self._react(plan, out))
+            signals = self._signals(plan, out)
+            if self.llm is not None and signals and self._budget - self._calls > RESERVED_FOR_RETRIEVER:
+                self._reserve = RESERVED_FOR_RETRIEVER
+                self._guard(out, lambda: self._react(plan, out, signals))
         out.tool_call_count = self._calls
         out.hops_used = max((r.hops_used for r in out.item_results), default=0)
         return out
@@ -121,7 +129,7 @@ class ExplorerAgent(BaseAgent[ExplorerOutput]):
                 out.unresolved.append(note)
 
     def _tool(self, fn, params):
-        if self._calls >= self._budget:
+        if self._calls >= self._budget - self._reserve:
             raise ToolBudgetExceeded
         self._calls += 1
         return fn(params, self.store)
@@ -180,8 +188,11 @@ class ExplorerAgent(BaseAgent[ExplorerOutput]):
                 out.start_nodes.append(StartNodeChoice(item_id=item.item_id, node_id=m.confirmed_node, matched_keyword=m.phrase,
                                                        match_source=MatchSource.CONFIRMED, score=1.0, reason="사용자 확정 매핑"))
                 continue
-            hits = self._tool(search_graph_nodes, SearchGraphNodesInput(
-                terms=[m.phrase, *m.synonyms], domains=plan.domains, labels=MENTION_LABELS[m.kind], top_k=5))
+            key = (m.phrase, *m.synonyms, "|", *(MENTION_LABELS[m.kind] or []))
+            if key not in self._searches:
+                self._searches[key] = self._tool(search_graph_nodes, SearchGraphNodesInput(
+                    terms=[m.phrase, *m.synonyms], domains=plan.domains, labels=MENTION_LABELS[m.kind], top_k=5))
+            hits = self._searches[key]
             good = [h for h in hits if h.score >= MIN_SCORE]
             if not good:
                 result.unmatched_mentions.append(m.phrase)
@@ -259,7 +270,8 @@ class ExplorerAgent(BaseAgent[ExplorerOutput]):
         target = req.target_role or (NodeRole.ENTRY if direction is Direction.REVERSE else
                                      item.target_role if item else NodeRole.TABLE)
         cap = item.hop_cap if item else config.MAX_HOPS_FORWARD
-        self._traverse(out, item_id, req.node_ids, direction.value, target, cap, plan.exclude.is_common, [],
+        columns = [n for n in req.node_ids if (node := self.store.node(n)) and node.label == "Column"]
+        self._traverse(out, item_id, req.node_ids, direction.value, target, cap, plan.exclude.is_common, columns,
                        join=req.mode is ReexploreMode.CONTINUE)
         result = next((r for r in out.item_results if r.item_id == item_id), None)
         if result is None:
@@ -270,11 +282,34 @@ class ExplorerAgent(BaseAgent[ExplorerOutput]):
 
     # --- ReAct 보완 ------------------------------------------------------------------
 
-    def _react(self, plan: PlannerOutput, out: ExplorerOutput) -> None:
+    def _signals(self, plan: PlannerOutput, out: ExplorerOutput) -> list[str]:
+        """규칙 결과에서 ReAct 로 보완할 신호 (프롬프트 점검 항목 번호와 맞춤). 없으면 ReAct 를 생략한다."""
+        signals = []
+        for it in plan.items:
+            r = next((x for x in out.item_results if x.item_id == it.item_id), None)
+            if r is None:
+                continue
+            mine = [p for p in out.paths if p.item_id == it.item_id]
+            nodes = [self.store.node(n) for p in mine for n in p.nodes]
+            if r.unmatched_mentions:
+                signals.append(f"① 항목 {it.item_id}: 매칭 실패 {r.unmatched_mentions}")
+            if not r.reached:
+                signals.append(f"② 항목 {it.item_id}: 목표 역할({it.target_role.value}) 미도달")
+            if mine and not any(self.store.node(p.nodes[0]).role is NodeRole.ENTRY for p in mine):
+                signals.append(f"④ 항목 {it.item_id}: 경로에 진입점(화면·배치) 없음")
+            if any(m.kind in VALUE_MENTIONS for m in it.mentions) and not any(n and n.label == "Column" for n in nodes):
+                signals.append(f"⑤ 항목 {it.item_id}: 요건이 말한 값의 컬럼이 경로에 없음")
+        if out.excluded_common:
+            signals.append(f"⑥ 공통이라 확장 안 한 노드 {len(out.excluded_common)}개 (요건 대상인지 확인)")
+        return signals
+
+    def _react(self, plan: PlannerOutput, out: ExplorerOutput, signals: list[str]) -> None:
+        context = self._react_context(plan, out) + "\n[점검 신호] (규칙 결과에서 계산. 이 항목만 확인)\n" + "\n".join(
+            f"- {s}" for s in signals)
         trace, self.last_usage = run_react(
-            self.llm, self.system_prompt, self._react_context(plan, out), ExplorerDecision,
+            self.llm, self.system_prompt, context, ExplorerDecision,
             lambda d: self._react_execute(d, plan, out),
-            budget=lambda: self._budget - self._calls - RESERVED_FOR_RETRIEVER)
+            budget=lambda: self._budget - self._calls - self._reserve, max_steps=EXPLORER_MAX_REACT_STEPS)
         out.react_trace = trace
 
     def _react_context(self, plan: PlannerOutput, out: ExplorerOutput) -> str:

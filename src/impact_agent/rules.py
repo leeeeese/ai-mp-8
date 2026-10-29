@@ -50,6 +50,12 @@ SM_PART_DOMAINS: dict[SmPart, list[Domain]] = {
     SmPart.PRODUCT: [Domain.SWING],
 }
 
+# tool 호출 한도(config.MAX_TOOL_CALLS) 배분. Supervisor 는 재탐색 라우팅에, Explorer·Retriever 는 ReAct 예산에 쓴다
+RESERVED_FOR_RETRIEVER = 5  # Explorer ReAct 가 남겨 둘 몫 (Retriever 원문 읽기 1 + ReAct 보완 4)
+MIN_CALLS_FOR_REEXPLORE = 2  # 재탐색 라운드를 시작할 최소 남은 호출 (Explorer 탐색 1 + Retriever 새 노드 읽기 1)
+EXPLORER_MAX_REACT_STEPS = 8  # Explorer ReAct 단계 상한 (finish 포함)
+RETRIEVER_MAX_REACT_STEPS = 6
+
 ROLE_ORDER = [NodeRole.ENTRY, NodeRole.ENTRY_HANDLER, NodeRole.LOGIC, NodeRole.DATA_ACCESS, NodeRole.TABLE, NodeRole.COLUMN]
 ROLE_RANK = {role: i for i, role in enumerate(ROLE_ORDER)}
 

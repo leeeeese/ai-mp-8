@@ -6,10 +6,14 @@ from impact_agent.schemas import (
     AgentName,
     AnswerKey,
     AnswerNode,
+    ChangeType,
     Complexity,
     ComposerOutput,
+    Direction,
+    ExploreItem,
     ExplorerOutput,
     KpiOutput,
+    NodeRole,
     PlannerOutput,
     PlanStep,
     ReexploreRequest,
@@ -34,7 +38,11 @@ class Fake:
         return self.fn(state)
 
 
-def make_supervisor(complexity, reexplore=False, verify=VerifyResult.PASS):
+ITEM = ExploreItem(item_id=1, text="t", change_type=ChangeType.SCREEN_CHANGE, mentions=[],
+                   target_role=NodeRole.ENTRY_HANDLER, direction=Direction.FORWARD, hop_cap=5)
+
+
+def make_supervisor(complexity, reexplore=False, verify=VerifyResult.PASS, items=(ITEM,)):
     agents = [AgentName.EXPLORER, AgentName.RETRIEVER]
     if complexity is Complexity.COMPLEX:
         agents += [AgentName.SIMULATOR, AgentName.VERIFIER]
@@ -44,7 +52,7 @@ def make_supervisor(complexity, reexplore=False, verify=VerifyResult.PASS):
         complexity=complexity,
         complexity_reason="test",
         domains=[],
-        items=[],
+        items=list(items),
         plan=[PlanStep(agent=a, purpose="p") for a in agents],
     ))
     sup.explorer = Fake(lambda s: ExplorerOutput(start_nodes=[], nodes=[], edges=[], hops_used=1))
@@ -98,3 +106,21 @@ def test_answer_key_reaches_kpi():
     sup.run(UserInput(request_text="요청", sm_part=SmPart.PRODUCT), AnswerKey(req_id="L-1", answer_nodes=[AnswerNode(node_id="TBL:n", type="Table")]))
     assert sup.last_state.kpi.req_id == "L-1"
     assert sup.last_state.kpi.missed_nodes == ["TBL:n"]
+
+
+def test_no_items_skips_to_composer():
+    # 분석 대상이 없는 입력(항목 0개)은 탐색·시뮬레이션 없이 Composer 로 바로 간다
+    sup = make_supervisor(Complexity.COMPLEX, items=())
+    run(sup)
+    assert (sup.explorer.calls, sup.retriever.calls, sup.simulator.calls, sup.composer.calls) == (0, 0, 0, 1)
+
+
+def test_reexplore_needs_budget_left():
+    # 남은 tool 호출이 MIN_CALLS_FOR_REEXPLORE 미만이면 재탐색 요청이 있어도 Explorer 로 돌아가지 않는다
+    from impact_agent.rules import MIN_CALLS_FOR_REEXPLORE
+
+    sup = make_supervisor(Complexity.SIMPLE, reexplore=True)
+    sup.explorer = Fake(lambda s: ExplorerOutput(start_nodes=[], nodes=[], edges=[],
+                                                 tool_call_count=config.MAX_TOOL_CALLS - MIN_CALLS_FOR_REEXPLORE + 1))
+    run(sup)
+    assert sup.explorer.calls == 1

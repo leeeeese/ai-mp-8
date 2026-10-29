@@ -257,9 +257,19 @@ def test_confirmed_node_and_unresolved(env):
 def test_tool_budget_is_respected(env, monkeypatch):
     from impact_agent import config
 
-    monkeypatch.setattr(config, "MAX_TOOL_CALLS", 1)
+    monkeypatch.setattr(config, "MAX_TOOL_CALLS", 2)
     mentions = [Mention(kind=MentionKind.SCREEN, phrase="주문 등록")]
     state = analyze(supervisor(env, plan([item(ChangeType.DATA_ADD, mentions, Direction.FORWARD, NodeRole.TABLE)])))
-    assert state.tool_call_count == 1  # 검색 1회 후 탐색·소스 조회는 생략
+    assert state.tool_call_count == 2  # 검색 1회 후 탐색은 생략하고, 마지막 1회는 Retriever 원문 읽기 몫
     assert any("tool 호출 상한" in u for u in state.explorer.unresolved)
-    assert state.retriever.evidence == [] and state.explore_loop_count == 1
+    assert [e.node_id for e in state.retriever.evidence] == ["SCR:ORD01"] and state.explore_loop_count == 1
+
+
+def test_same_search_runs_once(env):
+    # 두 항목이 같은 언급 표현을 가지면 검색 tool 은 한 번만 부른다
+    mentions = [Mention(kind=MentionKind.SCREEN, phrase="주문 등록")]
+    items = [item(ChangeType.DATA_ADD, mentions, Direction.FORWARD, NodeRole.TABLE),
+             item(ChangeType.SCREEN_CHANGE, mentions, Direction.FORWARD, NodeRole.ENTRY_HANDLER).model_copy(update={"item_id": 2})]
+    state = analyze(supervisor(env, plan(items)))
+    assert state.explorer.tool_call_count == 3  # 검색 1 + 항목별 탐색 2
+    assert {s.item_id for s in state.explorer.start_nodes} == {1, 2}

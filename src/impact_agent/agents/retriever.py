@@ -1,6 +1,8 @@
 """Retriever: Explorer 경로 노드의 소스·정의서 원문을 직접 읽어 근거(Evidence)로 Simulator 에 넘기고, 필요하면 재탐색을 요청한다.
 
 - read_source 한 번으로 시작 노드 + 경로 노드를 읽는다 (인터페이스가 걸린 노드는 정의서도 함께)
+- 재탐색 라운드는 이전 라운드 근거를 그대로 이어받고, 근거가 없는 새 노드만 읽는다 (근거 누적, 덮어쓰지 않음)
+- 같은 노드·파일의 근거는 가장 넓은 범위 하나로 합친다
 - 재탐색 요청 (reexplore_request, Supervisor 가 MAX_EXPLORE_LOOP 안에서 Explorer 를 다시 돌림)
     continue  hop 상한에 걸린 경로 → 끊긴 노드(frontier)에서 같은 목표로 이어서 탐색
     reverse   정방향 항목인데 시작 노드가 모두 목표 역할보다 DB 쪽이라 경로가 없음 → 진입점까지 역방향
@@ -8,16 +10,18 @@
 - ReAct 보완 (Yao et al. 2023, LLM 이 있을 때): 읽은 원문과 경로 밖 연결을 Observation 으로 주고,
   LLM 이 Thought → Action(read_source / request_reexplore / finish) 을 고른다.
   탐색 범위(Explorer 노드) 안은 직접 더 읽고, 범위 밖 연결은 next_target 재탐색 요청으로만 넘긴다.
+  같은 노드를 다시 읽으면 이미 보여 준 줄 다음부터 이어서 보여 주고, 끝까지 본 노드는 tool 을 부르지 않고 오류로 돌려준다.
+  경로 테이블의 컬럼(경로에 없는 것)을 입력에 함께 보여 줘, 원문이 쓰는 컬럼을 재탐색으로 그래프 경로에 되돌린다.
 근거 요약은 노드 설명·코멘트를 쓴다.
 """
 
+import re
 from typing import Literal
 
 from pydantic import BaseModel, Field
 
-from .. import config
 from ..llm import LLMClient, Usage, react_llm
-from ..rules import ROLE_RANK
+from ..rules import MIN_CALLS_FOR_REEXPLORE, RETRIEVER_MAX_REACT_STEPS, ROLE_RANK
 from ..schemas import (
     Direction,
     Evidence,
@@ -38,6 +42,9 @@ MAX_READ_NODES = 80  # 한 번에 읽을 노드 수 상한 (토큰 보호)
 CONTEXT_LINES_PER_EVIDENCE = 10  # ReAct 입력에 보여 줄 근거별 원문 줄 수 (더 필요하면 read_source)
 MAX_CONTEXT_CHARS = 10000  # ReAct 입력의 근거 원문 총 길이 (단계마다 다시 보내므로 토큰 비용에 직결)
 MAX_BOUNDARY = 30  # ReAct 입력에 보여 줄 경로 밖 연결 수
+MAX_TABLE_COLUMNS_CHARS = 2500  # ReAct 입력의 경로 테이블 컬럼 목록 길이
+OBSERVATION_CHARS = 2400  # read_source 결과 길이 (노드 여러 개면 나눠 씀)
+SINGLE_NODE_OBSERVATION_CHARS = 6000  # 노드 1개만 읽을 때
 
 
 class RetrieverDecision(BaseModel):
@@ -82,28 +89,38 @@ class RetrieverAgent(BaseAgent[RetrieverOutput]):
         exp = state.explorer
         if exp is None:
             return RetrieverOutput(evidence=[])
+        prev = state.retriever  # 재탐색 라운드면 이전 라운드 결과 (첫 라운드는 Supervisor 가 None 으로 비움)
+        if prev is None:
+            self._requested: list[ReexploreRequest] = []
+        self._shown: dict[tuple[str, str], tuple[int, int]] = {}  # (노드, 파일) → (보여 준 줄 수, 시작 줄)
         node_ids = list(dict.fromkeys([s.node_id for s in exp.start_nodes] + [n for p in exp.paths for n in p.nodes]))
         skipped = node_ids[MAX_READ_NODES:]
         node_ids = node_ids[:MAX_READ_NODES]
+        evidence = list(prev.evidence) if prev else []
+        have = {e.node_id for e in evidence}
+        to_read = [n for n in node_ids if n not in have]
 
-        items: list[ReadSourceItem] = []
         calls = 0
-        if node_ids and state.tool_call_count < config.MAX_TOOL_CALLS:  # Supervisor 가 Explorer 호출 수까지 누적한 값
-            items = read_source(ReadSourceInput(node_ids=node_ids), self.store, self.roots)
+        if to_read and state.tools_left() > 0:  # Supervisor 가 Explorer 호출 수까지 누적한 값
+            items = read_source(ReadSourceInput(node_ids=to_read), self.store, self.roots)
+            evidence += [self._evidence(i) for i in items if i.found]
             calls = 1
-
-        evidence = [self._evidence(i) for i in items if i.found]
-        found = {i.node_id for i in items if i.found}
+        found = {e.node_id for e in evidence}
         out = RetrieverOutput(
-            evidence=evidence,
+            evidence=_merge(evidence),
             nodes_without_evidence=[n for n in node_ids if n not in found] + skipped,
-            reexplore_request=self._reexplore(state),
+            reexplore_request=[r for r in self._reexplore(state) if not self._already(r.node_ids)],
             tool_call_count=calls,
         )
+        self._requested += out.reexplore_request
         self.last_usage = None
-        if self.llm is not None and evidence and state.tool_call_count + out.tool_call_count < config.MAX_TOOL_CALLS:
+        if self.llm is not None and out.evidence and state.tools_left() - out.tool_call_count > 0:
             self._react(state, out)
+        out.evidence = _merge(out.evidence)
         return out
+
+    def _already(self, node_ids: list[str]) -> bool:
+        return any(sorted(r.node_ids) == sorted(node_ids) for r in self._requested)
 
     def _evidence(self, item: ReadSourceItem) -> Evidence:
         node = self.store.node(item.node_id)
@@ -147,12 +164,19 @@ class RetrieverAgent(BaseAgent[RetrieverOutput]):
         base = out.tool_call_count
         added = []  # 이번 라운드 ReAct 가 낸 재탐색 요청 (tool 호출은 아니지만 단계 수를 같은 한도로 묶음)
 
-        def budget() -> int:
-            return config.MAX_TOOL_CALLS - state.tool_call_count - out.tool_call_count - len(added)
+        def budget() -> int:  # 재탐색을 요청했으면 그 라운드 몫(MIN_CALLS_FOR_REEXPLORE)은 남겨 둔다
+            return state.tools_left() - out.tool_call_count - (MIN_CALLS_FOR_REEXPLORE if added else 0)
+
+        def observation_len(d: RetrieverDecision) -> int:  # _page 가 원문 길이를 맞추므로 머리줄·안내문 몫만 더함
+            if d.action != "read_source":
+                return OBSERVATION_CHARS
+            body = SINGLE_NODE_OBSERVATION_CHARS if len(d.node_ids or []) == 1 else OBSERVATION_CHARS
+            return body + 300 * max(len(d.node_ids or []), 1)
 
         trace, self.last_usage = run_react(
             self.llm, self.system_prompt, self._react_context(state, out), RetrieverDecision,
-            lambda d: self._react_execute(d, state, out, added), budget)
+            lambda d: self._react_execute(d, state, out, added), budget,
+            max_steps=RETRIEVER_MAX_REACT_STEPS, max_observation=observation_len)
         out.react_trace = trace
         out.tool_call_count = max(out.tool_call_count, base)
 
@@ -172,6 +196,8 @@ class RetrieverAgent(BaseAgent[RetrieverOutput]):
                 lines.append(f"### {e.node_id} | {e.file_path} {e.location or ''} | {e.summary} (원문 생략: 입력 길이 한도)")
                 continue
             used += len(body)
+            self._shown[(e.node_id, e.file_path)] = (min(CONTEXT_LINES_PER_EVIDENCE, len((e.content or "").splitlines())),
+                                                     _start_line(e))
             lines.append(f"### {e.node_id} | {e.file_path} {e.location or ''} | {e.summary}\n{body}")
         if out.nodes_without_evidence:
             lines.append(f"[원문 없음] {out.nodes_without_evidence}")
@@ -184,11 +210,59 @@ class RetrieverAgent(BaseAgent[RetrieverOutput]):
                     boundary.append(f"- {e.from_id} -{e.type}-> {e.to_id}")
         lines.append("[경로 밖 연결] (탐색 범위 밖. 필요하면 request_reexplore)")
         lines += list(dict.fromkeys(boundary))[:MAX_BOUNDARY] or ["- 없음"]
-        prev = state.retriever.reexplore_request if state.retriever else []
-        requested = prev + out.reexplore_request
-        if requested:
-            lines += ["[이미 요청한 재탐색]"] + [f"- [{r.item_id}] {r.mode.value} {r.node_ids}" for r in requested]
+        lines.append("[경로 테이블의 컬럼] (경로에 없는 컬럼. ★ = 원문 SQL·프로그램·화면에 이름이 나옴. 요건 값을 이 컬럼으로 다루면 request_reexplore)")
+        lines += self._table_columns(exp, out.evidence) or ["- 없음"]
+        if self._requested:
+            lines += ["[이미 요청한 재탐색]"] + [f"- [{r.item_id}] {r.mode.value} {r.node_ids}" for r in self._requested]
         return "\n".join(lines)
+
+    def _table_columns(self, exp, evidence: list[Evidence]) -> list[str]:
+        """경로 테이블의 컬럼 중 경로에 없는 것. 테이블 DDL 이 아닌 원문(SQL·프로그램·화면)에 이름이 나오면 ★ 를 붙여 앞에 둔다."""
+        on_path = {n for p in exp.paths for n in p.nodes}
+        text = "\n".join(e.content or "" for e in evidence if not (e.node_id or "").startswith(("TBL:", "COL:"))).upper()
+        lines, used = [], 0
+        for tid in sorted(n for n in on_path if n.startswith("TBL:")):
+            cols = []
+            for e in self.store.out_edges(tid):
+                if e.type != "HAS_COLUMN" or e.to_id in on_path:
+                    continue
+                name = e.to_id.split(".", 1)[-1]
+                col = self.store.node(e.to_id)
+                comment = col.properties.get("comment") if col else None
+                star = re.search(rf"\b{re.escape(name.upper())}\b", text) is not None
+                cols.append((not star, f"{'★' if star else ''}{name}({comment})" if comment else f"{'★' if star else ''}{name}"))
+            if not cols:
+                continue
+            line = f"- {tid}: {', '.join(c for _, c in sorted(cols, key=lambda c: c[0]))}"
+            if used + len(line) > MAX_TABLE_COLUMNS_CHARS:
+                lines.append("- … 외 테이블 생략 (입력 길이 한도)")
+                break
+            used += len(line)
+            lines.append(line)
+        return lines
+
+    def _fully_shown(self, node_id: str, out: RetrieverOutput) -> bool:
+        evs = [e for e in out.evidence if e.node_id == node_id]
+        return bool(evs) and all(
+            (k := (e.node_id, e.file_path)) in self._shown and self._shown[k][0] >= len((e.content or "").splitlines())
+            for e in evs)
+
+    def _page(self, item: ReadSourceItem, chars: int) -> str:
+        """이미 보여 준 줄 다음부터 chars 길이만큼. 범위가 앞으로 넓어졌으면(context_lines) 새로 붙은 앞부분부터 보여 준다."""
+        lines = item.content.splitlines()
+        shown, start = self._shown.get((item.node_id, item.file_path), (0, item.start_line or 1))
+        new_start = item.start_line or start
+        offset = 0 if new_start < start else min(max(shown - (new_start - start), 0), len(lines))
+        body, end = [], offset
+        for ln in lines[offset:]:
+            if sum(len(b) + 1 for b in body) + len(ln) > chars and body:
+                break
+            body.append(ln)
+            end += 1
+        self._shown[(item.node_id, item.file_path)] = (end, item.start_line or 1)
+        head = f"### {item.node_id} {item.file_path} L{item.start_line}-{item.end_line} (원문 {offset + 1}~{end}줄 / 전체 {len(lines)}줄"
+        head += ", 끝까지 읽음)" if end >= len(lines) else f", 다시 읽으면 {end + 1}줄부터)"
+        return head + "\n" + "\n".join(body)
 
     def _react_execute(self, d: RetrieverDecision, state: AgentState, out: RetrieverOutput, added: list) -> str:
         if d.action == "read_source":
@@ -197,28 +271,34 @@ class RetrieverAgent(BaseAgent[RetrieverOutput]):
             outside = [n for n in d.node_ids or [] if n not in explored]
             if not ids:
                 raise InvalidAction(f"탐색 범위 안 노드만 읽을 수 있습니다 (범위 밖 {outside} 는 request_reexplore)")
-            items = read_source(ReadSourceInput(node_ids=ids, context_lines=max(d.context_lines or 0, 0)), self.store, self.roots)
+            context = max(d.context_lines or 0, 0)
+            done = [n for n in ids if not context and self._fully_shown(n, out)]
+            ids = [n for n in ids if n not in done]
+            if not ids:
+                raise InvalidAction(f"{done} 는 이미 끝까지 읽었습니다. 범위 밖 내용이 필요하면 context_lines 를 주거나 request_reexplore")
+            items = read_source(ReadSourceInput(node_ids=ids, context_lines=context), self.store, self.roots)
             out.tool_call_count += 1
-            known = {(e.node_id, e.file_path, e.location) for e in out.evidence}
             for i in items:
-                ev = self._evidence(i) if i.found else None
-                if ev and (ev.node_id, ev.file_path, ev.location) not in known:
-                    out.evidence.append(ev)
+                if i.found:
+                    out.evidence.append(self._evidence(i))
                     out.nodes_without_evidence = [n for n in out.nodes_without_evidence if n != i.node_id]
-            note = f" (범위 밖 {outside} 는 읽지 않음)" if outside else ""
-            return "\n\n".join(f"### {i.node_id} {i.file_path} L{i.start_line}-{i.end_line}\n{i.content}"
-                                for i in items if i.found)[:2400] + note or "원문 없음"
+            found = [i for i in items if i.found]
+            per = (SINGLE_NODE_OBSERVATION_CHARS if len(ids) == 1 else OBSERVATION_CHARS) // max(len(found), 1)
+            note = (f" (범위 밖 {outside} 는 읽지 않음)" if outside else "") + (f" ({done} 는 이미 끝까지 읽음)" if done else "")
+            return "\n\n".join(self._page(i, per) for i in found) + note if found else "원문 없음" + note
 
         # request_reexplore
         ids = [n for n in d.node_ids or [] if self.store.node(n)]
         if not ids or not d.reason:
             raise InvalidAction("request_reexplore 에는 그래프에 있는 node_ids 와 reason 이 필요합니다")
-        prev = state.retriever.reexplore_request if state.retriever else []
-        if any(sorted(r.node_ids) == sorted(ids) for r in prev + out.reexplore_request):
+        if self._already(ids):
             raise InvalidAction(f"{ids} 는 이미 재탐색을 요청했습니다")
+        if state.tools_left() - out.tool_call_count < MIN_CALLS_FOR_REEXPLORE:
+            raise InvalidAction(f"남은 tool 호출이 {MIN_CALLS_FOR_REEXPLORE}회 미만이라 재탐색을 진행할 수 없습니다. finish 로 미확인 내용을 남기세요")
         req = ReexploreRequest(item_id=d.item_id, mode=ReexploreMode.NEXT_TARGET, node_ids=ids, target_role=d.target_role,
                                direction=Direction(d.direction) if d.direction else None, reason=d.reason)
         out.reexplore_request.append(req)
+        self._requested.append(req)
         added.append(req)
         return f"재탐색 요청 등록: {ids} → {d.target_role.value if d.target_role else '항목 목표'} ({d.direction or 'forward'})"
 
@@ -233,3 +313,18 @@ def _summary(node: GraphNode | None, item: ReadSourceItem) -> str:
     desc = p.get("desc") or p.get("comment") or p.get("program_name") or ""
     head = f"{node.label}({node.role.value if node.role else '-'}) {node.name}"
     return f"{head} - {desc}" if desc else head
+
+
+def _start_line(e: Evidence) -> int:
+    return int(e.location[1:].split("-")[0]) if e.location and e.location.startswith("L") else 1
+
+
+def _merge(evidence: list[Evidence]) -> list[Evidence]:
+    """같은 노드·파일·종류의 근거는 가장 넓은 범위(원문이 긴 것) 하나만 남긴다. 처음 나온 순서 유지."""
+    best: dict[tuple, Evidence] = {}
+    for e in evidence:
+        k = (e.node_id, e.file_path, e.source_kind)
+        if k not in best or len(e.content or "") > len(best[k].content or ""):
+            best[k] = e
+    order = list(dict.fromkeys((e.node_id, e.file_path, e.source_kind) for e in evidence))
+    return [best[k] for k in order]
