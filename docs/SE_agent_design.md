@@ -59,6 +59,11 @@
 
 **역할**: 복잡 요건에서 영역(screen / db / interface / batch)별 영향 경로를 구성하고, 구현 가능성·난이도·대안을 판정한다. 그래프에 없는 신규 요소는 별도로 제안한다.
 
+**하지 않는 것**
+- **복잡도(simple / complex)를 다시 판정하거나 바꾸지 않는다.** 복잡도는 Planner(`planner.complexity`)가 정하고, Supervisor 는 그 값으로만 분기한다. Simulator 는 복잡 flow 로 들어온 요건을 그대로 판정하며 `SimulationOutput` 에 복잡도 필드가 없다 (`test_simulator_does_not_touch_complexity`).
+- **경로를 새로 찾지 않는다.** 경로 탐색은 Explorer 몫이고, Simulator 는 받은 경로에 대해서만 판정한다. 빠진 경로는 분석 한계로 남기고, 보완 요청은 Verifier → Supervisor → Planner 재계획으로 간다.
+- 여기서 내는 `difficulty`(Major / Medium / Minor)는 영역별 **구현 난이도**로, 복잡도와 다른 값이다 (1-2).
+
 **입력**
 
 | 필드 | 사용 |

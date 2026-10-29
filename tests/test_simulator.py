@@ -42,6 +42,7 @@ from impact_agent.schemas import (
     PlanStep,
     RequestType,
     RetrieverOutput,
+    SimulationOutput,
     SmPart,
     StopReason,
     StructuredRequest,
@@ -498,6 +499,16 @@ def test_requirement_difficulty():
     for a in out.area_impacts:
         a.impact_type = ImpactType.NONE
     assert requirement_difficulty(out.area_impacts) == (Difficulty.MINOR, "변경 영역 없음")
+
+
+def test_simulator_does_not_touch_complexity():
+    """복잡도는 Planner 가 정한다. Simulator 는 읽지도 바꾸지도 않고, 출력에도 복잡도가 없다 (설계서 1장 "하지 않는 것")."""
+    assert not {"complexity", "complexity_reason"} & set(SimulationOutput.model_fields)
+    for state in (make_state(), make_swing_state(SHARED_PATHS)):
+        before = state.planner.model_dump()
+        SimulatorAgent(llm=ScriptLLM(draft(hops=CHANGE_HOPS))).run(state)
+        SimulatorAgent(use_llm=False).run(state)
+        assert state.planner.model_dump() == before
 
 
 def test_empty_explorer():
