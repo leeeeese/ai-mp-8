@@ -5,7 +5,7 @@
 
 ## 0. 한눈에 보기
 
-![Agent 워크플로우](agent_workflow.svg)
+![Agent 워크플로우](agent_workflow_diagram.png)
 
 - 흐름: … 2-2 Retriever → (복잡) 2-3 Simulator(영역별 영향·가능성·난이도·대안) → 2-4 Verifier(영역 누락·근거 검증, 보완 필요 시 Supervisor → Planner 재계획) → 3 Composer. 단순은 Retriever → 3 Composer.
 - KPI Agent (점선, 평가 PoC): Composer 이후 실행 결과·실행 로그를 정답 노드 목록(`AnswerKey`)과 비교한다. 결과는 Composer 에 전달하지 않는다. 상세는 [SE_kpi-agent-design.md](SE_kpi-agent-design.md).
