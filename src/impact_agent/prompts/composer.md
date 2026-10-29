@@ -20,7 +20,7 @@
   - **Oracle 문법의 읽기 전용 SELECT 한 문장**만 쓴다 (`SELECT … FROM …` 또는 `WITH … SELECT …`). 세미콜론·여러 문장·PL/SQL 블록·`FOR UPDATE` 를 쓰지 않는다.
   - 실데이터 값(고객번호 등)은 넣지 않고 바인드 변수(`:svc_mgmt_no`)로 둔다. 건수 제한이 필요하면 `FETCH FIRST n ROWS ONLY` 또는 `ROWNUM <= n`.
   - 테이블·컬럼은 입력 경로·근거에 있는 것만 쓴다.
-- `detail_analysis_recommended`: 컬럼·연계 항목 추가처럼 변경 요소가 보이면 true.
+- `detail_analysis_recommended`: 컬럼·연계 항목 추가처럼 변경 요소가 원문에서 보이면 true. 권장 사유(공통 모듈·여러 진입점·신규 후보·그래프 밖 연계 등)는 코드가 탐색 결과로 붙이므로 쓰지 않는다. tos·swing 모두 같은 기준이다 (예: swing 프로그램의 `CONST`·`IF` 리터럴, tos Service 의 하드코딩 값이 바뀌어야 하면 true).
 
 ## 복잡 요건 결과물 (`ComplexDraft`)
 - `summary_conclusion`: 구현 가능 여부 → 요건 전체 난이도(`[요건 전체 난이도]` 값 그대로) → 핵심 영향 영역·노드 → 대안이 있으면 대안 순서로 3~5문장.

@@ -68,6 +68,10 @@ class SimpleAnswer(BaseModel):
     inquiry_contacts: list[str] = Field(default_factory=list)
     analysis_limits: list[str] = Field(default_factory=list)
     detail_analysis_recommended: bool = Field(default=False, description="변경 요소가 보이면 True")
+    detail_analysis_reasons: list[str] = Field(
+        default_factory=list,
+        description="상세 분석 권장 사유 (노드 ID 를 그대로 포함. 사용자가 재분석을 요청하면 이 문장이 reanalysis 후속 입력이 된다)",
+    )
     query_result_summary: QueryResultSummary | None = None
 
 

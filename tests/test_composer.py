@@ -2,6 +2,7 @@
 
 from impact_agent.agents import ComposerAgent, SimulatorAgent, Supervisor, VerifierAgent
 from impact_agent.agents.composer import (
+    LLM_DETAIL_REASON,
     ComplexDraft,
     DraftChecklistItem,
     DraftClaim,
@@ -11,7 +12,7 @@ from impact_agent.agents.composer import (
     FollowupDraft,
     SimpleDraft,
 )
-from impact_agent.agents.simulator import DraftDrop, DraftHop, SimulatorDraft
+from impact_agent.agents.simulator import DraftDrop, DraftHop, SimulatorDraft, reanalysis_nodes
 from impact_agent.agents.verifier import decide
 from impact_agent.llm import LLMError, Usage
 from impact_agent.schemas import (
@@ -27,13 +28,27 @@ from impact_agent.schemas import (
     Feasibility,
     FollowupInput,
     FollowupType,
+    ImpactType,
     OpenItem,
     PlanStep,
     SaveReportOutput,
     StopReason,
 )
-from test_simulator import P_BATCH, P_SCREEN, Fixed, make_state
+from test_simulator import (
+    CHANGE_HOPS,
+    P_BATCH,
+    P_SCREEN,
+    SHARED_PATHS,
+    SW_SCREEN,
+    TOS,
+    Fixed,
+    make_state,
+    make_swing_state,
+    with_followups,
+)
+from test_simulator import ScriptLLM as SimLLM
 from test_simulator import area as sim_area
+from test_simulator import draft as sim_draft
 from test_verifier import NO_IFACE
 
 SIMPLE_PATH = [(1, P_SCREEN, StopReason.TARGET_REACHED)]
@@ -293,3 +308,104 @@ def test_schedule_factors_capped():
     assert all(len(a.schedule_factors) == 3 for a in state.simulation.area_impacts)      # 영역당 3개
     r = composer().run(state).complex_report
     assert len(r.schedule_factors) == 9 and r.schedule_factors[-1] == "외 4건 (영역별 판정 참고)"  # 전체 8개 + 안내
+
+
+# --- 상세 분석 권장 사유 (설계서 3-1, planner_detail_analysis_to-be.md) ---------------------------------
+
+
+def swing_simple_state(paths):
+    state = make_swing_state(paths)
+    state.planner.complexity = Complexity.SIMPLE
+    return state
+
+
+def test_detail_reasons_swing_signals_with_node_ids():
+    state = swing_simple_state(SHARED_PATHS)                 # 화면·배치가 TP·Module 공유, 요건은 logic_change
+    state.explorer.excluded_common = ["MOD:BatchLauncher.runJob"]
+    state.explorer.unresolved = ["[항목 1] 신규 후보: 운영중단일 (Term)", "[항목 1] 그래프 밖: CDTS 수신 시스템"]
+    out = composer().run(state)
+    a = out.simple_answer
+    assert a.detail_analysis_recommended
+    assert a.detail_analysis_reasons == [
+        "공통 모듈 MOD:BatchLauncher.runJob 이 탐색에서 제외되어 다른 화면·처리 영향 확인 필요",
+        "TP:PntSvc.savePnt 을 여러 진입점에서 호출 (진입점 2개)",
+        "MOD:PntSvc.checkLimit 을 여러 진입점에서 호출 (진입점 2개)",
+        "그래프에 없는 항목이 있어 신규 개발 여부 확인 필요: [항목 1] 신규 후보: 운영중단일 (Term)",
+        "적재 범위 밖 연계 확인 필요: [항목 1] 그래프 밖: CDTS 수신 시스템",
+    ]
+    assert "## 상세 분석 권장" in out.markdown and "- TP:PntSvc.savePnt 을 여러 진입점에서 호출 (진입점 2개)" in out.markdown
+    # UI 가 사유를 이어 붙여 reanalysis 로 보내면 Simulator 가 노드 ID 를 그대로 확인 대상으로 쓴다
+    again = with_followups(make_swing_state(SHARED_PATHS), (FollowupType.REANALYSIS, " / ".join(a.detail_analysis_reasons)))
+    assert reanalysis_nodes(again) == ["MOD:BatchLauncher.runJob", "TP:PntSvc.savePnt", "MOD:PntSvc.checkLimit"]
+
+
+def test_detail_reasons_tos_common_on_path_and_change_type():
+    nodes = [n.model_copy(update={"properties": {"is_common": True}}) if n.node_id == "CTL:CmpCtl.save" else n for n in TOS]
+    a = composer().run(simple_state(nodes=nodes)).simple_answer
+    assert a.detail_analysis_reasons == [
+        "[항목 1] 저장·조회·연계 항목이 바뀌는 요건 (data_add)",
+        "[항목 2] 저장·조회·연계 항목이 바뀌는 요건 (interface_field_add)",
+        "공통 모듈 CTL:CmpCtl.save 이 경로에 있어 다른 화면·처리 영향 확인 필요",
+    ]
+
+
+def test_detail_not_recommended_without_signals_unless_llm_says():
+    state = swing_simple_state([(1, SW_SCREEN, StopReason.TARGET_REACHED)])   # 진입점 1개, 공통·미해결 없음
+    a = composer().run(state).simple_answer
+    assert not a.detail_analysis_recommended and a.detail_analysis_reasons == []
+    draft = SimpleDraft(conclusion_lines=["a", "b", "c"], hops=[], claims=[], check_queries=[], inquiry_contacts=[],
+                        detail_analysis_recommended=True, mail=None)
+    a = composer(ScriptLLM(draft)).run(swing_simple_state([(1, SW_SCREEN, StopReason.TARGET_REACHED)])).simple_answer
+    assert a.detail_analysis_recommended and a.detail_analysis_reasons == [LLM_DETAIL_REASON]
+
+
+# --- 복잡: 복잡도·난이도 표시, 체크리스트 필수 항목 (설계서 3-2) ---------------------------------------
+
+
+def swing_complex_state(sim_areas=None, hops=(), followups=()):
+    state = with_followups(make_swing_state(SHARED_PATHS), *followups) if followups else make_swing_state(SHARED_PATHS)
+    sim = SimLLM(sim_draft(areas=sim_areas, hops=list(hops))) if sim_areas or hops else None
+    state.simulation = SimulatorAgent(llm=sim, use_llm=sim is not None).run(state)
+    state.verifier = VerifierAgent(use_llm=False).run(state)
+    return state
+
+
+DB_ONLY_MINOR = [sim_area(Area.SCREEN, impact=ImpactType.REFERENCE_ONLY), sim_area(Area.DB),
+                 sim_area(Area.INTERFACE, impact=ImpactType.REFERENCE_ONLY), sim_area(Area.BATCH, impact=ImpactType.REFERENCE_ONLY)]
+DB_HOP = [DraftHop(path_id="P1-1", node="DBIO:PntSql.selectMonthPnt", impact="[변경] 조회 조건 변경")]   # 공유 아님
+
+
+def test_flow_note_minor_and_reanalysis():
+    s = composer().run(swing_complex_state(DB_ONLY_MINOR, DB_HOP)).complex_report.summary_conclusion
+    assert s.endswith("복잡 요건으로 분석했으나 확인 결과 변경 범위가 작습니다 (요건 전체 난이도 Minor).")
+    assert "재분석" not in s
+    s = composer().run(swing_complex_state(DB_ONLY_MINOR, DB_HOP, [(FollowupType.REANALYSIS, "DBIO:PntSql.selectMonthPnt 확인")])
+                       ).complex_report.summary_conclusion
+    assert s.endswith("사용자 상세 분석 요청에 따른 재분석 결과입니다. 복잡 요건으로 분석했으나 확인 결과 변경 범위가 작습니다 "
+                      "(요건 전체 난이도 Minor).")
+
+
+def test_flow_note_absent_when_not_minor():
+    s = composer().run(complex_state()).complex_report.summary_conclusion       # tos, 변경 영역 4개 → Major
+    assert "변경 범위가 작습니다" not in s and "재분석" not in s
+
+
+def test_checklist_shared_and_excluded_common_swing():
+    state = swing_complex_state(hops=CHANGE_HOPS)                                # Module [변경], 화면·배치 공유
+    state.explorer.excluded_common = ["MOD:BatchLauncher.runJob"]
+    dev = [c.question for c in composer().run(state).complex_report.checklist if c.owner is ChecklistOwner.DEVELOPER]
+    assert ("공유 노드 MOD:PntSvc.checkLimit 변경 - 함께 영향받는 진입점 SCR:ZPNTSS01, BAT:ZPNTBB01 의 테스트 범위 확인" in dev)
+    assert ("공통 모듈 MOD:BatchLauncher.runJob 은 탐색에서 제외됨 - 이 요건으로 바뀌는지, 다른 화면·처리 영향 확인" in dev)
+    assert not any("TP:PntSvc.savePnt" in q for q in dev)                       # 공유 노드지만 [참조] 라 넣지 않음
+
+
+def test_checklist_excluded_common_tos_with_llm_items():
+    state = complex_state()
+    state.explorer.excluded_common = ["CTL:CmmCdController.selectCdList"]
+    llm = ScriptLLM(ComplexDraft(summary_conclusion="요약", mail=None, checklist=[
+        DraftChecklistItem(owner=ChecklistOwner.BUSINESS, question="적용 시점", related_area=None)]))
+    report = composer(llm).run(state).complex_report
+    qs = [(c.item_id, c.question) for c in report.checklist]
+    assert ("D-1", "공통 모듈 CTL:CmmCdController.selectCdList 은 탐색에서 제외됨 - 이 요건으로 바뀌는지, 다른 화면·처리 영향 확인") in qs
+    assert ("B-1", "적용 시점") in qs                                            # LLM 항목과 함께 (LLM 유무와 관계없이 필수 항목 유지)
+    assert "[이미 포함된 확인 항목]" in llm.users[0] and "CTL:CmmCdController.selectCdList" in llm.users[0]

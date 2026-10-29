@@ -311,7 +311,7 @@ Simulator 는 시스템을 나눠 판단하지 않는다. **역할 → 변경 �
 | `evidence_table` | 코드. Evidence 마다 `claim`(LLM 요약 또는 노드 설명) · `evidence` · `location` · `confidence`. `claim` 은 원문으로 확인한 조건·코드값·컬럼 |
 | `check_queries` | LLM. 운영 문의일 때 확인용 SQL. **Oracle 문법의 읽기 전용 SELECT 한 문장**(`SELECT`/`WITH`, 세미콜론·PL/SQL 블록·`FOR UPDATE` 없음), 실데이터 대신 바인드 변수(`:svc_mgmt_no`), 건수 제한은 `FETCH FIRST n ROWS ONLY`/`ROWNUM`, 테이블·컬럼은 입력 경로·근거에 있는 것만. **코드에서 SELECT 단일 문장만 통과**. 코드값 해석은 Column `code_values`(swing) / `TCP_CMM_CD` 조회(tos) (SC-006) |
 | `analysis_limits` | 코드. `explorer.unresolved`, `nodes_without_evidence` |
-| `detail_analysis_recommended` | 규칙 + LLM. 변경 유형이 add/modify 이거나 LLM 이 변경 요소를 찾으면 `true`. (예정) 탐색 신호(공통 노드·여러 진입점·신규 후보·그래프 밖 연계)를 더하고 사유를 `detail_analysis_reasons` 에 ([planner_detail_analysis_to-be.md](planner_detail_analysis_to-be.md)) |
+| `detail_analysis_recommended` | 규칙 + LLM. 변경 유형이 add/modify 이거나 LLM 이 변경 요소를 찾으면 `true`. `detail_reasons` 가 신호별 사유를 `detail_analysis_reasons` 에 넣고, 사유가 있으면 권장 (LLM 이 true 인데 신호가 없으면 "Agent 판단" 사유 1개). 신호: 구조 변경 유형, 경로 위·탐색 제외 공통 모듈, 여러 진입점(`rules.shared_nodes`), 신규 후보, 그래프 밖 연계. 사유 문장에 노드 ID 를 그대로 넣어 재분석 시 Simulator·Verifier 가 확인 대상으로 쓴다. 최대 5개 ([planner_detail_analysis_to-be.md](planner_detail_analysis_to-be.md)) |
 
 ### 3-2. 복잡 요건 결과물 (`ComplexReport`)
 
@@ -319,7 +319,7 @@ Simulator 는 시스템을 나눠 판단하지 않는다. **역할 → 변경 �
 
 | 필드 | 작성 |
 |---|---|
-| 복잡도·난이도 표시 (예정) | 코드. 요건 전체 난이도가 Minor 인데 복잡 요건이면 요약에 "확인 결과 변경 범위가 작음" 을 붙인다. 재분석으로 들어온 요건이면 "사용자 상세 분석 요청에 따른 결과" 를 함께 쓴다. 값은 바꾸지 않는다 |
+| 복잡도·난이도 표시 (`with_flow_note`) | 코드. 요건 전체 난이도가 Minor 인데 복잡 요건이면 요약에 "확인 결과 변경 범위가 작음" 을 붙인다. 재분석으로 들어온 요건이면 "사용자 상세 분석 요청에 따른 결과" 를 함께 쓴다. 값은 바꾸지 않는다 |
 | `summary_conclusion` | LLM. 가능 여부 → 요건 전체 난이도 → 핵심 영향 영역·노드 → 대안 순서로 3~5문장. 가능 여부·난이도는 영역별 판정·`requirement_difficulty` 값 그대로 (LLM 이 새로 판단하지 않음) |
 | `area_verdicts` | 코드. `simulation.area_impacts` 를 영역별 한 행 (경로 요약 "진입 → … → 끝 노드", 최대 `MAX_PATH_SUMMARY` 개) |
 | `new_elements` (예정) | 코드. 영역별 `new_elements` → 레포트 "신규 개발 요소" 절 + 개발 체크리스트 |
@@ -333,6 +333,7 @@ Simulator 는 시스템을 나눠 판단하지 않는다. **역할 → 변경 �
 체크리스트 규칙
 - `owner=business`: 정책·업무 결정 질문 (예: 상품코드 분리 여부, 할인 정책). `owner=developer`: 구현 방식·테스트 범위 확인 (예: 하드코딩 위치, 함께 영향받는 배치).
 - 출처: `structured_request.open_items`, `inferred` hop, `review` 영역, 대안 선택 지점, 검토 제외 경로, 신규 요소, 공통 노드 영향(`excluded_common`), 화면·배치 공유 TP.
+- LLM 과 관계없이 항상 넣는 항목 (`required_checklist`): 요건 미확정 사항(업무), 검토 제외 경로·`[변경]` 된 공유 노드("함께 영향받는 진입점 … 의 테스트 범위 확인")·탐색에서 제외된 공통 모듈(개발).
 - LLM 초안 관점 (`prompts/composer.md`, 해당하는 것만): business = 상품·코드 분리, 정책·금액(할인·과금·한도), 상태 전환, 적용 범위·시점, 요청안 vs 대안 / developer = 하드코딩 위치(같은 조건·상수가 여러 노드에 있음), 함께 영향받는 진입점(테스트 범위), 데이터 작업(코드·상품 데이터 등록·이관), 근거 부족(`review`) 영역.
 - 질문은 예/아니오 또는 선택지로 답할 수 있게 쓰고, 영향받는 노드·테이블·배치명을 괄호로 붙인다. 코드가 넣은 확인 항목과 겹치지 않게 한다.
 - `item_id` 는 `B-1, B-2… / D-1, D-2…`. 후속 답변(`FollowupInput.target_item_ids`)은 이 id 로 연결.
@@ -444,6 +445,7 @@ Supervisor 의 `Supervisor.followup(session_id, FollowupInput)` 이 진입점을
 | `ComplexReport` | + `dropped_paths` |
 | `PathHop.evidence_ref` | 설명 `file_path#location` (Retriever Evidence 와 맞춤) |
 | LLM 응답 (`schemas.json` 비공개) | `SimulatorDraft`, `VerifierDraft`, `SimpleDraft`·`ComplexDraft`·`FollowupDraft` 신규 |
+| `SimpleAnswer` | + `detail_analysis_reasons` (상세 분석 권장 사유, 노드 ID 포함) |
 | `AreaImpact`, `ComplexReport`, `SimulatorDraft` (예정) | + `new_elements[NewElement{suggested_id, area, reason}]` (정답셋 `expected.new` 형식) |
 
 `python scripts/export_schema.py --write` 로 `schemas.json` 갱신, `tests/test_schema_sync.py` 가 일치 검사. 출력 모델이 바뀌면 프론트 목업(`frontend/src/mocks/fixtures/scenarios.ts`)도 맞춘다.
@@ -464,7 +466,7 @@ pytest (LLM·Neo4j 불필요, 가짜 LLM `Fixed` 또는 LLM 없음, tos·swing �
 |---|---|
 | Simulator | 경로 골격(노드 순서·엣지 유형·evidence_ref·확신도), 역할 기준 영역 배정, 경로 모양(`OPENS`·Batch→TP·Screen 단독·Table 시작·고립 노드), 그래프 밖 노드 제거, inferred 영역 review, 경로 제외 가드 3종, 난이도 기준, 영향 범위 보정(tos·swing 각각 공유 노드 / 단일 진입점), `[노드 메타]` 에 시스템별 속성이 들어가는지, LLM 없음 출력, 재분석: `[재분석 요청]` 블록·사유 노드 경로 제외 거절·사유 노드 미탐색 한계, 복잡도 미변경 |
 | Verifier | 점검 항목별 보완 필요/통과, 필수 영역 표, `additional_scope` 형식, 같은 사유 반복 시 pass, 재계획 한도 (`test_supervisor`), 변경 지점 근거 점검 (`[변경]` hop 기준·표시 없으면 이전 기준), swing 경로의 필수 영역·TP 연계 속성·도메인 혼재·포함 경로, 재분석 요청 점검 (tos·swing, 실제 Simulator 출력: 미탐색 → 보완 필요·`node:` 범위·공통 제외 표시, 판정 문장 없음 → 경고, 표시 없는 Simulator 출력은 점검 안 함, 반복 → pass) |
-| Composer | 단순/복잡 필드 조립, SELECT 외 쿼리 차단, 체크리스트 id·후속 답변·stage 전이, `reanalysis_request`, 검토 제외 경로, markdown 렌더링 |
+| Composer | 단순/복잡 필드 조립, SELECT 외 쿼리 차단, 체크리스트 id·후속 답변·stage 전이, `reanalysis_request`, 검토 제외 경로, markdown 렌더링, 상세 분석 권장 사유(tos·swing 신호별·노드 ID → Simulator 재분석 추출 연동), 복잡도·난이도 표시(Minor·재분석), 체크리스트 필수 항목(공유 노드·제외 공통 모듈, tos·swing) |
 | 전체 | `Supervisor.run` 이 Composer·KPI 까지 끝나고, 복잡 flow 도 KPI `evaluable=true` |
 
 정답셋 대조 (`eval/ground_truth`, 16건, 읽기 전용):

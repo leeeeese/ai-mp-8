@@ -95,15 +95,15 @@ export function AnswerCard({ answer, sessionId, onAnswerInput, onRequestDetail, 
         </section>
       )}
 
-      {simple && answer.changeDetected && (
+      {simple && answer.detail_analysis_recommended && (
         <section className="flex flex-col gap-2 rounded-chip border border-border bg-[color:var(--accent-soft)] px-3 py-2.5" aria-label="상세 분석 권장">
           <div className="flex items-center gap-2 text-sm font-semibold">
             <Badge tone="accent">상세 분석 권장</Badge>
             <span className="font-normal text-muted">탐색 결과 영향이 더 넓을 수 있습니다. 요청하면 복잡 요건으로 다시 분석합니다.</span>
           </div>
-          {answer.detailReasons && answer.detailReasons.length > 0 && (
+          {answer.detail_analysis_reasons && answer.detail_analysis_reasons.length > 0 && (
             <ul className="list-disc space-y-1 pl-5 text-sm leading-relaxed">
-              {answer.detailReasons.map((r) => (
+              {answer.detail_analysis_reasons.map((r) => (
                 <li key={r}>{r}</li>
               ))}
             </ul>
@@ -135,12 +135,12 @@ export function AnswerCard({ answer, sessionId, onAnswerInput, onRequestDetail, 
         <button type="button" className="btn" onClick={onAnswerInput}>
           <MessageSquareReply size={16} /> 현업 답변 입력
         </button>
-        {simple && answer.changeDetected && (
+        {simple && answer.detail_analysis_recommended && (
           <button
             type="button"
             className="btn-primary"
             disabled={detailRequested}
-            onClick={() => onRequestDetail(answer.detailReasons ?? [])}
+            onClick={() => onRequestDetail(answer.detail_analysis_reasons ?? [])}
           >
             <Sparkles size={16} /> {detailRequested ? '상세 분석 요청됨' : '상세 분석 요청'}
           </button>

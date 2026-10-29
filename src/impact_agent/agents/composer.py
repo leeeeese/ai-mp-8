@@ -1,6 +1,7 @@
 """Composer: 분석 결과를 사용자 결과물로 만든다. 설계: docs/SE_agent_design.md 3장
 
 - 단순 (Retriever → Composer): SimpleAnswer = 요약 결론 · 영향 경로 · 근거 (+ 확인 쿼리, 분석 한계)
+  + 상세 분석 권장과 사유 (탐색 신호, 노드 ID 포함 → 사용자가 요청하면 reanalysis 후속 입력, 설계서 3-1·1-4)
 - 복잡 (Verifier → Composer): ComplexReport = 요약 · 영역별 판정 · 일정 요인 · 경로 상세 · 분석 한계 · 검토 제외 경로 · 체크리스트
 - 후속 답변 (Supervisor 가 Composer 로 바로 보냄): 체크리스트 답변 반영·stage 갱신, 조회 결과 요약,
   답변 때문에 경로가 바뀌어야 하면 reanalysis_request (사용자가 확인 후 reanalysis 후속 입력으로 보냄)
@@ -16,7 +17,7 @@ from pydantic import BaseModel, Field
 
 from .. import config
 from ..llm import LLM_FAILURES, LLMClient, Usage, analysis_llm
-from ..rules import build_impact_paths, evidence_ref
+from ..rules import build_impact_paths, evidence_ref, node_role, shared_nodes
 from ..schemas import (
     Area,
     AreaImpact,
@@ -29,6 +30,7 @@ from ..schemas import (
     ComplexReport,
     ComposerOutput,
     Confidence,
+    Difficulty,
     Evidence,
     Feasibility,
     FollowupInput,
@@ -37,6 +39,7 @@ from ..schemas import (
     ImpactPath,
     ImpactType,
     MailDraft,
+    NodeRole,
     QueryResultSummary,
     ReanalysisRequest,
     SaveReportInput,
@@ -49,7 +52,14 @@ from ..state import AgentState
 from ..templates import render_complex, render_simple
 from ..tools import save_report
 from .base import BaseAgent
-from .simulator import DraftHop, apply_hop_impacts, requirement_difficulty, unverified_segments
+from .simulator import (
+    CHANGE_TAG,
+    DraftHop,
+    apply_hop_impacts,
+    reanalysis_request,
+    requirement_difficulty,
+    unverified_segments,
+)
 from .verifier import REPEATED, WARNING, unique_paths
 
 # Supervisor 가 Composer 로 바로 보내는 후속 입력 (supervisor.COMPOSER_FOLLOWUPS 와 같은 값)
@@ -61,6 +71,8 @@ MAX_SCHEDULE_FACTORS = 8  # 레포트 전체 일정 영향 요인 수
 MAX_PATH_SUMMARY = 3  # 판정표 한 칸에 보여 줄 경로 수
 MAX_EVIDENCE_NAMES = 5
 MAX_CONTEXT_EVIDENCE = 40
+MAX_DETAIL_REASONS = 5  # 상세 분석 권장 사유 수
+LLM_DETAIL_REASON = "원문에서 변경 요소가 보여 상세 분석을 권장 (Agent 판단)"
 
 
 # --- LLM 응답 형식 (Structured Outputs 호환: 기본값 없이 모든 필드 명시) ---------------------
@@ -174,6 +186,9 @@ class ComposerAgent(BaseAgent[ComposerOutput]):
         if draft is not None:
             apply_hop_impacts(draft, paths)
         claims = {c.node_id: c.claim for c in draft.claims} if draft else {}
+        reasons = detail_reasons(state, paths)
+        if not reasons and draft is not None and draft.detail_analysis_recommended:
+            reasons = [LLM_DETAIL_REASON]
         answer = SimpleAnswer(
             conclusion_lines=fit_lines(draft.conclusion_lines if draft else [], rule_conclusion(state, paths, evidence)),
             impact_paths=paths,
@@ -181,7 +196,8 @@ class ComposerAgent(BaseAgent[ComposerOutput]):
             check_queries=safe_queries(draft.check_queries) if draft else [],
             inquiry_contacts=draft.inquiry_contacts if draft else [],
             analysis_limits=unverified_segments(state, paths) + self.notes,
-            detail_analysis_recommended=(draft.detail_analysis_recommended if draft else False) or rule_detail(state),
+            detail_analysis_recommended=bool(reasons),
+            detail_analysis_reasons=reasons,
         )
         return ComposerOutput(
             complexity=state.planner.complexity if state.planner else Complexity.SIMPLE,
@@ -197,7 +213,7 @@ class ComposerAgent(BaseAgent[ComposerOutput]):
         base_items = required_checklist(state)
         draft: ComplexDraft | None = self._draft(ComplexDraft, complex_message(state, base_items))
         report = ComplexReport(
-            summary_conclusion=(draft.summary_conclusion.strip() if draft else "") or rule_summary(sim.area_impacts),
+            summary_conclusion=with_flow_note(state, (draft.summary_conclusion.strip() if draft else "") or rule_summary(sim.area_impacts)),
             area_verdicts=area_rows(sim.area_impacts),
             schedule_factors=merge_schedule_factors(sim.area_impacts),
             path_details=unique_paths(state),
@@ -313,9 +329,50 @@ def safe_queries(queries: list[DraftQuery]) -> list[GuidanceQuery]:
     return out
 
 
-def rule_detail(state: AgentState) -> bool:
-    """구조 변경 유형(데이터·컬럼·조회 항목·연계 항목 추가)이 있으면 상세 분석 권장."""
-    return bool(state.planner) and any(it.change_type in DETAIL_CHANGE_TYPES for it in state.planner.items)
+def detail_reasons(state: AgentState, paths: list[ImpactPath]) -> list[str]:
+    """단순 응답의 상세 분석 권장 사유 (설계서 3-1, planner_detail_analysis_to-be.md). 신호마다 노드 ID 를 그대로 넣는다.
+
+    사용자가 "상세 분석 요청"을 누르면 이 문장이 reanalysis 후속 입력이 되고, Simulator·Verifier 가 문장 속 노드 ID 를
+    확인 대상으로 쓴다 (simulator.reanalysis_nodes). 놓치지 않는 쪽으로 넓게 잡는다 (사용자가 거른다).
+    """
+    exp = state.explorer
+    nodes = {n.node_id: n for n in exp.nodes} if exp else {}
+    on_paths = list(dict.fromkeys(h.node for p in paths for h in p.hops))
+    reasons = [f"[항목 {it.item_id}] 저장·조회·연계 항목이 바뀌는 요건 ({it.change_type.value})"
+               for it in (state.planner.items if state.planner else []) if it.change_type in DETAIL_CHANGE_TYPES]
+    common = [n for n in on_paths if n in nodes and nodes[n].properties.get("is_common")]
+    reasons += [f"공통 모듈 {n} 이 경로에 있어 다른 화면·처리 영향 확인 필요" for n in common]
+    reasons += [f"공통 모듈 {n} 이 탐색에서 제외되어 다른 화면·처리 영향 확인 필요"
+                for n in (exp.excluded_common if exp else []) if n not in common]
+    shared = shared_nodes(exp.paths if exp else [], nodes)
+    reasons += [f"{n} 을 여러 진입점에서 호출 ({shared[n]})" for n in on_paths
+                if n in shared and n not in common and shared[n].startswith("진입점")]
+    for u in exp.unresolved if exp else []:
+        if "신규 후보" in u:
+            reasons.append(f"그래프에 없는 항목이 있어 신규 개발 여부 확인 필요: {u}")
+        elif "그래프 밖" in u:
+            reasons.append(f"적재 범위 밖 연계 확인 필요: {u}")
+    return list(dict.fromkeys(reasons))[:MAX_DETAIL_REASONS]
+
+
+def with_flow_note(state: AgentState, summary: str) -> str:
+    """복잡 요건 요약 끝에 복잡도·난이도 관계를 덧붙인다 (설계서 3-2). 값(복잡도·난이도)은 바꾸지 않는다."""
+    notes = []
+    if reanalysis_request(state) is not None:
+        notes.append("사용자 상세 분석 요청에 따른 재분석 결과입니다.")
+    level, _ = requirement_difficulty(state.simulation.area_impacts)
+    changed = any(a.impact_type in (ImpactType.ADD, ImpactType.MODIFY) for a in state.simulation.area_impacts)
+    if changed and level is Difficulty.MINOR:
+        notes.append("복잡 요건으로 분석했으나 확인 결과 변경 범위가 작습니다 (요건 전체 난이도 Minor).")
+    return " ".join([summary.strip()] + notes) if notes else summary
+
+
+def entry_points(state: AgentState, node_id: str) -> list[str]:
+    """Explorer 경로에서 그 노드를 지나는 진입점(경로 첫 노드가 Entry)."""
+    exp = state.explorer
+    nodes = {n.node_id: n for n in exp.nodes} if exp else {}
+    return list(dict.fromkeys(p.nodes[0] for p in (exp.paths if exp else [])
+                              if node_id in p.nodes[1:] and node_role(nodes.get(p.nodes[0])) is NodeRole.ENTRY))
 
 
 def area_rows(areas: list[AreaImpact]) -> list[AreaVerdictRow]:
@@ -365,12 +422,23 @@ def complex_limits(state: AgentState) -> list[str]:
 
 
 def required_checklist(state: AgentState) -> list[tuple[ChecklistOwner, str, Area | None]]:
-    """LLM 과 관계없이 항상 넣는 확인 항목: 요건 미확정 사항(업무), 검토 제외 경로(개발)."""
+    """LLM 과 관계없이 항상 넣는 확인 항목: 요건 미확정 사항(업무), 검토 제외 경로·[변경] 공유 노드·탐색 제외 공통 모듈(개발)."""
     items = [(ChecklistOwner.BUSINESS, f"{o.item} ({o.reason})", None)
              for o in (state.planner.structured_request.open_items if state.planner else [])]
     for d in state.simulation.dropped_paths if state.simulation else []:
         question = f"검토 제외 경로 {d.path.path_id} ({path_summary(d.path)}) 가 실제로 무관한지 확인 - 제외 사유: {d.reason}"
         items.append((ChecklistOwner.DEVELOPER, question, None))
+    exp = state.explorer
+    nodes = {n.node_id: n for n in exp.nodes} if exp else {}
+    shared = shared_nodes(exp.paths if exp else [], nodes)
+    changed = dict.fromkeys(h.node for p in (unique_paths(state) if state.simulation else []) for h in p.hops
+                            if h.node in shared and h.impact.startswith(CHANGE_TAG))
+    for n in changed:  # 공유 노드 변경 → 함께 영향받는 진입점 (테스트 범위)
+        entries = entry_points(state, n)
+        where = f"진입점 {', '.join(entries)}" if len(entries) >= 2 else shared[n]
+        items.append((ChecklistOwner.DEVELOPER, f"공유 노드 {n} 변경 - 함께 영향받는 {where} 의 테스트 범위 확인", None))
+    for n in exp.excluded_common if exp else []:  # 탐색에서 제외된 공통 모듈
+        items.append((ChecklistOwner.DEVELOPER, f"공통 모듈 {n} 은 탐색에서 제외됨 - 이 요건으로 바뀌는지, 다른 화면·처리 영향 확인", None))
     return items
 
 

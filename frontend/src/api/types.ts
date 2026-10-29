@@ -79,8 +79,9 @@ export interface AgentAnswer {
   // 단순 응답
   evidence?: EvidenceRow[];
   checkQueries?: { title: string; sql: string }[];
-  changeDetected?: boolean; // 상세 분석 권장 (백엔드 SimpleAnswer.detail_analysis_recommended)
-  detailReasons?: string[]; // 권장 사유, 노드 ID 포함 (백엔드 SimpleAnswer.detail_analysis_reasons)
+  // 상세 분석 권장: 백엔드 SimpleAnswer 와 같은 필드명을 그대로 쓴다 (snake_case, 매핑 누락 방지)
+  detail_analysis_recommended?: boolean;
+  detail_analysis_reasons?: string[]; // 권장 사유, 노드 ID 포함 → "상세 분석 요청" 시 reanalysis 후속 입력 내용
 }
 
 export interface Message {

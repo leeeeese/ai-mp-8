@@ -118,7 +118,7 @@ export function completeSession(id: string) {
     : isL1(s)
       ? L1_ANSWER
       : s.inputType === 'ops_inquiry'
-        ? { ...SC006_ANSWER, changeDetected: true, detailReasons: SC006_DETAIL_REASONS }
+        ? { ...SC006_ANSWER, detail_analysis_recommended: true, detail_analysis_reasons: SC006_DETAIL_REASONS }
         : complexAnswer;
   s.complexity = answer.complexity;
   s.status = 'done';

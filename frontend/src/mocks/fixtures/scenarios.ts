@@ -93,7 +93,7 @@ export const SC006_ANSWER: AgentAnswer = {
  ORDER BY CNT DESC;`,
     },
   ],
-  changeDetected: false,
+  detail_analysis_recommended: false,
 };
 
 /** 단순 응답의 상세 분석 권장 사유 예 (백엔드 Composer 가 탐색 신호로 만드는 문장, 노드 ID 포함) */
@@ -138,8 +138,8 @@ export const L1_ANSWER: AgentAnswer = {
  WHERE JOB_ID IN ('ZDOCBB0100010', 'ZDOCBB0100020', 'ZDOCBB0100030', 'ZDOCBB0100040', 'ZDOCBB0100050')`,
     },
   ],
-  changeDetected: true,
-  detailReasons: [
+  detail_analysis_recommended: true,
+  detail_analysis_reasons: [
     '공통 모듈 MOD:BatchLauncher.runJob 이 탐색에서 제외되어 다른 배치·처리 영향 확인 필요',
     'DBIO:BatJobSql.updateLastRun 을 Job 5개(BAT:ZDOCBB0100010 외 4)가 함께 호출',
   ],
