@@ -2,10 +2,12 @@
 
 점검 (VerifyCheck.check)
   area_path_missing  요건 항목의 변경 유형이 가리키는 영역에 그 항목의 경로가 없음 / 항목의 경로가 하나도 없음
-  evidence_missing   confirmed hop 의 근거 위치가 Retriever 근거에 없음 / 변경(add·modify) 영역의 hop 이 전부 inferred
+  evidence_missing   confirmed hop 의 근거 위치가 Retriever 근거에 없음 / 변경(add·modify) 영역의 [변경] hop 이 전부 inferred
+                     ([변경] 표시가 없으면 영역 hop 전체가 inferred)
   cross_domain_link  경로 노드의 domain 이 섞였는데 cross_domain=false
   redundant_path     중복·포함 경로 (경고만, 재계획 사유 아님)
   alternative_basis  hard 영역에 대안이 없음 / 대안이 근거를 가리키지 않음 (LLM 이 있을 때)
+  reanalysis_coverage 사용자가 재분석으로 확인을 요청한 노드가 영향 경로에 없음 (보완 필요) / 경로에 있지만 판정 문장이 없음 (경고)
 판정: 보완 필요가 하나라도 있으면 needs_supplement + reason + additional_scope(node: / area: / keyword:).
 이전 라운드 replan_feedback 에 같은 사유가 있으면 재계획으로 해결되지 않는 것으로 보고 pass 로 바꾸고 note 에 남긴다.
 """
@@ -16,7 +18,7 @@ from dataclasses import dataclass, field
 from pydantic import BaseModel, Field
 
 from ..llm import LLM_FAILURES, LLMClient, Usage, analysis_llm
-from ..rules import evidence_ref
+from ..rules import evidence_ref, interface_node_ids, node_areas
 from ..schemas import (
     Area,
     ChangeType,
@@ -24,6 +26,7 @@ from ..schemas import (
     Feasibility,
     ImpactPath,
     ImpactType,
+    PathHop,
     ReplanFeedback,
     VerifierOutput,
     VerifyCheck,
@@ -32,6 +35,7 @@ from ..schemas import (
 from ..schemas.verifier import CheckKind
 from ..state import AgentState
 from .base import BaseAgent
+from .simulator import CHANGE_TAG, REFERENCE_TAG, reanalysis_nodes
 
 # 변경 유형 → 그 항목의 경로(또는 그래프 밖 표시)가 반드시 있어야 할 영역 (설계서 2장, rules.CHANGE_TYPE_RULES 목표 역할 기준)
 REQUIRED_AREAS: dict[ChangeType, list[Area]] = {
@@ -42,7 +46,8 @@ REQUIRED_AREAS: dict[ChangeType, list[Area]] = {
     ChangeType.BATCH_CHANGE: [Area.BATCH],
     ChangeType.INTERFACE_FIELD_ADD: [Area.INTERFACE],
 }
-CHECK_ORDER: list[CheckKind] = ["area_path_missing", "evidence_missing", "cross_domain_link", "redundant_path", "alternative_basis"]
+CHECK_ORDER: list[CheckKind] = ["area_path_missing", "evidence_missing", "cross_domain_link", "redundant_path", "alternative_basis",
+                                "reanalysis_coverage"]
 MAX_SCOPE = 5  # 점검 하나가 additional_scope 에 넣는 항목 수
 REPEATED = "(반복) 재계획으로 해결되지 않음: "
 WARNING = "(경고) "
@@ -95,7 +100,7 @@ class VerifierAgent(BaseAgent[VerifierOutput]):
         if state.simulation is None:
             return decide([Issue("area_path_missing", "Simulator 결과가 없어 점검하지 못함", blocking=False)], [])
         issues = (area_path_missing(state) + evidence_missing(state) + cross_domain_link(state)
-                  + redundant_path(state) + self._alternative_basis(state))
+                  + redundant_path(state) + self._alternative_basis(state) + reanalysis_coverage(state))
         return decide(issues, state.replan_feedback)
 
     def _alternative_basis(self, state: AgentState) -> list[Issue]:
@@ -165,13 +170,31 @@ def evidence_missing(state: AgentState) -> list[Issue]:
         issues.append(Issue("evidence_missing", f"confirmed 인데 근거 위치가 Retriever 근거에 없음: {', '.join(bad)}",
                             scope=[f"node:{n}" for n in bad[:MAX_SCOPE]]))
     for a in state.simulation.area_impacts:
-        hops = [h for p in a.paths for h in p.hops]
-        if a.impact_type in (ImpactType.ADD, ImpactType.MODIFY) and hops and all(
-                h.confidence is Confidence.INFERRED for h in hops):
+        if a.impact_type not in (ImpactType.ADD, ImpactType.MODIFY):
+            continue
+        if changed := changed_hops(state, a.area, a.paths):  # 실제로 바꾸는 지점에 근거가 있는지
+            if all(h.confidence is Confidence.INFERRED for h in changed):
+                nodes = list(dict.fromkeys(h.node for h in changed))
+                issues.append(Issue("evidence_missing", f"[{a.area.value}] 변경 지점([변경] hop)에 원문 근거가 없음: {', '.join(nodes)}",
+                                    a.area, [f"node:{n}" for n in nodes[:MAX_SCOPE]]))
+            continue
+        hops = [h for p in a.paths for h in p.hops]  # [변경] 표시가 없으면 영역 전체 hop 기준 (이전 동작)
+        if hops and all(h.confidence is Confidence.INFERRED for h in hops):
             nodes = list(dict.fromkeys(h.node for h in hops))
             issues.append(Issue("evidence_missing", f"[{a.area.value}] 변경 영역인데 원문 근거가 하나도 없음", a.area,
                                 [f"node:{n}" for n in nodes[:MAX_SCOPE]]))
     return issues
+
+
+def changed_hops(state: AgentState, area: Area, paths: list[ImpactPath]) -> list[PathHop]:
+    """그 영역에 속한 [변경] hop (Simulator 와 같은 rules.node_areas 기준). Simulator 가 표시하지 않았으면 빈 목록."""
+    nodes = {n.node_id: n for n in state.explorer.nodes} if state.explorer else {}
+    iface = interface_node_ids(nodes, state.retriever.evidence if state.retriever else [])
+    out = []
+    for p in paths:
+        areas = node_areas([h.node for h in p.hops], nodes, iface)
+        out += [h for h, ar in zip(p.hops, areas) if area in ar and h.impact.startswith(CHANGE_TAG)]
+    return out
 
 
 def cross_domain_link(state: AgentState) -> list[Issue]:
@@ -199,6 +222,34 @@ def redundant_path(state: AgentState) -> list[Issue]:
         container = next((qid for qid, other in distinct if len(nodes) < len(other) and _contains(other, nodes)), None)
         if container:
             issues.append(Issue("redundant_path", f"{pid} 가 {container} 에 포함됨", blocking=False))
+    return issues
+
+
+def reanalysis_coverage(state: AgentState) -> list[Issue]:
+    """재분석으로 들어온 요건: 사용자가 확인을 요청한 노드(사유 문장 속 노드 ID)를 Simulator 가 다뤘는지 (설계서 1-4, 2장).
+
+    - 영향 경로에 없음 → 보완 필요. additional_scope 에 node:<ID>. 공통 모듈이라 탐색에서 제외된 노드는 사유에 함께 적는다
+      (Planner 가 공통 제외를 끌 근거). 다음 라운드에도 같으면 decide 의 반복 규칙으로 pass.
+    - 경로에 있지만 그 노드의 hop 에 [변경]/[참조] 판정 문장이 없음 → 경고. Simulator 가 표시를 하나도 안 쓴 경우(LLM 없음 등)는
+      Simulator 분석 한계에 이미 남으므로 점검하지 않는다.
+    """
+    requested = reanalysis_nodes(state)
+    if not requested:
+        return []
+    paths = unique_paths(state)
+    on_paths = {h.node for p in paths for h in p.hops}
+    excluded = set(state.explorer.excluded_common) if state.explorer else set()
+    issues = []
+    if missing := [n for n in requested if n not in on_paths]:
+        names = ", ".join(f"{n} (공통 모듈이라 탐색에서 제외됨)" if n in excluded else n for n in missing)
+        issues.append(Issue("reanalysis_coverage", f"재분석 요청 노드가 영향 경로에 없음: {names}",
+                            scope=[f"node:{n}" for n in missing[:MAX_SCOPE]]))
+    tags = (CHANGE_TAG, REFERENCE_TAG)
+    if any(h.impact.startswith(tags) for p in paths for h in p.hops):
+        answered = {h.node for p in paths for h in p.hops if h.impact.startswith(tags)}
+        if unanswered := [n for n in requested if n in on_paths and n not in answered]:
+            issues.append(Issue("reanalysis_coverage", f"재분석 요청 노드의 판정 문장([변경]/[참조])이 없음: {', '.join(unanswered)}",
+                                blocking=False))
     return issues
 
 

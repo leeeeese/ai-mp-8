@@ -2087,7 +2087,8 @@
             "evidence_missing",
             "cross_domain_link",
             "redundant_path",
-            "alternative_basis"
+            "alternative_basis",
+            "reanalysis_coverage"
           ],
           "title": "Check",
           "type": "string"

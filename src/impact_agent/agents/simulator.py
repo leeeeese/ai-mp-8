@@ -143,7 +143,7 @@ class SimulatorAgent(BaseAgent[SimulationOutput]):
 
         if draft is not None:
             apply_hop_impacts(draft, [p for p, _ in built])
-        kept, dropped = apply_drops(draft, built, state)
+        kept, dropped = apply_drops(draft, built, state, shared)
         return SimulationOutput(
             area_impacts=judge_areas(draft, kept, areas_of, state, limits, (shared, hop_areas)),
             requested_vs_alternative=draft.requested_vs_alternative if draft else None,
@@ -172,20 +172,23 @@ def apply_hop_impacts(draft: SimulatorDraft, paths: list[ImpactPath]) -> None:
 
 
 def apply_drops(
-    draft: SimulatorDraft | None, built: list[tuple[ImpactPath, list[ExplorePath]]], state: AgentState
+    draft: SimulatorDraft | None, built: list[tuple[ImpactPath, list[ExplorePath]]], state: AgentState,
+    shared: dict[str, str] | None = None,
 ) -> tuple[list[ImpactPath], list[DroppedPath]]:
-    """LLM 의 경로 제외 제안 중 가드 규칙을 통과한 것만 제외한다."""
+    """LLM 의 경로 제외 제안 중 가드 규칙을 통과한 것만 제외한다 (hop 영향 설명을 반영한 뒤 부른다)."""
     if draft is None:
         return [p for p, _ in built], []
     reasons = {d.path_id: d.reason for d in draft.drop_paths}
     confirmed = {m.confirmed_node for it in (state.planner.items if state.planner else [])
                  for m in it.mentions if m.confirmed_node}
     requested = set(reanalysis_nodes(state))
+    # 어느 경로에서든 [변경] 으로 판정된 공유 노드: 그 노드를 지나는 다른 진입점 경로도 함께 영향받는 범위다
+    changed_shared = {h.node for p, _ in built for h in p.hops if h.node in (shared or {}) and h.impact.startswith(CHANGE_TAG)}
     kept = list(built)
     dropped = []
     for path, sources in built:
         reason = reasons.get(path.path_id)
-        if reason and not drop_guarded(path, sources, confirmed, kept, requested):
+        if reason and not drop_guarded(path, sources, confirmed, kept, requested, changed_shared):
             kept.remove((path, sources))
             dropped.append(DroppedPath(path=path, reason=reason))
     return [p for p, _ in kept], dropped
@@ -193,7 +196,7 @@ def apply_drops(
 
 def drop_guarded(
     path: ImpactPath, sources: list[ExplorePath], confirmed: set[str], kept: list[tuple[ImpactPath, list[ExplorePath]]],
-    requested: set[str] | None = None,
+    requested: set[str] | None = None, changed_shared: set[str] | None = None,
 ) -> bool:
     """제외하면 안 되는 경로인지 (설계서 1장 경로 제외 가드)."""
     if any(s.stop_reason is StopReason.TARGET_REACHED for s in sources) and path.hops[-1].confidence is Confidence.CONFIRMED:
@@ -202,6 +205,8 @@ def drop_guarded(
         return True  # 사용자가 확정한 노드가 있음
     if requested and any(h.node in requested for h in path.hops):
         return True  # 사용자가 재분석으로 확인을 요청한 노드가 있음 (설계서 1-4)
+    if changed_shared and any(h.node in changed_shared for h in path.hops):
+        return True  # [변경] 된 공유 노드를 지남 → 함께 영향받는 진입점 경로 (설계서 1-3 (c))
     others = {s.item_id for p, ss in kept if p is not path for s in ss}
     return any(s.item_id not in others for s in sources)  # 빼면 그 요건 항목의 경로가 없어짐
 

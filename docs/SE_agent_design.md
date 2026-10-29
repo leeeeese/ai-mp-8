@@ -39,7 +39,7 @@
 | Simulator | 시스템 공통 판단 틀: 라벨이 아니라 역할·변경 지점 유형으로 판단하고, 시스템별 원문 형태는 표로만 구분 (1-3) | `prompts/simulator.md`, `agents/simulator.py` |
 | Simulator | 판정 순서 고정: 요건 항목별 바뀔 것 정리 → hop `[변경]`/`[참조]` 구분 → 영역 `impact_type` → 가능성·난이도 → 대안·경로 제외 | `prompts/simulator.md` |
 | 공통 (담당 범위) | 출력 전 자체 점검: 프롬프트마다 ID·근거·형식 점검 항목을 두고 하나라도 어긋나면 고친 뒤 출력. `_common.md` 는 파트너 에이전트와 공유하므로 넣지 않는다 | `prompts/{simulator,verifier,composer}.md` |
-| Verifier | 규칙 우선: 점검은 코드, LLM 은 `alternative_basis`(대안이 근거를 가리키는지)만 | `agents/verifier.py`, `prompts/verifier.md` |
+| Verifier | 규칙 우선: 점검은 코드, LLM 은 `alternative_basis`(대안이 근거를 가리키는지)만. 판단 예시 5개 (tos 형 3 · swing 형 2), 대안이 기대는 값의 위치를 시스템별로 정리한 표 (하드코딩·데이터 관리 값·조회 위치·연계) | `agents/verifier.py`, `prompts/verifier.md` |
 | Verifier·Supervisor | Reflexion (Shinn et al. 2023): 보완 사유를 `reason`·`additional_scope` 로 내고 Supervisor 가 `replan_feedback` 에 누적 | `agents/verifier.py` → `supervisor._verifier_node` |
 | Composer | 템플릿 고정: LLM 은 문장 필드만, markdown 은 항상 Jinja2 템플릿 렌더링 | `templates/simple_answer.md.j2`, `templates/complex_report.md.j2` |
 | Output Parsing | Structured Output (Pydantic): `SimulatorDraft`, `VerifierDraft`, `SimpleDraft`·`ComplexDraft`·`FollowupDraft`. 최종 출력 모델은 코드가 조립 | 각 agent 모듈 |
@@ -112,6 +112,7 @@
      - 사용자가 확정한 노드(`Mention.confirmed_node`)가 경로에 있음
      - 그 경로를 빼면 요건 항목(`item_id`)의 경로가 하나도 남지 않음
      - 재분석 사유에 나온 노드가 경로에 있음 (사용자가 확인을 요청한 범위, `reanalysis_nodes`, 1-4)
+     - 어느 경로에서든 `[변경]` 으로 판정된 공유 노드(`rules.shared_nodes`)가 경로에 있음 (함께 영향받는 다른 진입점 경로. 프롬프트 규칙을 코드로 강제, 1-3 (c))
    - 제외한 경로는 `dropped_paths` 에 사유와 함께 남긴다 → Composer 레포트 "검토 제외 경로"
 5. **분석 한계 (`unverified_segments`)**: `explorer.unresolved`, `item_results` 의 미도달·frontier·매칭 실패, 근거 없는 노드, 공통 제외 노드, 고립 노드로 끝난 경로(6-3), swing 컬럼 변경 시 참조 테이블 미확인 (swing 에 `REFERENCES` 없음).
 
@@ -231,7 +232,7 @@ Simulator 는 시스템을 나눠 판단하지 않는다. **역할 → 변경 �
 | 결과 해석 | 재분석 결과가 Minor 여도 정상이다 ("확인해 보니 변경 범위가 작다"는 답). Simulator 는 표시하지 않고, 복잡도와 함께 보여 주는 것은 Composer 몫 |
 
 - 재분석 라운드는 Explorer·Retriever 부터 새로 돈다. Simulator 는 이전 라운드의 단순 응답을 입력으로 받지 않는다 (사유 문장만).
-- (반영됨) 사유에 나온 노드가 이번 라운드 경로에 없으면 (Explorer 가 다시 못 찾음) 분석 한계에 "재분석 요청 노드 미탐색: … (이번 탐색 경로에 없어 판정하지 못함)" 을 남긴다.
+- (반영됨) 사유에 나온 노드가 이번 라운드 경로에 없으면 (Explorer 가 다시 못 찾음) 분석 한계에 "재분석 요청 노드 미탐색: … (이번 탐색 경로에 없어 판정하지 못함)" 을 남긴다. 보완 요청(재계획)은 Verifier `reanalysis_coverage` 가 낸다 (2장).
 
 **출력 `SimulationOutput`**: `area_impacts[AreaImpact{area, impact_type, paths[ImpactPath], feasibility, difficulty, difficulty_basis, schedule_factors, infeasible_reason, alternatives, confidence, new_elements(예정)}]`, `requested_vs_alternative`, `unverified_segments`, `dropped_paths`
 
@@ -251,10 +252,11 @@ Simulator 는 시스템을 나눠 판단하지 않는다. **역할 → 변경 �
 | check | 방식 | 보완 필요 조건 |
 |---|---|---|
 | `area_path_missing` | 규칙 | 변경 유형이 가리키는 필수 영역(아래 표)에 경로가 없음 / 항목의 경로가 하나도 없음 (`reached=false` 이고 경로 0) |
-| `evidence_missing` | 규칙 | `confirmed` hop 의 `evidence_ref` 가 Retriever 근거에 없음 / `modify`·`add` 영역의 hop 이 전부 `inferred` (`add` 영역이 `new_elements` 만이면 제외, 예정) |
+| `evidence_missing` | 규칙 | `confirmed` hop 의 `evidence_ref` 가 Retriever 근거에 없음 / 변경(`modify`·`add`) 영역의 **변경 지점**에 근거가 없음: 그 영역에 속한(`rules.node_areas`, Simulator 와 같은 기준) `[변경]` hop 이 전부 `inferred` → 보완 필요, 범위 `node:<변경 노드>`. `[변경]` 표시가 없으면(LLM 없음·판정 불일치) 영역 hop 전체가 `inferred` 일 때 (이전 기준). `[변경]` hop 이 하나라도 근거가 있으면 통과 (재계획이 과하게 늘지 않게) (`add` 영역이 `new_elements` 만이면 제외, 예정) |
 | `cross_domain_link` | 규칙 | 경로 노드의 domain 이 섞였는데 `cross_domain=false` |
 | `redundant_path` | 규칙 | 같은 노드 순서 중복, 한 경로가 다른 경로에 완전히 포함 (경고만, 재계획 사유 아님) |
 | `alternative_basis` | 규칙 + LLM | `hard` 영역에 대안 없음 / 대안 설명이 근거(Evidence·노드)를 가리키지 않음 |
+| `reanalysis_coverage` | 규칙 | 재분석으로 들어온 요건(1-4)에서 사용자가 확인을 요청한 노드(사유 속 노드 ID)가 영향 경로에 없음 → 보완 필요, `additional_scope` 에 `node:<ID>`, 공통 제외된 노드는 사유에 "공통 모듈이라 탐색에서 제외됨" (Planner 가 공통 제외를 끌 근거). 경로에는 있지만 그 노드 hop 에 `[변경]`/`[참조]` 판정 문장이 없음 → 경고 (Simulator 가 표시를 하나도 안 쓴 경우는 점검 안 함). 다음 라운드에도 같으면 반복 규칙으로 pass |
 
 2. 필수 영역 (`rules.CHANGE_TYPE_RULES` 목표 역할과 맞춤)
 
@@ -273,7 +275,7 @@ Simulator 는 시스템을 나눠 판단하지 않는다. **역할 → 변경 �
    - `additional_scope` 는 Planner 가 탐색 명세로 바꿀 수 있는 형태: `node:<노드ID>` / `area:<영역>` / `keyword:<표현>`. Planner 는 `[이전 탐색 명세]` + `[재계획 요청]` 블록으로 받는다
    - 같은 사유가 이전 `replan_feedback` 에 이미 있으면 재계획해도 해결되지 않는 것으로 보고 `pass`, 사유는 `checks[].note` (Composer 가 분석 한계로 표시)
    - 고립 노드(6-3)로 끝나 경로가 이어지지 않는 영역은 `additional_scope` 에 넣지 않고 분석 한계로
-   - 경고 (예정): 화면 경로의 TP 가 Batch→TP 로 배치에서도 호출되는데 batch 영역이 `none` 이면 `checks[].note` (H-1 `TP:CombScrbSvc.joinComb`)
+   - 화면·배치 공유 노드(예: H-1 `TP:CombScrbSvc.joinComb`)는 Verifier 가 따로 점검하지 않는다. 재계획으로는 Simulator 의 경로 제외·판정을 고칠 수 없어서, Simulator 에서 막는다: `[변경]` 공유 노드 경로 제외 거절(경로 제외 가드), 공유 노드 영역 최소 Medium(영향 범위 보정), `[변경]` 과 영역 판정 불일치 경고(`tag_mismatch`)
 
 4. LLM 판단 기준 (`alternative_basis`, `prompts/verifier.md`)
    - 규칙 점검 결과를 다시 판단하거나 뒤집지 않는다. 입력의 모든 대안에 하나씩 `has_basis` 를 낸다
@@ -437,7 +439,7 @@ Supervisor 의 `Supervisor.followup(session_id, FollowupInput)` 이 진입점을
 
 | 모델 | 변경 |
 |---|---|
-| `VerifyCheck.check` (`CheckKind`) | + `evidence_missing` |
+| `VerifyCheck.check` (`CheckKind`) | + `evidence_missing`, + `reanalysis_coverage` |
 | `SimulationOutput` | + `dropped_paths[DroppedPath{path, reason}]` |
 | `ComplexReport` | + `dropped_paths` |
 | `PathHop.evidence_ref` | 설명 `file_path#location` (Retriever Evidence 와 맞춤) |
@@ -461,7 +463,7 @@ pytest (LLM·Neo4j 불필요, 가짜 LLM `Fixed` 또는 LLM 없음, tos·swing �
 | 대상 | 확인 |
 |---|---|
 | Simulator | 경로 골격(노드 순서·엣지 유형·evidence_ref·확신도), 역할 기준 영역 배정, 경로 모양(`OPENS`·Batch→TP·Screen 단독·Table 시작·고립 노드), 그래프 밖 노드 제거, inferred 영역 review, 경로 제외 가드 3종, 난이도 기준, 영향 범위 보정(tos·swing 각각 공유 노드 / 단일 진입점), `[노드 메타]` 에 시스템별 속성이 들어가는지, LLM 없음 출력, 재분석: `[재분석 요청]` 블록·사유 노드 경로 제외 거절·사유 노드 미탐색 한계, 복잡도 미변경 |
-| Verifier | 점검 항목별 보완 필요/통과, 필수 영역 표, `additional_scope` 형식, 같은 사유 반복 시 pass, 재계획 한도 (`test_supervisor`) |
+| Verifier | 점검 항목별 보완 필요/통과, 필수 영역 표, `additional_scope` 형식, 같은 사유 반복 시 pass, 재계획 한도 (`test_supervisor`), 변경 지점 근거 점검 (`[변경]` hop 기준·표시 없으면 이전 기준), swing 경로의 필수 영역·TP 연계 속성·도메인 혼재·포함 경로, 재분석 요청 점검 (tos·swing, 실제 Simulator 출력: 미탐색 → 보완 필요·`node:` 범위·공통 제외 표시, 판정 문장 없음 → 경고, 표시 없는 Simulator 출력은 점검 안 함, 반복 → pass) |
 | Composer | 단순/복잡 필드 조립, SELECT 외 쿼리 차단, 체크리스트 id·후속 답변·stage 전이, `reanalysis_request`, 검토 제외 경로, markdown 렌더링 |
 | 전체 | `Supervisor.run` 이 Composer·KPI 까지 끝나고, 복잡 flow 도 KPI `evaluable=true` |
 
@@ -490,7 +492,7 @@ pytest (LLM·Neo4j 불필요, 가짜 LLM `Fixed` 또는 LLM 없음, tos·swing �
 1. `new_elements` 반영: 스키마(`NewElement`) → Simulator 보정 → Verifier `evidence_missing` 예외 → Composer "신규 개발 요소" 절·체크리스트 → 프론트 목업
 2. Simulator 재분석 연동 (1-4): Simulator 쪽은 모두 반영됨 (`shared_nodes` 이동, `[재분석 요청]` 입력·프롬프트, 경로 제외 가드, 사유 노드 미탐색 분석 한계). Planner 재분석 규칙·UI 는 [planner_detail_analysis_to-be.md](planner_detail_analysis_to-be.md) Planner·UI 쪽 To-Be([planner_detail_analysis_to-be.md](planner_detail_analysis_to-be.md))와 같이 진행
    Simulator 일반화 (1-3) 남은 것: 고립 노드·swing REFERENCES 분석 한계. 프롬프트(역할별 원문 표·변경 지점 유형·공유 노드·swing 형 예시 4), 영향 범위 보정, `[노드 메타]`·`[공유 노드]` 입력은 반영됨
-3. Verifier: 화면·배치 공유 TP 경고, 고립 노드 재계획 제외
+3. Verifier: 고립 노드 재계획 제외 (화면·배치 공유 노드는 Simulator 가드·보정으로 처리, 2장)
 4. 난이도 기준 검증: 조정안은 손 대조 결과라 16건 실행 후 재확인. **SC-002(운영 장애, 정답 Major)는 기준표로 설명이 안 됨** → 운영 장애·권한 요건 가중 여부 결정
 5. 공통 노드 처리: 정답셋이 공통 노드를 `reference_only`·경로 시작으로 쓰는 경우(H-2·L-1·SC-003)와 Explorer 공통 제외 규칙을 맞출지 (파트너 합의)
 6. 자동 재분석: 지금은 사용자 확인 후 `reanalysis` 후속 입력. 자동화가 필요하면 Supervisor 에 `reanalysis_request` 라우팅 추가 (파트너 합의)

@@ -463,6 +463,36 @@ def test_reanalysis_nodes_extracted_from_reason():
 POPUP_PATHS = [(1, SW_SCREEN, StopReason.TARGET_REACHED), (1, SW_POPUP, StopReason.DEAD_END)]   # P1-2 는 제외 가능한 경로
 
 
+SHARED_DROPPABLE = [(1, SW_SCREEN, StopReason.TARGET_REACHED), (1, SW_BATCH, StopReason.DEAD_END)]  # P1-2 는 다른 가드에 안 걸림
+
+
+@pytest.mark.parametrize(("hop", "dropped"), [
+    (DraftHop(path_id="P1-1", node="MOD:PntSvc.checkLimit", impact="[변경] 한도 상수 변경"), []),             # 공유 노드 변경 → 남김
+    (DraftHop(path_id="P1-1", node="MOD:PntSvc.checkLimit", impact="[참조] 호출만"), ["P1-2"]),              # 공유 노드지만 참조만
+    (DraftHop(path_id="P1-1", node="DBIO:PntSql.selectMonthPnt", impact="[변경] 조회 조건 변경"), ["P1-2"]),  # 바뀐 노드가 공유 아님
+], ids=["shared_changed_kept", "shared_reference_dropped", "non_shared_changed_dropped"])
+def test_changed_shared_node_blocks_drop_swing(hop, dropped):
+    drop = draft(hops=[hop], drops=[DraftDrop(path_id="P1-2", reason="배치 경로라 무관")])
+    out = SimulatorAgent(llm=ScriptLLM(drop)).run(make_swing_state(SHARED_DROPPABLE))
+    assert [d.path.path_id for d in out.dropped_paths] == dropped
+    if not dropped:   # 남긴 배치 경로에도 같은 변경이 반영되고, 배치 영역이 공유 노드 보정을 받는다
+        a = by_area(out)
+        assert "P1-2" in [p.path_id for p in a[Area.BATCH].paths]
+        assert a[Area.BATCH].difficulty_basis.startswith("(보정) 공유 노드 변경: MOD:PntSvc.checkLimit")
+
+
+def test_changed_shared_node_blocks_drop_tos():
+    # tos: 화면 경로와 배치 경로가 같은 SQL 을 지남 (같은 항목, 배치 경로는 목표 미도달)
+    batch = ["BAT:TCMP100", "SQL:CmpMapper.insert", "TBL:TCP_CMP"]
+    state = make_state(paths=[(1, P_SCREEN, StopReason.TARGET_REACHED), (1, batch, StopReason.DEAD_END)],
+                       edges=TOS_EDGES + [("BAT:TCMP100", "SQL:CmpMapper.insert", "EXECUTES")])
+    drop = draft(hops=[DraftHop(path_id="P1-1", node="SQL:CmpMapper.insert", impact="[변경] 저장 컬럼 추가")],
+                 drops=[DraftDrop(path_id="P1-2", reason="배치 경로라 무관")])
+    out = SimulatorAgent(llm=ScriptLLM(drop)).run(state)
+    assert out.dropped_paths == []
+    assert "P1-2" in {p.path_id for a in out.area_impacts for p in a.paths}
+
+
 def test_reanalysis_node_blocks_drop():
     drop = draft(drops=[DraftDrop(path_id="P1-2", reason="팝업 조회만, 무관")])
     out = SimulatorAgent(llm=ScriptLLM(drop)).run(make_swing_state(POPUP_PATHS))
