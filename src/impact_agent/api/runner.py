@@ -7,6 +7,7 @@
 """
 
 import json
+import logging
 import threading
 import time
 from collections.abc import Callable
@@ -18,6 +19,7 @@ from ..schemas import Complexity
 from ..state import AgentState
 
 Emit = Callable[[dict], None]
+log = logging.getLogger("uvicorn.error")  # uvicorn 터미널에 진행 로그를 같이 찍는다
 SHOWN_AGENTS = ("planner", "explorer", "retriever", "simulator", "verifier", "composer")  # 진행 패널 단계 (KPI 제외)
 
 
@@ -103,6 +105,9 @@ class SessionRecord:
     cond: threading.Condition = field(default_factory=threading.Condition)
 
     def push(self, event: dict) -> None:
+        elapsed = f" {event['elapsedMs'] / 1000:.1f}s" if event.get("elapsedMs") is not None else ""
+        log.info("[%s] %-10s %-7s%s%s", self.meta["id"][:8], event["node"], event["status"], elapsed,
+                 f" · {event['detail']}" if event.get("detail") else "")
         with self.cond:
             self.events.append(event)
             self.cond.notify_all()

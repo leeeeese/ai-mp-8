@@ -1,13 +1,14 @@
 """FastAPI 앱. 실행: uvicorn impact_agent.api.app:app --reload --port 8000 (프론트는 Vite 프록시로 /api 를 여기로 보낸다)
 
 경로·응답은 목업(frontend/src/mocks/handlers.ts)과 같다. 구현한 것: 세션(목록·생성·조회·후속 입력·즐겨찾기·결과물·
-체크리스트 답변·진행 SSE), KPI 기록(조회·초기화). 적재 현황(/api/graph/*)·관리(/api/admin/*)는 아직 501.
+체크리스트 답변·진행 SSE), KPI 기록(조회·초기화). 적재 현황(/api/graph/*, api/graph.py). 관리(권한)(/api/admin/*)는 아직 501.
 - 분석은 백그라운드 스레드에서 Supervisor 로 돌고, 진행은 /stream (SSE) 으로 받는다.
 - 요청 문장이 정답셋(eval/ground_truth)의 request_text 와 같으면 정답을 붙여 KPI 품질·판정 지표까지 계산한다.
 """
 
 import asyncio
 import json
+import logging
 import threading
 import uuid
 from collections.abc import Callable
@@ -23,12 +24,14 @@ from pydantic import BaseModel
 from ..agents.kpi import load_answer_key
 from ..schemas import AnswerKey, ChecklistOwner, ChecklistStatus, FollowupInput, FollowupType, SmPart, UserInput
 from ..state import AgentState
+from .graph import GraphSource, default_source, graph_router
 from .runner import KpiStore, Runner, SessionRecord
 from .views import answer_view, kpi_record, report_view
 
 ROOT = Path(__file__).resolve().parents[3]
 GT_DIR = ROOT / "eval" / "ground_truth"
 DEFAULT_KPI_PATH = ROOT / "outputs" / "kpi" / "records.json"
+DEFAULT_RELOAD_PATH = ROOT / "outputs" / "graph" / "reload_requests.json"
 SM_TO_BACKEND = {"prod": SmPart.PRODUCT, "dbm": SmPart.MARKETING}
 # UI 입력 유형 → 후속 입력 유형. chat(추가 질문)은 대응 유형이 없어 변경 분석(Planner 부터)으로 둔다 (가안)
 KIND_TO_FOLLOWUP = {
@@ -83,8 +86,10 @@ def ground_truth_keys(gt_dir: Path = GT_DIR) -> dict[str, Path]:
 
 
 def create_app(supervisor_factory: Callable[[], Any] | None = None, kpi_path: Path = DEFAULT_KPI_PATH,
-               gt_dir: Path = GT_DIR, run_in_thread: bool = True) -> FastAPI:
-    """앱 생성. 테스트는 supervisor_factory(가짜 에이전트)·kpi_path(임시 파일)·run_in_thread=False 를 넘긴다."""
+               gt_dir: Path = GT_DIR, run_in_thread: bool = True, graph_source: Callable[[], GraphSource] = default_source,
+               reload_path: Path = DEFAULT_RELOAD_PATH) -> FastAPI:
+    """앱 생성. 테스트는 supervisor_factory(가짜 에이전트)·kpi_path(임시 파일)·run_in_thread=False 를 넘긴다.
+    적재 현황은 graph_source(기본 .env 의 Neo4j, 첫 요청 때 연결)·reload_path(재적재 요청 저장 파일)."""
     if supervisor_factory is None:
         from dotenv import load_dotenv
 
@@ -117,6 +122,7 @@ def create_app(supervisor_factory: Callable[[], Any] | None = None, kpi_path: Pa
         try:
             state = runner.run(rec.push, fn)
         except Exception as exc:  # noqa: BLE001 - 사용자에게 실패를 알리고 스트림을 닫는다
+            logging.getLogger("uvicorn.error").exception("[%s] 분석 실패", rec.meta["id"][:8])
             rec.messages.append({"id": uuid.uuid4().hex, "role": "agent", "text": f"분석 중 오류가 발생했습니다: {exc}",
                                  "createdAt": _now()})
             rec.push({"node": "composer", "status": "done", "detail": "오류"})
@@ -238,11 +244,15 @@ def create_app(supervisor_factory: Callable[[], Any] | None = None, kpi_path: Pa
     def reset_kpi_records() -> dict:
         return {"deleted": kpi.clear()}
 
+    # --- 적재 현황 (api/graph.py) ----------------------------------------------------------
+
+    app.include_router(graph_router(graph_source, reload_path))
+
     # --- 아직 구현하지 않은 API ----------------------------------------------------------
 
     @app.api_route("/api/{rest:path}", methods=["GET", "POST", "PATCH", "DELETE"])
     def not_implemented(rest: str) -> None:
-        raise HTTPException(501, f"/api/{rest} 는 아직 구현하지 않았습니다 (적재 현황·관리 API)")
+        raise HTTPException(501, f"/api/{rest} 는 아직 구현하지 않았습니다 (관리(권한) API)")
 
     return app
 

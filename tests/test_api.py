@@ -119,4 +119,4 @@ def test_list_star_reset_and_not_implemented(tmp_path, gt_dir):
     assert c.delete("/api/kpi/records").json() == {"deleted": 1}
     assert c.get("/api/kpi/records").json() == []
     assert c.get("/api/sessions/nope").status_code == 404
-    assert c.get("/api/graph/status?sm=dbm").status_code == 501
+    assert c.get("/api/admin/users").status_code == 501

@@ -64,6 +64,7 @@
 │   │   ├── composer.py       #   SimpleAnswer, ComplexReport, ChecklistItem, MailDraft, ComposerOutput, ...
 │   │   └── tools.py          #   tool 입출력 (SearchGraphNodes*, TraverseGraph*, ReadSource*, SaveReport*)
 │   ├── agents/               # 에이전트 구현 (supervisor = 흐름 제어, kpi = PoC 평가)
+│   ├── api/                  # UI 백엔드 API (FastAPI: 세션·SSE·KPI·적재 현황)
 │   ├── tools/                # tool 구현 + TOOL_REGISTRY
 │   ├── prompts/              # 에이전트별 시스템 프롬프트 (*.md)
 │   └── templates/            # Composer markdown 템플릿 (Jinja2)
@@ -165,10 +166,150 @@ python -m impact_agent --case L-1 --answer-key eval/ground_truth/L-1.json   # + 
 python scripts/eval_kpi.py outputs/runs/YJ/<run_id>   # 저장된 *.state.json 배치 KPI 평가
 ```
 
-## 웹 UI
+## 웹 UI 실행 (Neo4j → 백엔드 → 프론트)
 
-`frontend/` (React 18 + TypeScript + Vite, API 는 MSW mock). 실행: `cd frontend && npm install && npm run dev` → http://localhost:5173
-화면 설계서: [docs/ui_design.md](docs/ui_design.md), Agent 설계서: [docs/YJ_agent_design.md](docs/YJ_agent_design.md)
+`frontend/` (React 18 + TypeScript + Vite) + 백엔드 API `src/impact_agent/api/` (FastAPI).
+화면 설계서: [docs/ui_design.md](docs/ui_design.md), API 설계서: [docs/api_design.md](docs/api_design.md), Agent 설계서: [docs/YJ_agent_design.md](docs/YJ_agent_design.md)
+
+| 모드 | 필요한 것 | 용도 |
+|---|---|---|
+| mock (기본) | 프론트만 | 화면 확인. API 는 MSW 목업 (`frontend/src/mocks`) |
+| 실제 API | Neo4j + 백엔드 + 프론트, `.env` (LLM 키·Neo4j 계정), `data/` | 실제 분석·적재 현황 |
+
+### 0. 사전 준비 (최초 1회)
+
+| 항목 | 확인 |
+|---|---|
+| Python 3.11 이상 | `python3 --version` |
+| Node.js 18 이상 · npm | `node --version` |
+| Docker Desktop | 실행 중이어야 함 |
+| `.env` | `cp .env.example .env` 후 `OPENAI_API_KEY`, `LLM_MODEL`, `SOURCE_ROOT_*` 설정. `.env.example` 에 없는 `NEO4J_URI`·`NEO4J_USER`·`NEO4J_PASSWORD` (아래 [Neo4j 실행](#neo4j-실행-docker)), Azure 사용 시 `AZURE_OPENAI_ENDPOINT`·`OPENAI_API_VERSION` 추가 |
+| `data/` | 목업 소스·그래프 (git 미포함, 관리자에게 zip 요청) → 저장소 루트에 `data/source`, `data/graph` |
+
+**Python 환경**: 아래 둘 중 하나로 실행한다. conda `base` 의 `python3` 에는 uvicorn·neo4j 가 없어 `No module named uvicorn` 이 난다.
+
+| 방법 | 설정 |
+|---|---|
+| 1. Python 경로를 직접 지정 | 패키지가 설치된 Python 경로를 `PY` 로 둔다. 예: 시스템 Python 3.11 `PY=/Library/Frameworks/Python.framework/Versions/3.11/bin/python3` |
+| 2. conda 환경 사용 | `conda activate <환경>` 후 (처음 한 번) `pip install -r requirements.txt`, 그리고 `PY=python` |
+
+```bash
+# 1. 경로 직접 지정
+PY=/Library/Frameworks/Python.framework/Versions/3.11/bin/python3
+
+# 2. conda 환경
+conda activate <환경>
+pip install -r requirements.txt            # 처음 한 번 (fastapi · uvicorn · neo4j · openai 포함)
+PY=python
+
+$PY -c "import fastapi, uvicorn, neo4j, openai; print('ok')"   # ok 가 나오면 준비 완료
+```
+
+아래 명령의 `$PY` 는 위에서 정한 Python 이다 (터미널을 새로 열면 다시 정한다).
+
+**프론트 패키지**
+
+```bash
+cd ~/Desktop/impact-agent/frontend
+npm install
+```
+
+### 1. Neo4j 띄우기 + 그래프 적재 (터미널 1)
+
+```bash
+cd ~/Desktop/impact-agent
+docker compose up -d                       # 이미 떠 있으면 그대로
+docker ps --filter name=neo4j              # STATUS 가 Up 이면 OK
+docker compose logs -f neo4j               # 처음 띄울 때 "Started." 확인 후 Ctrl+C
+
+$PY scripts/build_graph.py --load          # data/source → data/graph 생성 + Neo4j 재적재 (기존 :Node 삭제 후 다시)
+```
+
+- 적재할 때 영역별 적재 기록(`:LoadMeta`: 시각·소스 파일별 해시·노드/관계 수)이 남는다 → 적재 현황 화면의 master 반영률 · 적재 이력. 소스(`data/source`)를 바꿨으면 다시 적재한다.
+- 확인: http://localhost:7474 에서 `neo4j` / `.env` 의 `NEO4J_PASSWORD` 로 연결 후 입력줄에 쿼리를 넣고 `Cmd + Enter` (쿼리 전에는 빈 화면이 정상).
+  ```cypher
+  MATCH (n:Node) RETURN n.domain, count(*)                       // tos 322 · swing 366
+  MATCH (m:LoadMeta) RETURN m.domain, m.loaded_at, m.nodes, m.rels
+  ```
+
+### 2. 백엔드 띄우기 (터미널 2)
+
+```bash
+cd ~/Desktop/impact-agent
+PYTHONPATH=src PYTHONWARNINGS=ignore $PY -m uvicorn impact_agent.api.app:app --app-dir src --port 8000
+```
+
+- `Uvicorn running on http://127.0.0.1:8000` 이 나오면 준비 완료. `.env` 는 앱이 직접 읽는다.
+- 터미널에 HTTP 요청과 함께 에이전트 진행이 한 줄씩 찍힌다:
+  ```
+  INFO:     "POST /api/sessions HTTP/1.1" 200 OK
+  INFO:     [2d604607] planner    done    12.3s · 단순 · 항목 2개
+  INFO:     [2d604607] explorer   done    3.1s · 시작 노드 4 · 경로 18
+  ```
+- 확인 (다른 터미널):
+  ```bash
+  curl -s localhost:8000/api/sessions                                   # []
+  curl -s "localhost:8000/api/graph/status?sm=dbm" | python3 -m json.tool | head -20   # connected: true, nodes 322
+  ```
+- 코드를 고치면 `Ctrl + C` 후 다시 실행 (또는 `--reload` 추가). **재시작하면 세션은 사라진다** (메모리 저장). KPI 기록은 `outputs/kpi/records.json` 에 남는다.
+
+### 3. 프론트 띄우기 (터미널 3)
+
+```bash
+cd ~/Desktop/impact-agent/frontend
+VITE_USE_MOCK=false npm run dev            # 실제 API 모드 (Vite 프록시가 /api 를 :8000 으로)
+```
+
+→ http://localhost:5173
+
+- 매번 변수를 붙이기 싫으면 `echo "VITE_USE_MOCK=false" > .env.local` (git 미포함) 후 `npm run dev`. 지우면 다시 mock.
+- mock 모드: `npm run dev` 만 실행 (백엔드·Neo4j 불필요).
+
+### 4. 화면에서 시나리오 실행
+
+사이드바 아래 mock 사용자를 **이관리**(상품·DBM)로 둔다. 분석은 한 번에 하나씩 돌므로 앞 분석이 끝난 뒤 다음을 넣는다.
+요청 문장이 정답셋 `eval/ground_truth/<요건ID>.json` 의 `request_text` 와 같으면 KPI 품질 지표(탐지율·정밀도·판정)까지 계산된다.
+
+| 시나리오 | SM | 흐름 | 소요 |
+|---|---|---|---|
+| tos `SC-003` | DBM | 단순 응답 → "상세 분석 권장" 의 **상세 분석 요청** 클릭 → 복잡 재분석 → 레포트·체크리스트 | 약 9분 |
+| swing `L-4` | 상품 | 단순 응답 (권장이 떠도 누르지 않음) | 약 2분 |
+
+요청 문장 꺼내기:
+```bash
+$PY -c "import json; print(json.load(open('eval/ground_truth/SC-003.json'))['request_text'])"
+```
+
+1. 홈 → SM 토글·입력 유형(요건서) 선택 → 문장 붙여넣기 → 전송(↑) (`⌘ + Enter`)
+2. `/session/:id` 오른쪽 진행 패널: 단계·경과 시간·한도 미터(도구 n/20 · 왕복 n/3 · 재계획 n/2)·근거 목록
+3. 복잡 결과: 답변 카드의 **레포트·체크리스트** → `/session/:id/report`
+4. `/kpi`: 세션별 KPI 기록. 반복 테스트 전에는 **기록 초기화**
+5. `/graph`: Neo4j 연결 · master 반영률 · 품질 점검 · 노드 검색(예: `TOSCP0210M`) → 2 hop 미리보기
+
+### 5. 종료
+
+| 대상 | 방법 |
+|---|---|
+| 프론트 · 백엔드 | 각 터미널에서 `Ctrl + C` |
+| Neo4j | `docker compose down` (데이터 유지) |
+
+### 문제 해결
+
+| 증상 | 원인 · 조치 |
+|---|---|
+| `No module named uvicorn` | conda base 의 `python3` 로 실행함. 위 "Python 환경" 의 1·2 중 하나로 실행 |
+| 화면이 mock 데이터 그대로 | `VITE_USE_MOCK=false` 없이 실행함. 프론트 재시작 |
+| 적재 현황 "연결 끊김" · 검색 503 | Neo4j 꺼짐 → `docker compose up -d` |
+| master 반영률 0% · 적재 이력 없음 | 적재 기록(`:LoadMeta`) 없는 적재 → `$PY scripts/build_graph.py --load` |
+| 관리 화면이 비어 있음 | 관리(권한) API(`/api/admin/*`) 미구현 (501) |
+| 후속 입력 409 | 분석 중. 끝난 뒤 다시 |
+| 백엔드 재시작 후 세션이 없음 | 세션은 메모리 저장 (PoC) |
+
+### API 테스트 (LLM · Neo4j 없음)
+
+```bash
+PYTHONPATH=src $PY -m pytest tests/test_api.py tests/test_graph_api.py -q
+```
 
 ## 스키마 변경 절차
 

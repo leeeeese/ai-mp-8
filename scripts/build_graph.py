@@ -15,6 +15,7 @@ import csv
 import os
 import sys
 from collections import Counter
+from datetime import datetime
 from pathlib import Path
 
 from graph import model, parse_swing, parse_tos
@@ -54,13 +55,14 @@ def main() -> int:
     except ImportError:
         pass
 
-    results, glossary = [], []
+    results, glossary, roots = [], [], {}
     for domain, parse in PARSERS.items():
         root = env_path(f"SOURCE_ROOT_{domain.upper()}", f"data/source/{domain}")
         if not root.is_dir():
             print(f"[INFO] {domain}: 소스 루트 없음 ({root}) - 건너뜀", file=sys.stderr)
             continue
         results.append(parse(root, domain))
+        roots[domain] = root
         glossary += load_glossary(domain)
     graph = model.finalize(results)
     model.enrich(graph, glossary)
@@ -80,7 +82,9 @@ def main() -> int:
         print(f"[WARN] {err}", file=sys.stderr)
 
     if args.load:
-        model.load_neo4j(graph.nodes, graph.edges)
+        loaded_at = datetime.now().astimezone().isoformat(timespec="seconds")
+        metas = [model.load_meta(d, r, graph.nodes, graph.edges, len(graph.errors), loaded_at) for d, r in roots.items()]
+        model.load_neo4j(graph.nodes, graph.edges, metas)
         print("Neo4j 적재 완료")
     return 1 if args.strict and graph.errors else 0
 

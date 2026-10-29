@@ -26,6 +26,7 @@ data/
 - 소스는 모두 **요건 반영 전(As-Is)** 상태입니다. 요건이 "무엇을 바꿔야 하는지"는 `eval/ground_truth/` 에만 기록합니다.
 - 방해(노이즈) 소스도 일반 소스와 똑같은 모습으로 섞어 둡니다. 노이즈 여부는 정답셋에만 적습니다.
 - 노드에는 원문이 `code` 속성으로도 들어 있습니다. Retriever 는 `source_file`/`source_line` 으로 원문을 직접 읽어 Simulator 에 넘깁니다.
+- 소스에는 **그래프용 주석이 없습니다 (tos · swing 공통)**. 노드 ID·호출 관계·업무 규칙을 주석으로 적지 않고, 영역별 파서(`scripts/graph/parse_tos.py` · `parse_swing.py`)가 실제 코드 관례를 읽어 노드/엣지를 만듭니다 (근거 목록은 각 파서 머리말).
 
 ## 노드 ID 규칙 (공통, 2026-10-25 고정)
 
@@ -140,7 +141,7 @@ SQL(`sql/*.sql`) 은 PL/SQL `CREATE OR REPLACE PACKAGE BODY <패키지>` 안의 
 
 ## 그래프 모델 (tos)
 
-tos 소스에는 그래프용 주석이 없습니다. `scripts/graph/parse_tos.py` 가 실제 코드 관례를 읽어 노드/엣지를 만듭니다 (근거 목록은 파일 머리말).
+`scripts/graph/parse_tos.py` 가 실제 코드 관례를 읽어 노드/엣지를 만듭니다 (근거 목록은 파일 머리말).
 
 ```
 0  Screen ──CALLS──▶ Controller ──INVOKES──▶ Service ──EXECUTES──▶ SQL ──READS/WRITES──▶ Table ──HAS_COLUMN──▶ Column
@@ -173,3 +174,4 @@ python scripts/build_graph.py --load     # 생성 후 .env 의 Neo4j 에 적재 
   → `scripts/graph/parse_swing.py` · `parse_tos.py` (`BaseParser` 상속, 영역 언어를 읽는 부분만) → `scripts/graph/model.py` (라벨·엣지·허용 패턴·검증·출력·적재)
 - 영역을 추가하려면 `BaseParser` 를 상속한 `parse_<domain>.py` 를 만들고 `build_graph.py` 의 `PARSERS` 에 등록합니다.
 - `[INFO]` 는 의도된 누락(적재 범위 밖 프로그램, 매핑 없는 주소 등)이라 `--strict` 에서도 실패하지 않습니다.
+- 의도된 누락 예: tos `TBCH1020`·`TBCH4020` Job 의 PROC 프로그램 `tbch1020.pc`·`tbch4020.pc` 는 소스에 넣지 않았습니다. Job 정의(`batch/job/*.xml`)만 있어 그래프에는 Batch 노드만 생기고(고립 노드), 적재 현황 화면의 "미제공 소스 영역"에 나옵니다. SC-006(발송 실패 사유 문의)에서 에이전트가 이 한계를 분석 한계로 밝히고 Job 정의·DDL·공통코드로 답하는지 보려는 것입니다.

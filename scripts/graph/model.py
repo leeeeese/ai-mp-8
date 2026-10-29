@@ -7,6 +7,7 @@ source_file 은 해당 영역 소스 루트 기준 상대경로. ID 규칙은 do
 """
 
 import csv
+import hashlib
 import json
 import os
 import re
@@ -225,8 +226,27 @@ FULLTEXT_INDEX = ("CREATE FULLTEXT INDEX node_search IF NOT EXISTS FOR (n:Node) 
                   "OPTIONS {indexConfig: {`fulltext.analyzer`: 'cjk'}}")
 
 
-def load_neo4j(nodes: list[dict], edges: list[dict]) -> None:
-    """기존 :Node 그래프를 지우고 전체를 다시 적재한다 (.env 의 NEO4J_* 사용)."""
+def source_manifest(root: Path) -> dict[str, str]:
+    """소스 루트의 파일별 sha1 (숨김 파일 제외). 적재 현황 API 의 master 대비 비교와 같은 규칙 (src/impact_agent/api/graph.py)."""
+    return {p.relative_to(root).as_posix(): hashlib.sha1(p.read_bytes()).hexdigest()
+            for p in sorted(root.rglob("*"))
+            if p.is_file() and not any(part.startswith(".") for part in p.relative_to(root).parts)}
+
+
+def load_meta(domain: str, root: Path, nodes: list[dict], edges: list[dict], warnings: int, loaded_at: str) -> dict:
+    """영역별 적재 기록 (:LoadMeta). 적재 시점 소스 지문으로 적재 현황 화면이 master 대비·적재 이력을 그린다."""
+    manifest = source_manifest(root)
+    ids = {n["node_id"] for n in nodes if n["domain"] == domain}
+    return {"domain": domain, "loaded_at": loaded_at, "files": list(manifest), "hashes": list(manifest.values()),
+            "fingerprint": hashlib.sha1("\n".join(f"{k} {v}" for k, v in manifest.items()).encode()).hexdigest(),
+            "nodes": len(ids), "rels": sum(e["from_id"] in ids for e in edges), "warnings": warnings}
+
+
+def load_neo4j(nodes: list[dict], edges: list[dict], metas: list[dict] | None = None) -> None:
+    """기존 :Node 그래프를 지우고 전체를 다시 적재한다 (.env 의 NEO4J_* 사용).
+
+    metas(영역별 적재 기록)는 :LoadMeta 노드로 쌓는다. :Node 가 아니라 재적재해도 지워지지 않는다 (= 적재 이력).
+    """
     from neo4j import GraphDatabase
 
     driver = GraphDatabase.driver(os.environ["NEO4J_URI"], auth=(os.environ["NEO4J_USER"], os.environ["NEO4J_PASSWORD"]))
@@ -242,3 +262,5 @@ def load_neo4j(nodes: list[dict], edges: list[dict]) -> None:
             rows = [{"from_id": e["from_id"], "to_id": e["to_id"], "props": edge_props(e)} for e in edges if e["type"] == rel]
             s.run(f"UNWIND $rows AS r MATCH (a:Node {{node_id: r.from_id}}), (b:Node {{node_id: r.to_id}}) "
                   f"CREATE (a)-[x:{rel}]->(b) SET x = r.props", rows=rows)
+        if metas:
+            s.run("UNWIND $metas AS m CREATE (x:LoadMeta) SET x = m", metas=metas)

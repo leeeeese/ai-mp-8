@@ -249,7 +249,9 @@ echo "VITE_USE_MOCK=false" > frontend/.env.local                     # 프론트
 cd frontend && npm run dev                                           # Vite 프록시가 /api 를 8000 으로 보냄
 ```
 
-- 구현됨: 세션(목록·생성·조회·후속 입력·즐겨찾기·결과물·체크리스트 답변·진행 SSE), KPI 기록(조회·초기화). 적재 현황(`/api/graph/*`)·관리(`/api/admin/*`)는 501 → 실제 API 모드에서는 그 화면이 비어 보인다.
+- 구현됨: 세션(목록·생성·조회·후속 입력·즐겨찾기·결과물·체크리스트 답변·진행 SSE), KPI 기록(조회·초기화), 적재 현황(`/api/graph/*`, `api/graph.py`). 관리(권한)(`/api/admin/*`)는 501 → 실제 API 모드에서는 관리 화면이 비어 보인다. API 전체 설계: [api_design.md](api_design.md).
+- 적재 현황: Neo4j(.env)를 읽기만 한다 (`GRAPH_BACKEND=csv` 면 `data/graph` CSV). 노드 수·라벨·품질 점검·검색·2 hop 은 실제 그래프 값. 재적재 요청은 `outputs/graph/reload_requests.json` 에 요청만 쌓는다.
+- master 대비: `data/` 가 git 밖이라 커밋 대신 **소스 지문**으로 비교한다. `python scripts/build_graph.py --load` 가 영역별 `:LoadMeta`(적재 시각·파일별 sha1·노드/관계 수)를 남기고, API 가 `SOURCE_ROOT_<영역>` 현재 파일과 비교해 미반영 파일·반영률을 낸다. `loadedCommit`/`masterCommit` = 적재 시점/현재 지문 앞 7자, `behindCommits` = 다르면 1. 적재 이력 = `:LoadMeta` 목록. `:LoadMeta` 가 없으면(이 기능 전 적재) 반영률 0%·이력 없음으로 보인다 → 한 번 다시 적재.
 - Supervisor·Planner 코드는 고치지 않는다. 진행 SSE 는 API 가 각 에이전트를 감싸(`runner.ProgressAgent`) 실행 시작·완료 때 이벤트를 만든다. Supervisor 하나를 공유하므로 분석은 한 번에 하나씩 순서대로 돈다.
 - 요청 문장이 정답셋(`eval/ground_truth/*.json`)의 `request_text` 와 같으면 정답을 붙여 KPI 품질·판정 지표까지 쌓인다 (같은 시나리오 반복 테스트용).
 - 세션·분석 결과는 메모리(서버 재시작 시 사라짐), KPI 기록은 `outputs/kpi/records.json` (git 제외).
