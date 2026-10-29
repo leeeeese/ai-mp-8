@@ -6,12 +6,8 @@ __pycache__/
 dist/
 build/
 *.egg-info/
-# outputs: 실행 산출물은 제외하되 YJ 에이전트 실행 기록(단계 기록·요약·가드레일)은 공유. 상태 JSON 은 소스 원문을 담고 있어 제외
-outputs/*
-!outputs/runs/
-outputs/runs/*
-!outputs/runs/YJ/
-outputs/runs/YJ/**/*.state.json
+# outputs: 실행 산출물(실행 기록·상태 JSON·KPI 결과)은 모두 로컬에만 둔다 (저장소에 올리지 않음)
+outputs/
 data/
 mock_dev/
 

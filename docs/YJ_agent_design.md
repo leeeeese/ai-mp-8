@@ -276,7 +276,7 @@ PYTHONPATH=src python3 scripts/YJ/run_guardrail.py --run-id v3/guardrail/r1
 ```
 
 결과 (v3, 16건): 경로 재현율 0.94 (규칙만 0.45) · Critical 미탐 3/24 · must_find 0.94 · 근거율 0.92 · 복잡도 일치 13/16, 가드레일 30/30 (분석 대상 없음 조기 종료 포함).
-기존 10건 기준 v2 → v3: 경로 재현율 0.73 → 0.91, Critical 미탐 6/16 → 3/16. 케이스별 기록은 `outputs/runs/YJ/<버전>/<영역>/` ([README](../outputs/runs/YJ/README.md)).
+기존 10건 기준 v2 → v3: 경로 재현율 0.73 → 0.91, Critical 미탐 6/16 → 3/16. 케이스별 기록은 로컬 `outputs/runs/YJ/<버전>/<영역>/` (`outputs/` 는 저장소에 올리지 않음).
 
 ## 9. 남은 과제
 
