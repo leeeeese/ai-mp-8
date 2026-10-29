@@ -17,3 +17,10 @@ frontend/dist/
 
 # macOS
 .DS_Store
+
+# editor
+.vscode/
+
+# local env (Vite .env.local 등)
+.env.*
+!.env.example
