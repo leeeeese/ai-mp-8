@@ -239,6 +239,12 @@ cd ~/Desktop/impact-agent
 PYTHONPATH=src PYTHONWARNINGS=ignore $PY -m uvicorn impact_agent.api.app:app --app-dir src --port 8000
 ```
 
+`$PY` 를 매번 정하기 번거로우면 경로를 직접 넣은 한 줄로 실행한다 (경로는 각자 패키지가 설치된 Python 으로 바꿔서 수행).
+
+```bash
+cd ~/Desktop/impact-agent && PYTHONPATH=src PYTHONWARNINGS=ignore /Library/Frameworks/Python.framework/Versions/3.11/bin/python3 -m uvicorn impact_agent.api.app:app --app-dir src --port 8000
+```
+
 - `Uvicorn running on http://127.0.0.1:8000` 이 나오면 준비 완료. `.env` 는 앱이 직접 읽는다.
 - 터미널에 HTTP 요청과 함께 에이전트 진행이 한 줄씩 찍힌다:
   ```
