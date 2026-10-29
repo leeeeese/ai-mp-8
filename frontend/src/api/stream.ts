@@ -96,8 +96,6 @@ function mockScript(complexity: Complexity, sm: SmPart): { after: number; event:
           { after: 100, event: { node: 'simulator' as const, status: 'skipped' as const, detail: '단순 요건' } },
           { after: 50, event: { node: 'verifier' as const, status: 'skipped' as const, detail: '단순 요건' } },
         ]),
-    { after: 200, event: { node: 'kpi', status: 'running', detail: '실행 로그 집계' } },
-    { after: 300, event: { node: 'kpi', status: 'done', elapsedMs: 300 } },
     { after: 200, event: { node: 'composer', status: 'running', detail: complex ? '레포트 · 체크리스트 작성' : '단순 응답 작성' } },
     { after: 900, event: { node: 'composer', status: 'done', elapsedMs: 900 } },
     { after: 50, event: { node: 'supervisor', status: 'done', detail: '완료' } },

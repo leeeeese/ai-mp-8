@@ -101,6 +101,7 @@ export interface Session extends SessionSummary {
 
 // --- Agent 진행 (SSE) -----------------------------------------------------------
 
+// 'kpi' 는 백엔드 SSE 가 보낼 수 있어 타입에 남겨 두지만, 세션 진행 패널(AgentProgress.NODES)에는 표시하지 않는다
 export type AgentNode = 'supervisor' | 'planner' | 'explorer' | 'retriever' | 'simulator' | 'verifier' | 'kpi' | 'composer';
 export type NodeStatus = 'waiting' | 'running' | 'done' | 'skipped';
 

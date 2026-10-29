@@ -3,6 +3,7 @@ import type { AgentCounters, AgentEvent, AgentNode, NodeStatus } from '@/api/typ
 import { LIMITS } from '@/config';
 import { cn, formatMs } from '@/lib/cn';
 
+/** 사용자에게 보여 주는 분석 단계. KPI Agent 는 Composer 이후 PoC 평가(개발·운영용)라 세션 화면에 넣지 않는다 (KPI 페이지에서 본다) */
 export const NODES: { node: AgentNode; label: string; loop?: boolean }[] = [
   { node: 'supervisor', label: 'Supervisor' },
   { node: 'planner', label: '1 Planner' },
@@ -10,7 +11,6 @@ export const NODES: { node: AgentNode; label: string; loop?: boolean }[] = [
   { node: 'retriever', label: '2-2 Retriever', loop: true },
   { node: 'simulator', label: '2-3 Simulator' },
   { node: 'verifier', label: '2-4 Verifier' },
-  { node: 'kpi', label: 'KPI Agent' },
   { node: 'composer', label: '3 Composer' },
 ];
 
