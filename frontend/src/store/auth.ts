@@ -39,7 +39,7 @@ export interface AuthUser {
 }
 
 export const MOCK_USERS: AuthUser[] = [
-  { empNo: 'A11001', name: '김유저', role: 'user', smParts: ['dbm'] },
+  { empNo: 'A11001', name: '김유저', role: 'user', smParts: ['prod', 'dbm'] },
   { empNo: 'A10001', name: '이관리', role: 'admin', smParts: ['prod', 'dbm'] },
 ];
 

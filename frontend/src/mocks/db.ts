@@ -48,7 +48,7 @@ export const db = {
     { id: 'r2', sm: 'prod', scope: '전체', reason: '정기 적재', requestedBy: '이관리', requestedAt: iso(60 * 30), status: 'approved' },
   ] as ReloadRequest[],
   users: [
-    { empNo: 'A11001', name: '김유저', role: 'user', smParts: ['dbm'], lastLoginAt: iso(5), active: true },
+    { empNo: 'A11001', name: '김유저', role: 'user', smParts: ['prod', 'dbm'], lastLoginAt: iso(5), active: true },
     { empNo: 'A10001', name: '이관리', role: 'admin', smParts: ['prod', 'dbm'], lastLoginAt: iso(30), active: true },
     { empNo: 'A11855', name: '박상품', role: 'user', smParts: ['prod'], lastLoginAt: iso(60 * 72), active: true },
     { empNo: 'A10544', name: '최퇴사', role: 'user', smParts: ['dbm'], lastLoginAt: iso(60 * 24 * 40), active: false },
