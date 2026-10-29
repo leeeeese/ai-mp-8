@@ -24,7 +24,8 @@
                                               ▼       ▼
  3. Composer ── 레포트 · 체크리스트 / 회신 메일 초안 · MD/PDF (요청 시)
         ├─▶ 복잡: ComplexReport (영역별 영향·가능성·대안, 업무·개발 확인 체크리스트)
-        ├─▶ 단순: SimpleAnswer (요약 결론, 영향 경로·근거)
+        ├─▶ 단순: SimpleAnswer (요약 결론, 영향 경로·근거, 상세 분석 권장·사유)
+        │        └ 사용자 확인(UI) → reanalysis → Supervisor → Planner 가 complex 로 판정 → 2-3 Simulator
         ┆
         ┆ (PoC 평가)
         ▼

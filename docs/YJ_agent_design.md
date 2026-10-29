@@ -9,7 +9,7 @@
 
 - 흐름: 요건서 + SM 파트 → Supervisor → 1 Planner(복잡도·탐색 명세) → 2-1 Explorer ⇄ 2-2 Retriever(경로 / 확장 요청) → 단순은 3 Composer, 복잡은 2-3 Simulator → 2-4 Verifier(보완 필요 시 재계획) → 3 Composer.
 - KPI Agent (점선, 평가 PoC): 분석 흐름의 단계가 아니라 **별개로 측정**한다. Composer 이후 실행 결과·실행 로그를 정답 경로 목록(`AnswerKey`)과 비교해 재현율·미탐율·정밀도·시간을 내고, 결과는 Composer 에 전달하지 않는다 (`agents/supervisor.py`: `… → COMPOSER → KPI → END`).
-- 후속 입력(현업 답변·개발 의견·조회 결과)은 START 에서 바로 Composer 로, 변경 분석·재분석 요청은 Planner 로 간다 (그림에는 없음).
+- 후속 입력(현업 답변·개발 의견·조회 결과)은 START 에서 바로 Composer 로, 변경 분석·재분석 요청은 Planner 로 간다. 단순 응답의 상세 분석 권장을 사용자가 확인하면 재분석 요청(파란 점선)으로 Planner 가 complex 로 판정해 2-3 Simulator 까지 간다.
 
 ```
 UserInput (요청 문장 · SM 선택 · 확정 매핑)
@@ -19,7 +19,8 @@ UserInput (요청 문장 · SM 선택 · 확정 매핑)
       2-2 Retriever  규칙+ReAct 경로 노드 원문·정의서 → 근거 / 재탐색 요청  ┘ tool ≤ 20회
       2-3 Simulator  (복잡) 영역별 영향·가능성·난이도·대안
       2-4 Verifier   (복잡) 영역 누락·근거 검증 ─ 보완 필요 → Planner (재계획 ≤ 2회)
-      3 Composer     단순 응답 / 레포트·체크리스트·회신 메일
+      3 Composer     단순 응답(+ 상세 분석 권장·사유) / 레포트·체크리스트·회신 메일
+        └ 사용자 확인(UI "상세 분석 요청") → FollowupInput(reanalysis) → Supervisor → 1 Planner 가 complex 로 판정 → 탐색 → 2-3 Simulator
       KPI Agent      정답 경로 대비 평가 (PoC)
 ```
 
@@ -66,9 +67,10 @@ UserInput (요청 문장 · SM 선택 · 확정 매핑)
 1. Planner 실행 → `confirmed_nodes` 를 같은 표현의 `Mention.confirmed_node` 에 반영 (사용자가 확정한 매핑 우선).
 2. Planner 가 탐색 항목을 하나도 만들지 않으면(분석 대상 없음, 예: 업무와 무관한 질문) 탐색·시뮬레이션 없이 Composer 로 간다.
 3. plan 에 Explorer 가 있으면 Explorer ⇄ Retriever 루프
-   - Planner 실행(재계획 포함)마다 새로 시작 (`state.explorer = state.retriever = None`). 재탐색 라운드는 이전 경로·근거를 이어받는다
+   - Planner 실행(첫 분석·Verifier 재계획·사용자 재분석)마다 새로 시작 (`state.explorer = state.retriever = None`, 탐색 루프 수·**tool 호출 한도도 새로**). 재탐색 라운드는 이전 경로·근거를 이어받는다
    - Retriever 의 `reexplore_request` 가 없거나, `MAX_EXPLORE_LOOP` 에 닿거나, 남은 tool 호출이 `MIN_CALLS_FOR_REEXPLORE`(2: Explorer 탐색 1 + Retriever 새 노드 읽기 1) 미만이면 종료
-4. `simple` → 종료 / `complex` → Simulator → Verifier → `needs_supplement` 면 `replan_feedback` 누적 후 Planner 로 (`MAX_REPLAN` 까지)
+4. `simple` → Composer (단순 응답 + 상세 분석 권장·사유) / `complex` → Simulator → Verifier → `needs_supplement` 면 `replan_feedback` 누적 후 Planner 로 (`MAX_REPLAN` 까지)
+   - **사용자 상세 분석 요청**: 단순 응답의 권장을 사용자가 확인하면 `FollowupInput(type=reanalysis)` → START 에서 Planner 로 → Planner 가 complex 로 판정 → 탐색부터 다시 → 2-3 Simulator (`docs/planner_detail_analysis_to-be.md`). Supervisor 는 복잡도를 바꾸지 않는다
 5. Composer → KPI Agent (평가 PoC, 결과는 Composer 에 전달하지 않음)
 6. 에이전트마다 `AgentRunRecord { agent, latency_ms, tool_calls, input_tokens, output_tokens }` 기록
 
@@ -84,8 +86,11 @@ UserInput (요청 문장 · SM 선택 · 확정 매핑)
 
 **처리**
 1. LLM(`gpt-6.1-sol`, OpenAI Structured Outputs)이 `PlannerDraft` 를 채운다: 구조화 요청, 복잡도·근거, 요건 항목(문장·`change_type`·언급 표현·그래프 밖 영역), 공통 제외 여부.
-   - 복잡도 기준 (Few-shot 5개 + 요약): 운영 문의는 문장 끝맺음("알려 주세요")이 아니라 **문의 대상이 정상 동작의 결과인지(결과 해석 → simple), 기대와 다른 동작인지(안 보임·안 됨 → complex)** 로 가른다. 애매하면 complex
+   - **요건 문장에서 확인되는 것만으로 판정** (to-be 결정 1): 탐색해야 알 수 있는 사실(공통 사용 여부·영향 범위·난이도)은 쓰지 않는다. `complexity_reason` 에 근거가 된 요건 표현을 큰따옴표로 인용
+   - **영역 중립**: 프롬프트 0장에 SM 파트별 처리 구조·조건 위치·자주 나오는 요건(마케팅 tos / 상품 swing)을 나란히 두고, change_type 표에 두 영역 예를 함께 둔다. Few-shot 6개 중 1개는 상품 영역 업무 조건 변경 예시
+   - 복잡도 기준 (Few-shot 6개 + 요약): 요건 문장에 여러 영역의 변경이 드러남·신규 항목·지금 화면에 없는 다른 화면·업무 데이터를 새로 보여 달라 → complex. **대상 개수가 아니라 바뀌는 위치의 종류**로 판단 (같은 종류의 고정 값을 여러 개 바꾸는 것은 위치 종류 하나). 운영 문의는 문장 끝맺음("알려 주세요")이 아니라 **문의 대상이 정상 동작의 결과인지(결과 해석 → simple), 기대와 다른 동작인지(안 보임·안 됨 → complex)** 로 가른다. 애매하면 complex
 2. 코드가 판단 기준표로 나머지를 채운다 (LLM 판단 일관성 확보)
+   - **복잡도 코드 규칙** (`apply_reanalysis`): 마지막 후속 입력이 `reanalysis` 면 LLM 판정과 관계없이 complex, `plan` 에 Simulator·Verifier, 사유 앞에 "사용자 상세 분석 요청: <권장 사유>". 이전 판정이 complex 인 Verifier 재계획 라운드도 complex 유지 ("재계획 (복잡 흐름 유지) n차"). 재분석이면 프롬프트 7장대로 권장 사유를 항목·언급 표현에 반영
    - 항목별 `target_role`·`direction`·`hop_cap` ← `rules.CHANGE_TYPE_RULES`
    - `domains` ← `rules.SM_PART_DOMAINS` (marketing → tos, product → swing)
    - `plan` ← 복잡도 (simple: explorer·retriever / complex: + simulator·verifier)
@@ -180,7 +185,15 @@ UserInput (요청 문장 · SM 선택 · 확정 매핑)
 | 역방향 컬럼 필터 | Column → Table → SQL/DBIO 는 그 컬럼을 읽거나 쓰는 엣지만 |
 | 그래프 밖 | `out_of_graph` 는 탐색 안 함 → `unresolved` |
 
-### 3-4. 재탐색
+### 3-4. 경로 정리 (뒤 단계 전달 순서)
+
+규칙 단계·ReAct·재탐색 뒤마다 `_arrange_paths` 로 정리한다. Retriever 읽기 상한(80)·Simulator 입력 경로 상한(40)은 앞쪽 경로부터 쓰므로 **순서가 곧 전달 우선순위**다.
+
+1. 같은 처리에서 마지막 컬럼만 다른 경로(컬럼까지 탐색할 때 컬럼마다 갈라짐)는 시작 노드이거나 요건 언급이 이름·코멘트에 통째로 들어 있는 컬럼만 남기고, 없으면 테이블까지 한 경로로 합친다 (노드 목록·엣지의 접근 컬럼은 유지)
+2. 같은 항목의 다른 경로 안에 그대로 들어 있는 짧은 경로·중복 경로는 뺀다
+3. 항목마다 정렬 (보완 경로 → 언급 노드를 많이 지남 → 진입점에서 시작 → 목표 도달 → 긴 경로) 후 항목을 번갈아 배치
+
+### 3-5. 재탐색
 Retriever 요청을 받아 이전 결과에 이어서 탐색한다. `continue` 는 hop 상한으로 끊긴 경로에 새 경로를 이어 붙여 하나로 만든다. 요청 노드가 Column 이면 그 컬럼을 쓰는 엣지만 따라간다(`focus_ids`). 재탐색 라운드는 Retriever 가 새 노드를 읽을 1회를 남긴다.
 
 **출력 `ExplorerOutput`**: `start_nodes[{item_id, node_id, matched_keyword, match_source, score, reason}]`, `nodes`, `edges`, `paths[{item_id, nodes(진입→DB), direction, reached_role, stop_reason}]`, `item_results[{reached, hops_used, frontier, unmatched_mentions}]`, `excluded_common`, `unresolved`, `hops_used`, `tool_call_count`
@@ -207,6 +220,8 @@ Retriever 요청을 받아 이전 결과에 이어서 탐색한다. `continue` �
    - 입력: 탐색 명세, Explorer 경로, 근거별 앞 10줄, `[경로 밖 연결]`, `[경로 테이블의 컬럼]`(경로에 없는 컬럼 + 코멘트, 원문 SQL·프로그램·화면에 이름이 나오면 ★)
    - `read_source` 다시 읽기는 **이미 보여 준 줄 다음부터** 이어서 (노드 1개면 6,000자, 여러 개면 2,400자를 나눠 씀). `context_lines` 로 범위가 앞으로 넓어지면 새로 붙은 줄부터. 끝까지 본 노드는 tool 을 부르지 않고 오류 Observation
    - 원문이 요건 값을 다루는 컬럼(다른 이름·반대 개념 포함)이 경로에 없으면 그 `COL:` 노드로 `request_reexplore` (reverse → Entry). 남은 호출이 2회 미만이면 요청 거부
+   - **핵심 근거**: `finish` 의 `key_evidence[{node_id, quote, note}]` — 원문 코드 한 줄을 그대로 인용하면 그 줄 앞 3 · 뒤 8줄을 잘라 `summary="[핵심] note"` 근거로 근거 목록 맨 앞에 둔다 (붙은 파일이면 그 파일 기준 줄 번호). 원문에 없는 인용은 버린다. 뒤 단계는 근거마다 앞부분만 보므로 깊은 곳의 근거를 전달하기 위함
+   - 프롬프트에 영역별 노드 유형 표(tos Controller·Service·SQL / swing TP·Module·DBIO)와 영역마다 예시 1개
 4. 재탐색 요청 (이미 요청한 노드 조합은 라운드가 바뀌어도 다시 요청하지 않음)
 
 | mode | 조건 | 요청 |
@@ -267,22 +282,22 @@ python -m impact_agent ... --confirm "비마케팅 여부=COL:TCP_MSG_SCRT.ADVT_
 pytest                                                                 # 가짜 그래프·LLM (Neo4j 불필요)
 ```
 
-시나리오 평가 (Neo4j, 실제 LLM, Retriever 까지):
+시나리오 평가 (Neo4j, 실제 LLM). v5 부터 ReAct(실제 흐름) 결과만 기록하고, complex 흐름은 2-3 Simulator 까지 실행한다. 1차 판정 simple · 정답 complex 는 사용자가 상세 분석을 요청했다고 보고 reanalysis(내용 = Composer 상세 분석 권장 사유)로 다시 돌린다:
 
 ```bash
-PYTHONPATH=src python3 scripts/YJ/run_scenarios.py SC-001 SC-002 SC-003 SC-004 SC-005 SC-006 --run-id v3/tos
-PYTHONPATH=src python3 scripts/YJ/run_scenarios.py H-1 H-2 M-1 M-2 M-3 M-4 L-1 L-2 L-3 L-4 --run-id v3/swing
-PYTHONPATH=src python3 scripts/YJ/run_guardrail.py --run-id v3/guardrail/r1
+nohup zsh scripts/YJ/run_all.sh v5 > /dev/null 2>&1 &     # tos 6 → swing 10 → 가드레일 3회 순차, 끊기면 같은 명령으로 이어서
+PYTHONPATH=src python3 scripts/YJ/run_scenarios.py SC-001 … --run-id v5/tos            # 케이스마다 바로 저장, 끝난 케이스는 건너뜀
+PYTHONPATH=src python3 scripts/YJ/run_scenarios.py SC-001 … --run-id v5/tos --rebuild  # 저장된 state 로 기록만 다시
 ```
 
-결과 (v3, 16건): 경로 재현율 0.94 (규칙만 0.45) · Critical 미탐 3/24 · must_find 0.94 · 근거율 0.92 · 복잡도 일치 13/16, 가드레일 30/30 (분석 대상 없음 조기 종료 포함).
-기존 10건 기준 v2 → v3: 경로 재현율 0.73 → 0.91, Critical 미탐 6/16 → 3/16. 케이스별 기록은 로컬 `outputs/runs/YJ/<버전>/<영역>/` (`outputs/` 는 저장소에 올리지 않음).
+결과 (v5, 16건): 경로 재현율 0.91 · Critical 미탐 4/24 · must_find 53/56 · 근거율 0.90 · **Planner 1차 판정 15/16, 정답 complex 10건 모두 2-3 Simulator 까지 (SC-003 은 재분석)** · Simulator 전달 경로 0.74 · 근거 0.81, 가드레일 30/30.
+v4 (16건): 경로 재현율 0.96 · Critical 2/24 · 복잡도 13/16 · Simulator 전달 경로 0.89 · 근거 0.86. v3 (16건): 0.94 · 3/24 · 13/16 · 0.68 · 0.77. 케이스별 기록은 로컬 `outputs/runs/YJ/<버전>/<영역>/` (`outputs/` 는 저장소에 올리지 않음).
 
 ## 9. 남은 과제
 
-1. 경로 폭증: 컬럼에서 역방향 재탐색이 붙으면 경로가 수백 개로 늘어 Retriever 읽기 상한(80)을 넘음 (SC-001 경로 419 · 근거 없음 35), 노드 정밀도 하락 → 항목별 경로 상한·대표 경로 선별
-2. 공통코드 경로: 문구·사유 코드가 공통코드(`TCP_CMM_CD`)에서 오는 경우를 아직 못 찾음 (SC-003·SC-006)
-3. 복잡도: 요건 문장만으로는 알 수 없는 경우(문구가 공통코드·다른 처리에서도 쓰임) → 탐색 결과로 다시 판정하는 단계, 케이스당 3회 반복 평가
-4. 비용: v3 는 근거 보완이 늘어 요청당 입력 토큰 +21%, Retriever 지연 +32% → ReAct 입력 근거를 항목 관련 노드로 한정
-5. 응답 언어: ReAct thought 가 드물게 다른 언어로 나옴 (SC-002 1단계 일본어) → 공통 페르소나에 응답 언어 명시
+1. Simulator 입력 경로 40개 상한: Planner 항목 분리가 달라지면 정답 경로가 입력 밖으로 밀림 (v5 M-2·M-3 전달 경로 0) → 항목별 대표 경로만 넘겨 경로 수를 줄임, 파트너와 상한·[핵심] 근거 우선 배정 협의
+2. 상세 분석 권장 과다: 정답 simple 6건 중 5건에 권장 (사유 대부분 "여러 진입점 호출"·"공통 모듈") → 확인용 경로(조회·공통 유틸)를 경로 정리에서 뒤로, 파트너와 신호 기준 협의
+3. 공통코드 경로: 문구·사유 코드가 공통코드(`TCP_CMM_CD`)에서 오는 경우를 아직 못 찾음 (SC-003·SC-006)
+4. 비용: Retriever ReAct 입력 근거를 항목 관련 노드로 한정 (요청당 입력 10.8만)
+5. 평가: 케이스당 1회 실행 편차, 전체 흐름(Verifier 재계획 → Composer → KPI) 실행은 두 담당 코드 확정 후 한 번에
 6. Supervisor: 입력 정리(`input_meta`: 입력 출처·유형·분석 시점) 미구현, 에이전트 예외(그래프 DB 장애 등) 시 대체 흐름 없음
