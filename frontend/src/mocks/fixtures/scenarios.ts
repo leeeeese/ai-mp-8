@@ -96,6 +96,12 @@ export const SC006_ANSWER: AgentAnswer = {
   changeDetected: false,
 };
 
+/** 단순 응답의 상세 분석 권장 사유 예 (백엔드 Composer 가 탐색 신호로 만드는 문장, 노드 ID 포함) */
+export const SC006_DETAIL_REASONS = [
+  '공통 모듈 CTL:CmmCdController.selectCdList 이 경로에 있어 다른 화면·처리 영향 확인 필요',
+  '적재 범위 밖 연계(BAT:TBCH1020 결과 반영 프로그램) 확인 필요',
+];
+
 export const H1_ANSWER: AgentAnswer = {
   complexity: 'complex',
   plannerVerdict: '복잡 — 결합 조건 검증·결합그룹 생성·할인 배치가 함께 걸림',

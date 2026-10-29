@@ -10,11 +10,14 @@ interface Props {
   answer: AgentAnswer;
   sessionId: string;
   onAnswerInput: () => void;
-  onSwitchDetail: () => void;
+  /** 상세 분석 요청 (reanalysis 후속 입력). 사유를 그대로 넘긴다 */
+  onRequestDetail: (reasons: string[]) => void;
+  /** 이미 요청했거나 분석 중이면 버튼을 막는다 */
+  detailRequested: boolean;
 }
 
-/** Agent 답변 카드: Planner 판정 → (접힘) 분석 과정 → 요약 결론 → 판정표/근거 → 확인 필요 → 액션 */
-export function AnswerCard({ answer, sessionId, onAnswerInput, onSwitchDetail }: Props) {
+/** Agent 답변 카드: Planner 판정 → (접힘) 분석 과정 → 요약 결론 → 판정표/근거 → 상세 분석 권장 → 확인 필요 → 액션 */
+export function AnswerCard({ answer, sessionId, onAnswerInput, onRequestDetail, detailRequested }: Props) {
   const { can } = useAuth();
   const simple = answer.complexity === 'simple';
   return (
@@ -92,6 +95,22 @@ export function AnswerCard({ answer, sessionId, onAnswerInput, onSwitchDetail }:
         </section>
       )}
 
+      {simple && answer.changeDetected && (
+        <section className="flex flex-col gap-2 rounded-chip border border-border bg-[color:var(--accent-soft)] px-3 py-2.5" aria-label="상세 분석 권장">
+          <div className="flex items-center gap-2 text-sm font-semibold">
+            <Badge tone="accent">상세 분석 권장</Badge>
+            <span className="font-normal text-muted">탐색 결과 영향이 더 넓을 수 있습니다. 요청하면 복잡 요건으로 다시 분석합니다.</span>
+          </div>
+          {answer.detailReasons && answer.detailReasons.length > 0 && (
+            <ul className="list-disc space-y-1 pl-5 text-sm leading-relaxed">
+              {answer.detailReasons.map((r) => (
+                <li key={r}>{r}</li>
+              ))}
+            </ul>
+          )}
+        </section>
+      )}
+
       {answer.openItemCount > 0 && (
         <div className="flex items-center gap-2 text-sm">
           <Badge tone="warn">확인 필요 {answer.openItemCount}건</Badge>
@@ -117,8 +136,13 @@ export function AnswerCard({ answer, sessionId, onAnswerInput, onSwitchDetail }:
           <MessageSquareReply size={16} /> 현업 답변 입력
         </button>
         {simple && answer.changeDetected && (
-          <button type="button" className="btn-primary" onClick={onSwitchDetail}>
-            <Sparkles size={16} /> 상세 분석으로 전환
+          <button
+            type="button"
+            className="btn-primary"
+            disabled={detailRequested}
+            onClick={() => onRequestDetail(answer.detailReasons ?? [])}
+          >
+            <Sparkles size={16} /> {detailRequested ? '상세 분석 요청됨' : '상세 분석 요청'}
           </button>
         )}
       </div>

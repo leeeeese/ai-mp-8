@@ -9,7 +9,7 @@ import type {
   Session,
   User,
 } from '@/api/types';
-import { H1_ANSWER, SC001_ANSWER, SC006_ANSWER, reportFor } from './fixtures/scenarios';
+import { H1_ANSWER, SC001_ANSWER, SC006_ANSWER, SC006_DETAIL_REASONS, reportFor } from './fixtures/scenarios';
 
 const now = Date.now();
 const iso = (minAgo: number) => new Date(now - minAgo * 60_000).toISOString();
@@ -85,19 +85,23 @@ export function createSession(req: CreateSessionRequest): Session {
   return s;
 }
 
+/** 상세 분석(reanalysis)을 요청한 세션: 다음 실행은 Planner 가 complex 로 판정한 것처럼 돈다 */
+const reanalysisRequested = new Set<string>();
+
 export function plannedComplexity(s: Session) {
+  if (reanalysisRequested.has(s.id)) return 'complex';
   return s.inputType === 'ops_inquiry' ? 'simple' : 'complex';
 }
 
 export function completeSession(id: string) {
   const s = db.sessions.find((x) => x.id === id);
   if (!s || s.status === 'done') return;
-  const answer =
-    s.inputType === 'ops_inquiry'
-      ? { ...SC006_ANSWER, changeDetected: true }
-      : s.smPart === 'prod'
-        ? H1_ANSWER
-        : SC001_ANSWER;
+  const complexAnswer = s.smPart === 'prod' ? H1_ANSWER : SC001_ANSWER;
+  const answer = reanalysisRequested.has(id)
+    ? { ...complexAnswer, plannerVerdict: '복잡 — 사용자 상세 분석 요청에 따른 재분석' }
+    : s.inputType === 'ops_inquiry'
+      ? { ...SC006_ANSWER, changeDetected: true, detailReasons: SC006_DETAIL_REASONS }
+      : complexAnswer;
   s.complexity = answer.complexity;
   s.status = 'done';
   s.messages.push({ id: nextId('m-'), role: 'agent', answer, createdAt: new Date().toISOString() });
@@ -107,6 +111,12 @@ export function addMessage(id: string, kind: Message['kind'], text: string): Ses
   const s = db.sessions.find((x) => x.id === id);
   if (!s) return undefined;
   s.messages.push({ id: nextId('m-'), role: 'user', kind, text, createdAt: new Date().toISOString() });
+  if (kind === 'reanalysis') {
+    // 실제: Supervisor.followup → Planner(complex) → Explorer ⇄ Retriever → Simulator → Verifier → Composer
+    reanalysisRequested.add(id);
+    s.status = 'running';
+    return s;
+  }
   s.messages.push({
     id: nextId('m-'),
     role: 'agent',

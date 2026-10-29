@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
 import { useSendMessage, useSession, useToggleStar } from '@/api/client';
 import { openAgentStream } from '@/api/stream';
-import { MESSAGE_KIND_LABEL, SM_LABEL, type MessageKind, type Session as SessionT } from '@/api/types';
+import { INPUT_KINDS, MESSAGE_KIND_LABEL, SM_LABEL, type MessageKind, type Session as SessionT } from '@/api/types';
 import { AgentProgress, NODES, emptyProgress, reduceProgress, type ProgressState } from '@/components/AgentProgress';
 import { AnswerCard } from '@/components/AnswerCard';
 import { Badge } from '@/components/Badge';
@@ -66,6 +66,10 @@ export function Session() {
     send.mutate({ kind, text: text.trim() });
     setText('');
   };
+  /** 단순 응답의 "상세 분석 요청": 권장 사유를 그대로 reanalysis 후속 입력으로 보낸다 (Simulator 가 사유의 노드 ID 를 확인 대상으로 쓴다) */
+  const requestDetail = (reasons: string[]) =>
+    send.mutate({ kind: 'reanalysis', text: reasons.length ? reasons.join(' / ') : '상세 분석 요청' });
+  const detailRequested = running || send.isPending || !!session?.messages.some((m) => m.kind === 'reanalysis');
 
   const badges = useMemo(
     () =>
@@ -113,7 +117,8 @@ export function Session() {
                 answer={m.answer}
                 sessionId={id}
                 onAnswerInput={() => focusInput('answer')}
-                onSwitchDetail={() => focusInput('change')}
+                onRequestDetail={requestDetail}
+                detailRequested={detailRequested}
               />
             ) : (
               <div key={m.id} className="glass max-w-[85%] px-4 py-3 text-sm">
@@ -136,7 +141,7 @@ export function Session() {
             }}
           >
             <div className="flex flex-wrap items-center gap-1.5 pb-2" role="radiogroup" aria-label="후속 입력 유형">
-              {(Object.keys(MESSAGE_KIND_LABEL) as MessageKind[]).map((k) => (
+              {INPUT_KINDS.map((k) => (
                 <button
                   key={k}
                   type="button"

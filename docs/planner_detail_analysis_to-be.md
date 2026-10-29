@@ -24,7 +24,7 @@
 |---|---|---|---|
 | 1 | `src/impact_agent/prompts/planner.md` "## 2. 복잡도" | complex 기준에서 탐색해야 알 수 있는 기준("바꿀 값이 저장되거나 공통코드·다른 처리에서도 쓰임")을 뺀다. `complexity_reason` 에는 근거가 된 **요건 문장 표현을 인용**하게 한다. "애매하면 complex"·운영 문의 기준은 유지 | YJ |
 | 2 | `src/impact_agent/agents/planner.py` | 마지막 후속 입력이 `reanalysis` 이면 LLM 판정과 관계없이 `complexity=complex`, `plan` 에 simulator·verifier 포함, `complexity_reason` 앞에 "사용자 상세 분석 요청" (코드 규칙) | YJ |
-| 3 | UI (단순 요건 응답 화면) | `detail_analysis_recommended=true` 면 권장 표시와 `detail_analysis_reasons` 를 보여 주고, "상세 분석" 버튼 → `FollowupInput(type=reanalysis, content=<사유 요약>)` 전송 | YJ |
+| 3 | UI (단순 요건 응답 화면) | `detail_analysis_recommended=true` 면 권장 표시와 `detail_analysis_reasons` 를 보여 주고, "상세 분석 요청" 버튼 → `FollowupInput(type=reanalysis, content=<사유 요약>)` 전송. **반영됨 (mock)**: `AnswerCard`·`Session`·`types.ts`(`MessageKind` reanalysis, `detailReasons`)·mock 저장소. 실제 API 연결 시 백엔드 필드명 매핑 확인 | SE |
 | 4 | `src/impact_agent/schemas/composer.py` `SimpleAnswer` | `detail_analysis_reasons: list[str]` 추가 (권장 사유) | SE |
 | 5 | `src/impact_agent/agents/composer.py` `rule_detail` | 기존 `change_type` 기준에 탐색 신호 추가 (아래 표). 신호마다 사유 문장을 `detail_analysis_reasons` 에 넣는다 | SE |
 | 6 | `src/impact_agent/templates/simple_answer.md.j2` | 권장 사유 목록 표시 | SE |

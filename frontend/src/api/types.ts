@@ -8,7 +8,7 @@ export type Role = 'user' | 'admin';
 export type InputType = 'requirement' | 'ops_inquiry';
 export type InputSource = 'mail' | 'itsd' | 'etc';
 export type Complexity = 'simple' | 'complex';
-export type MessageKind = 'chat' | 'query_result' | 'answer' | 'change';
+export type MessageKind = 'chat' | 'query_result' | 'answer' | 'change' | 'reanalysis';
 
 export const SM_LABEL: Record<SmPart, string> = { prod: '상품', dbm: 'DBM' };
 export const INPUT_TYPE_LABEL: Record<InputType, string> = { requirement: '요건서', ops_inquiry: '운영 문의' };
@@ -18,7 +18,10 @@ export const MESSAGE_KIND_LABEL: Record<MessageKind, string> = {
   query_result: '조회 결과 입력',
   answer: '현업 답변 입력',
   change: '변경 분석 요청',
+  reanalysis: '상세 분석 요청',
 };
+/** 입력창에서 고를 수 있는 유형. reanalysis 는 단순 응답의 "상세 분석 요청" 버튼으로만 보낸다 (백엔드 FollowupType.reanalysis) */
+export const INPUT_KINDS: MessageKind[] = ['chat', 'query_result', 'answer', 'change'];
 
 // --- 세션 ---------------------------------------------------------------------
 
@@ -76,7 +79,8 @@ export interface AgentAnswer {
   // 단순 응답
   evidence?: EvidenceRow[];
   checkQueries?: { title: string; sql: string }[];
-  changeDetected?: boolean; // 단순 → 상세 분석 전환 제안
+  changeDetected?: boolean; // 상세 분석 권장 (백엔드 SimpleAnswer.detail_analysis_recommended)
+  detailReasons?: string[]; // 권장 사유, 노드 ID 포함 (백엔드 SimpleAnswer.detail_analysis_reasons)
 }
 
 export interface Message {
