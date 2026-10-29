@@ -240,6 +240,22 @@ Dribbble "Forge – AI Agent Code Workspace"(라이트) · "AI Knowledge Base Em
 | `GET /api/kpi/records` | → `KpiRecord[]` (세션별 KPI 기록, 최근 순). 필드는 백엔드 `KpiOutput` 과 같은 이름(`metrics`·`reanalyzed`·`judgement_notes`·`missed_nodes`…) + 세션 정보·합산용 `counts{tp, fn, fp, critical_missed, critical_total}` |
 | `DELETE /api/kpi/records` | KPI 기록 전체 초기화 → `{ deleted }` (세션·분석 결과는 지우지 않음) |
 
+### 백엔드 API 실행 (FastAPI, `src/impact_agent/api`)
+
+```bash
+pip install -e ".[all,dev]"                                          # fastapi · uvicorn 포함 (api 묶음)
+.venv/bin/uvicorn impact_agent.api.app:app --app-dir src --port 8000 --reload
+echo "VITE_USE_MOCK=false" > frontend/.env.local                     # 프론트를 실제 API 로 (지우면 다시 mock)
+cd frontend && npm run dev                                           # Vite 프록시가 /api 를 8000 으로 보냄
+```
+
+- 구현됨: 세션(목록·생성·조회·후속 입력·즐겨찾기·결과물·체크리스트 답변·진행 SSE), KPI 기록(조회·초기화). 적재 현황(`/api/graph/*`)·관리(`/api/admin/*`)는 501 → 실제 API 모드에서는 그 화면이 비어 보인다.
+- Supervisor·Planner 코드는 고치지 않는다. 진행 SSE 는 API 가 각 에이전트를 감싸(`runner.ProgressAgent`) 실행 시작·완료 때 이벤트를 만든다. Supervisor 하나를 공유하므로 분석은 한 번에 하나씩 순서대로 돈다.
+- 요청 문장이 정답셋(`eval/ground_truth/*.json`)의 `request_text` 와 같으면 정답을 붙여 KPI 품질·판정 지표까지 쌓인다 (같은 시나리오 반복 테스트용).
+- 세션·분석 결과는 메모리(서버 재시작 시 사라짐), KPI 기록은 `outputs/kpi/records.json` (git 제외).
+- UI 입력 유형 → 후속 입력: `answer`→business_answer, `query_result`→query_result, `change`·`chat`→change_analysis (chat 은 가안), `reanalysis`→reanalysis. 체크리스트 답변은 항목 owner 에 따라 business_answer / developer_opinion.
+- 테스트: `pytest tests/test_api.py` (가짜 Planner·Explorer·Retriever, LLM·Neo4j 없음).
+
 - SSE: `VITE_USE_MOCK=false` 면 `EventSource`, 아니면 같은 이벤트 순서를 타이머로 재생하고 끝나면 mock 저장소에 답변을 붙인다 (`src/api/stream.ts`).
 - 백엔드 `AgentState` 와의 대응: `planner.complexity` → 배지·Planner 판정, `explorer/retriever` 실행 로그 → 진행 패널, `retriever.evidence` → 근거 목록, `state.tool_call_count`·`explore_loop_count`·`replan_count` → 한도 미터.
 
