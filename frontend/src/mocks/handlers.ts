@@ -114,6 +114,18 @@ export const handlers = [
     s.starred = !s.starred;
     return HttpResponse.json(s);
   }),
+  http.get('/api/sessions/:id/logs', () => {
+    const row = (kind: string, text: string, section: string | null = null, label = '') => ({ at: '10:00:00', agent: 'planner', kind, section, label, text });
+    return HttpResponse.json([
+      row('run', '1차 실행 · 목업 로그 (실제 API 모드에서 상세 로그 표시)'),
+      row('route', 'PLANNER  새 요건'),
+      row('open', '1 Planner · 10:00:00'),
+      row('row', '목업 요청 문장', '받은 입력 ← 요청 접수', '요청 문장'),
+      row('row', 'gpt-6.1-sol PlannerDraft 11.2s · 입력 6,781 · 출력 828 토큰', '동작 · LLM 판정', 'LLM'),
+      row('row', '단순 — 목업 판정', '결과 → Explorer', '복잡도'),
+      row('close', '완료 11.2s │ 단순 · 항목 1개 │ 토큰 7,609'),
+    ]);
+  }),
   http.get('/api/sessions/:id/report', async ({ params, request }) => {
     await delay();
     const v = Number(new URL(request.url).searchParams.get('version') ?? 2);
@@ -171,21 +183,30 @@ export const handlers = [
     return HttpResponse.json(r);
   }),
 
-  // --- 관리 (백엔드에서 슈퍼 권한 검증 필요) ---
+  // --- 사용자 (목업은 X-User 헤더를 사용자 목록에서 찾는다) ---
+  http.get('/api/auth/me', ({ request }) => {
+    const u = db.users.find((x) => x.name === decodeURIComponent(request.headers.get('X-User') ?? ''));
+    if (!u) return new HttpResponse('사용자를 선택해 주세요', { status: 401 });
+    const base = ['analyze', 'report', 'graph.view', 'reload.request'];
+    const extra = ['reload.approve', 'settings', 'users.manage', 'audit.view', 'sessions.all'];
+    return HttpResponse.json({ ...u, permissions: u.role === 'admin' ? [...base, ...extra] : base });
+  }),
+
+  // --- 관리 (백엔드에서 슈퍼 권한 검증) ---
   http.get('/api/admin/users', () => HttpResponse.json(db.users)),
   http.post('/api/admin/users', async ({ request }) => {
     const u = (await request.json()) as User;
-    if (db.users.some((x) => x.empNo === u.empNo)) return new HttpResponse('이미 있는 사번', { status: 409 });
-    db.users.push({ ...u, active: true });
-    audit('이관리', '사용자 추가', `${u.empNo} ${u.name}`);
+    if (db.users.some((x) => x.name === u.name)) return new HttpResponse('이미 있는 사용자', { status: 409 });
+    db.users.push(u);
+    audit('김관리', '사용자 추가', u.name);
     return HttpResponse.json(u);
   }),
-  http.patch('/api/admin/users/:empNo', async ({ params, request }) => {
+  http.patch('/api/admin/users/:name', async ({ params, request }) => {
     const body = (await request.json()) as Partial<User>;
-    const u = db.users.find((x) => x.empNo === params.empNo);
+    const u = db.users.find((x) => x.name === params.name);
     if (!u) return new HttpResponse('not found', { status: 404 });
     Object.assign(u, body);
-    audit('이관리', '권한 변경', `${u.empNo} ${u.name}`);
+    audit('김관리', '권한 변경', u.name);
     return HttpResponse.json(u);
   }),
   http.get('/api/admin/reload-requests', () => HttpResponse.json(db.reloadRequests)),
@@ -193,7 +214,7 @@ export const handlers = [
     const r = db.reloadRequests.find((x) => x.id === params.id);
     if (!r) return new HttpResponse('not found', { status: 404 });
     r.status = params.decision === 'approve' ? 'approved' : 'rejected';
-    audit('이관리', r.status === 'approved' ? '재적재 승인' : '재적재 반려', `${r.id} (${r.scope})`);
+    audit('김관리', r.status === 'approved' ? '재적재 승인' : '재적재 반려', `${r.id} (${r.scope})`);
     return HttpResponse.json(r);
   }),
   http.get('/api/admin/audit-logs', () => HttpResponse.json(db.audit)),

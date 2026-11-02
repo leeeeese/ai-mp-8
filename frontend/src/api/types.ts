@@ -120,6 +120,16 @@ export interface AgentEvent {
   evidence?: { nodeId: string; file: string; location?: string }[];
 }
 
+/** 실행 로그 한 건. run·open·close·route 가 블록 구조를 만들고 row·plain·note 가 내용. 에이전트 블록 섹션: 받은 입력 → 동작 → 근거 → 결과 (백엔드 api/agent_log.py) */
+export interface SessionLog {
+  at: string; // HH:MM:SS
+  agent: string;
+  kind: 'run' | 'note' | 'open' | 'row' | 'plain' | 'close' | 'route';
+  section: string | null;
+  label: string;
+  text: string;
+}
+
 // --- 결과물 ---------------------------------------------------------------------
 
 export type ChecklistOwner = 'business' | 'developer';
@@ -248,17 +258,16 @@ export interface ReloadRequest {
   requestedBy: string;
   requestedAt: string;
   status: 'pending' | 'approved' | 'rejected';
+  decidedBy?: string;
+  decidedAt?: string;
 }
 
 // --- 관리 ------------------------------------------------------------------------
 
 export interface User {
-  empNo: string;
   name: string;
   role: Role;
   smParts: SmPart[];
-  lastLoginAt?: string;
-  active: boolean;
 }
 
 export interface AuditLog {

@@ -64,7 +64,7 @@
 │   │   ├── composer.py       #   SimpleAnswer, ComplexReport, ChecklistItem, MailDraft, ComposerOutput, ...
 │   │   └── tools.py          #   tool 입출력 (SearchGraphNodes*, TraverseGraph*, ReadSource*, SaveReport*)
 │   ├── agents/               # 에이전트 구현 (supervisor = 흐름 제어, kpi = PoC 평가)
-│   ├── api/                  # UI 백엔드 API (FastAPI: 세션·SSE·KPI·적재 현황)
+│   ├── api/                  # UI 백엔드 API (FastAPI: 세션·SSE·KPI·적재 현황·권한·상세 로그)
 │   ├── tools/                # tool 구현 + TOOL_REGISTRY
 │   ├── prompts/              # 에이전트별 시스템 프롬프트 (*.md)
 │   └── templates/            # Composer markdown 템플릿 (Jinja2)
@@ -246,16 +246,23 @@ cd ~/Desktop/impact-agent && PYTHONPATH=src PYTHONWARNINGS=ignore /Library/Frame
 ```
 
 - `Uvicorn running on http://127.0.0.1:8000` 이 나오면 준비 완료. `.env` 는 앱이 직접 읽는다.
-- 터미널에 HTTP 요청과 함께 에이전트 진행이 한 줄씩 찍힌다:
+- 터미널에 에이전트 실행 로그가 찍힌다. 에이전트마다 **받은 입력 → 동작 → 근거 → 결과** 순서다. HTTP 요청 줄이 섞이는 게 싫으면 실행 명령에 `--no-access-log` 를 붙인다:
   ```
-  INFO:     "POST /api/sessions HTTP/1.1" 200 OK
-  INFO:     [2d604607] planner    done    12.3s · 단순 · 항목 2개
-  INFO:     [2d604607] explorer   done    3.1s · 시작 노드 4 · 경로 18
+  ┌─ 2-1 Explorer · 왕복 1/3 · 19:02:47 ─────────────────
+  │ ▸ 받은 입력 ← Planner
+  │   항목 1     screen_change → 목표 EntryHandler · forward · hop 5 | …
+  │ ▸ 동작 · 규칙 탐색
+  │     Screen   '결합상품' (+동의어 2) → 채택 SCR:ZCMBSS0100010 '결합상품 가입' 1.05 / 탈락 SCR:ZPRDSS0200010 0.4, …
+  │   tool 5     탐색 SCR:ZCMBSS0100010 외 1 forward → EntryHandler → 경로 10 · 노드 12 · 23ms
+  │ ▸ 결과 → Retriever
+  │   경로 1     [1] target_reached: SCR:ZCMBSS0100010 > TP:DocRsvSvc.regDocRsv
+  └─ 완료 14.5s │ 시작 노드 4 · 경로 10 │ tool 누적 7/20 │ 토큰 13,134
   ```
+- 같은 내용이 `outputs/logs/<세션 8자>.log` 와 세션 화면 **실행 로그**에도 남는다.
 - 확인 (다른 터미널):
   ```bash
-  curl -s localhost:8000/api/sessions                                   # []
-  curl -s "localhost:8000/api/graph/status?sm=dbm" | python3 -m json.tool | head -20   # connected: true, nodes 322
+  curl -s -H "X-User: %EA%B9%80%EA%B4%80%EB%A6%AC" localhost:8000/api/sessions    # []  (값은 "김관리" URL 인코딩, 없으면 401)
+  curl -s -H "X-User: %EA%B9%80%EA%B4%80%EB%A6%AC" "localhost:8000/api/graph/status?sm=dbm" | python3 -m json.tool | head -20   # connected: true, nodes 322
   ```
 - 코드를 고치면 `Ctrl + C` 후 다시 실행 (또는 `--reload` 추가). **재시작하면 세션은 사라진다** (메모리 저장). KPI 기록은 `outputs/kpi/records.json` 에 남는다.
 
@@ -273,7 +280,7 @@ VITE_USE_MOCK=false npm run dev            # 실제 API 모드 (Vite 프록시�
 
 ### 4. 화면에서 시나리오 실행
 
-사이드바 아래 mock 사용자를 **이관리**(상품·DBM)로 둔다. 분석은 한 번에 하나씩 돌므로 앞 분석이 끝난 뒤 다음을 넣는다.
+사이드바 아래 mock 사용자를 **김관리**(상품·DBM)로 둔다. 분석은 한 번에 하나씩 돌므로 앞 분석이 끝난 뒤 다음을 넣는다.
 요청 문장이 정답셋 `eval/ground_truth/<요건ID>.json` 의 `request_text` 와 같으면 KPI 품질 지표(탐지율·정밀도·판정)까지 계산된다.
 
 | 시나리오 | SM | 흐름 | 소요 |
@@ -299,15 +306,15 @@ $PY -c "import json; print(json.load(open('eval/ground_truth/SC-003.json'))['req
 | SM | 입력 | 기대 결과 |
 |---|---|---|
 | DBM | (처음 화면) | 기본 노드 `DBIO:DCP_MSGSCRT_S02` 기준 2 hop |
-| DBM | `TOSCP0210M` | `SCR:TOSCP0210M` (메시지 등록 화면, Entry) |
+| DBM | `TOSCP0210M` | `SCR:TOSCP0210M` (캠페인 화면, Entry) |
 | DBM | `TCH_MMS_SND_TGT` / `TCH_EXT_SND_TGT` | SC-006 자사·타사 발송 대상 테이블 (Table) |
-| DBM | `TCP_MSG_SCRT` | `TBL:TCP_MSG_SCRT` (메시지스크립트 테이블). 연결이 많아 "컬럼 노드 표시" 체크 전후 비교에 적합 |
-| DBM | `TBCH1020` | 배치 (자사 MMS 발송결과 반영). 프로그램 소스 미제공이라 연결 없이 노드 1개만 (품질 점검 "미제공 소스 영역"과 같은 노드) |
+| DBM | `TCP_MSG_SCRT` | 테이블. "컬럼 노드 표시" 체크 시 컬럼까지 |
+| DBM | `TBCH1020` | 배치. 프로그램 소스 미제공이라 연결 없음 (품질 점검 "미제공 소스 영역"과 같은 노드) |
 | 상품 | (처음 화면) | 기본 노드 `TP:CombScrbSvc.joinComb` 기준 2 hop |
 | 상품 | `joinComb` | `TP:CombScrbSvc.joinComb` (결합 가입 서비스, EntryHandler) |
 | 상품 | `TB_COMB_GRP` / `TB_COMB_MBR` | 결합 그룹·구성원 테이블 |
-| 상품 | `ZCMBSS0100010` | 결합상품 가입 화면 (Entry) |
-| 상품 | `ZDOCBB0100010` | 구비서류 자동처리 배치 (Entry) |
+| 상품 | `ZCMBSS0100010` | 결합 화면 (Entry) |
+| 상품 | `ZDOCBB0100010` | 구비서류 배치 (Entry) |
 | 공통 | `MMS`, `발송` 등 단어 일부 | 이름·설명에 포함된 노드 목록 |
 | 공통 | 다른 SM 노드 (예: DBM 에서 `joinComb`) | 결과 없음 (SM 별 영역만 검색) |
 
@@ -326,14 +333,15 @@ $PY -c "import json; print(json.load(open('eval/ground_truth/SC-003.json'))['req
 | 화면이 mock 데이터 그대로 | `VITE_USE_MOCK=false` 없이 실행함. 프론트 재시작 |
 | 적재 현황 "연결 끊김" · 검색 503 | Neo4j 꺼짐 → `docker compose up -d` |
 | master 반영률 0% · 적재 이력 없음 | 적재 기록(`:LoadMeta`) 없는 적재 → `$PY scripts/build_graph.py --load` |
-| 관리 화면이 비어 있음 | 관리(권한) API(`/api/admin/*`) 미구현 (501) |
+| API 401 | 사용자(`X-User`)가 없거나 미등록. 사용자 목록은 `outputs/admin/users.json` |
+| API 403 | 권한 또는 SM 파트 위반. 관리 화면·KPI 초기화는 김관리(관리자)로 전환 |
 | 후속 입력 409 | 분석 중. 끝난 뒤 다시 |
 | 백엔드 재시작 후 세션이 없음 | 세션은 메모리 저장 (PoC) |
 
 ### API 테스트 (LLM · Neo4j 없음)
 
 ```bash
-PYTHONPATH=src $PY -m pytest tests/test_api.py tests/test_graph_api.py -q
+PYTHONPATH=src $PY -m pytest tests/test_api.py tests/test_admin_api.py tests/test_graph_api.py -q
 ```
 
 ## 스키마 변경 절차
@@ -347,7 +355,7 @@ PYTHONPATH=src $PY -m pytest tests/test_api.py tests/test_graph_api.py -q
 완료 (2026-10-29 기준): 에이전트 LLM 호출 · Neo4j/소스 조회 연결 · 후속 입력(재분석 포함)·MEMORY_WINDOW_N 대화 메모리 · MAX_TOOL_CALLS 예산 · 회신 메일 초안/MD·PDF 저장(백엔드) · KPI Agent(토큰 포함) · UI 백엔드 API(세션·SSE·KPI·적재 현황) · API 통합 테스트 v0.1 ([docs/api_integration_test.md](docs/api_integration_test.md))
 
 - [ ] 에이전트 품질: 1차 복잡도 판정(SC-003 이 단순으로 판정됨), 미탐 노드, 정답 단순 요건의 과한 "상세 분석 권장"(L-4)
-- [ ] 관리(권한) API `/api/admin/*` (현재 501) · 인증(401)/권한(403) 백엔드 검증 ([docs/api_design.md](docs/api_design.md) 5장)
+- [ ] 실제 로그인 연동 (관리(권한) API · 권한 검증은 완료, 지금은 mock 사용자 전환, [docs/api_design.md](docs/api_design.md) 5장)
 - [ ] 회신 메일 초안 · PDF 저장을 UI 버튼과 연결하는 API
 - [ ] 결과물 버전(v2 현업 답변 반영 …) 조회 (`GET …/report?version=` 은 지금 v1 만)
 - [ ] 세션 영속 저장 (지금은 메모리, 서버 재시작 시 사라짐)

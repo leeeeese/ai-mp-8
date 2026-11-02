@@ -7,10 +7,13 @@ AZURE_OPENAI_ENDPOINT 가 있으면 Azure OpenAI 호환 게이트웨이로 호�
 """
 
 import os
+import time
 from dataclasses import dataclass
 from typing import Protocol, TypeVar
 
 from pydantic import BaseModel, ValidationError
+
+from .trace import clip, trace
 
 T = TypeVar("T", bound=BaseModel)
 DEFAULT_MODEL = "gpt-6.1-sol"
@@ -74,6 +77,17 @@ class OpenAIClient:
             self.client = OpenAI(api_key=key)
 
     def parse(self, system: str, user: str, schema: type[T]) -> tuple[T, Usage]:
+        start = time.perf_counter()
+        try:
+            parsed, usage = self._parse(system, user, schema)
+        except Exception as e:
+            trace(f"{schema.__name__} 실패 {time.perf_counter() - start:.1f}s · {type(e).__name__}: {clip(e, 120)}", label="LLM 오류")
+            raise
+        trace(f"{self.model} {schema.__name__} {time.perf_counter() - start:.1f}s · "
+              f"입력 {usage.input_tokens or 0:,} · 출력 {usage.output_tokens or 0:,} 토큰", label="LLM")
+        return parsed, usage
+
+    def _parse(self, system: str, user: str, schema: type[T]) -> tuple[T, Usage]:
         completions = getattr(self.client.chat.completions, "parse", None) or self.client.beta.chat.completions.parse
         completion = completions(
             model=self.model,

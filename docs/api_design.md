@@ -1,12 +1,13 @@
 # API 설계서: impact-agent 전체 API (UI 백엔드)
 
-> 범위: UI 가 호출하는 전체 API (세션 · 진행 SSE · KPI · 적재 현황 · 관리(권한)). 구현: `src/impact_agent/api/` (FastAPI). 계약(요청·응답 타입)은 `frontend/src/api/types.ts` · 목업 `frontend/src/mocks/handlers.ts` 와 같다. 화면별 사용처는 [ui_design.md](ui_design.md) 7장. 기준일 2026-10-29.
+> 범위: UI 가 호출하는 전체 API (세션 · 진행 SSE · KPI · 적재 현황 · 관리(권한)). 구현: `src/impact_agent/api/` (FastAPI). 계약(요청·응답 타입)은 `frontend/src/api/types.ts` · 목업 `frontend/src/mocks/handlers.ts` 와 같다. 화면별 사용처는 [ui_design.md](ui_design.md) 7장. 기준일 2026-11-02.
 
 ## 변경 이력
 
 | 일자 | 내용 |
 |---|---|
 | 2026-10-29 | 최초 작성. 전체 API 목록 · 응답 코드 규칙 · 엔드포인트 상세. 세션·KPI·적재 현황 구현, 관리(권한) 501 |
+| 2026-11-02 | 관리(권한) API 구현 (사용자·재적재 승인·감사 로그), 전 경로 로그인·권한 검증(401·403), `GET /api/auth/me`, 상세 실행 로그(`GET …/logs`, 터미널, `outputs/logs`). 501 제거 |
 
 ## 1. 개요
 
@@ -15,16 +16,18 @@
 | 기술 | FastAPI · uvicorn · Pydantic v2 (요청 검증) · SSE (`text/event-stream`) |
 | 기본 주소 | `http://localhost:8000` (프론트는 Vite 프록시로 `/api` 를 전달) |
 | 형식 | 요청·응답 모두 JSON (UTF-8). SSE 만 `text/event-stream` |
-| 인증 | 없음 (PoC). 사용자·권한은 프론트 mock 사용자로만 구분. 401·403 은 인증 도입 때 추가 (5장) |
-| 저장 | 세션·분석 결과: 메모리 (재시작 시 사라짐) / KPI 기록: `outputs/kpi/records.json` / 재적재 요청: `outputs/graph/reload_requests.json` / 그래프: Neo4j 읽기 전용 |
+| 사용자 구분 | 프론트에서 고른 mock 사용자 이름을 `X-User` 헤더로 보냄 (URL 인코딩, SSE 만 `?user=`). 없거나 미등록 401, 권한·SM 파트 위반 403 (5장) |
+| 저장 | 세션·분석 결과: 메모리 (재시작 시 사라짐) / KPI 기록: `outputs/kpi/records.json` / 재적재 요청: `outputs/graph/reload_requests.json` / 사용자·감사 로그: `outputs/admin/{users,audit_logs}.json` / 세션 로그: `outputs/logs/<세션 8자>.log` / 그래프: Neo4j 읽기 전용 |
 | 동시성 | Supervisor 하나를 공유 → 분석은 한 번에 하나씩 순서대로. 분석은 백그라운드 스레드, 진행은 SSE |
 
 ### 파일 구성
 
 | 파일 | 역할 |
 |---|---|
-| `api/app.py` | 앱 생성(`create_app`), 세션·KPI 라우트, 정답셋 매칭, 관리(권한) API 501 처리 |
-| `api/runner.py` | 에이전트 래퍼(`ProgressAgent`) → 진행 이벤트, 세션 기록(`SessionRecord`), JSON 목록 저장소(`KpiStore`), 진행 로그 |
+| `api/app.py` | 앱 생성(`create_app`), 세션·KPI 라우트, 정답셋 매칭 |
+| `api/auth.py` | 인증(`Auth`), 권한표, 사용자·재적재 승인·감사 로그 라우터 |
+| `api/agent_log.py` | 에이전트 출력 → 상세 로그 줄, 실행 표, KPI 요약 |
+| `api/runner.py` | 에이전트 래퍼(`ProgressAgent`) → 진행 이벤트, 세션 기록(`SessionRecord`), JSON 목록 저장소(`JsonStore`), 세션 로그 |
 | `api/views.py` | `AgentState` → UI 응답 모양 (`answer_view`, `report_view`, `kpi_record`) |
 | `api/graph.py` | 적재 현황 라우터(`graph_router`), Neo4j/CSV 그래프 소스, 품질 점검·검색·2 hop·master 대비 |
 
@@ -40,13 +43,22 @@
 | `GET /api/sessions/{id}/report` | 복잡 요건 결과물 | 200 | 404 |
 | `PATCH /api/sessions/{id}/checklist/{itemId}` | 체크리스트 답변 → 결과물 갱신 | 200 | 404 · 409 · 422 |
 | `GET /api/sessions/{id}/stream` | 진행 이벤트 (SSE) | 200 | 404 |
-| `GET /api/kpi/records` | KPI 기록 (최근 순) | 200 | - |
-| `DELETE /api/kpi/records` | KPI 기록 전체 초기화 | 200 | - |
+| `GET /api/sessions/{id}/logs` | 상세 실행 로그 (라운드 누적) | 200 | 404 |
+| `GET /api/kpi/records` | KPI 기록 (최근 순, 자기 SM 파트) | 200 | - |
+| `DELETE /api/kpi/records` | KPI 기록 전체 초기화 (`settings`) | 200 | - |
 | `GET /api/graph/status?sm=` | 적재 현황 | 200 | 422 |
 | `GET /api/graph/search?sm=&q=` | 노드 검색 | 200 | 422 · 503 |
 | `GET /api/graph/neighbors?sm=&nodeId=&hops=` | 2 hop 그래프 | 200 | 404 · 422 · 503 |
 | `POST /api/graph/reload-requests` | 재적재 요청 생성 | 200 | 422 |
-| `/api/admin/*` (GET·POST·PATCH·DELETE) | 관리(권한): 사용자·권한 변경, 재적재 승인·반려, 감사 로그 (미구현) | - | 501 (관리(권한) 미구현) |
+| `GET /api/auth/me` | 현재 사용자 + 권한 | 200 | - |
+| `GET /api/admin/users` | 사용자 목록 (`users.manage`) | 200 | - |
+| `POST /api/admin/users` | 사용자 추가 | 200 | 409 · 422 |
+| `PATCH /api/admin/users/{name}` | 역할·SM 파트 변경 | 200 | 404 · 409 · 422 |
+| `GET /api/admin/reload-requests` | 재적재 요청 목록 (`reload.approve`) | 200 | - |
+| `POST /api/admin/reload-requests/{id}/{approve\|reject}` | 재적재 승인·반려 | 200 | 404 · 409 · 422 |
+| `GET /api/admin/audit-logs` | 감사 로그 (`audit.view`) | 200 | - |
+
+위 표의 오류 칸에서 공통 401 · 403 은 뺐다. `/api/*` 전 경로가 사용자 구분을 요구한다.
 
 ## 3. 응답 코드 설계
 
@@ -54,7 +66,7 @@
 
 1. **성공은 200 하나로 통일한다.** 생성(`POST /api/sessions`, `POST …/reload-requests`)도 201 대신 200. 프론트 `request()` 가 `res.ok` 만 보고, 목업(MSW)도 200 으로 응답하므로 계약을 하나로 맞춘다.
 2. **오류는 "누가 고쳐야 하는가"로 나눈다.** 요청이 틀렸으면 4xx(프론트·사용자), 서버가 못 하면 5xx(백엔드·인프라).
-3. **오류 본문은 FastAPI 기본 형식** `{"detail": "..."}`. 4xx·501·503 은 화면에 그대로 보여 줄 수 있는 한국어 문장으로 쓴다 (422 만 FastAPI 가 만드는 검증 목록).
+3. **오류 본문은 FastAPI 기본 형식** `{"detail": "..."}`. 4xx·503 은 화면에 그대로 보여 줄 수 있는 한국어 문장으로 쓴다 (422 만 FastAPI 가 만드는 검증 목록).
 4. **화면을 그릴 수 있으면 오류로 만들지 않는다.** 예: Neo4j 연결이 끊겨도 `GET /api/graph/status` 는 200 + `connected: false` 로 "연결 끊김" 배지를 그리게 한다. 데이터가 없으면 빈 목록(200)이지 404 가 아니다 (`GET /api/sessions`, `GET /api/kpi/records`).
 5. **분석 실패는 HTTP 오류가 아니다.** 분석은 요청이 끝난 뒤 백그라운드에서 돌기 때문에, 실패하면 세션에 "분석 중 오류가 발생했습니다: …" 메시지를 남기고 SSE 를 정상 종료한다 (서버 터미널에 traceback 로그).
 
@@ -64,9 +76,10 @@
 |---|---|---|---|---|
 | **200** | OK | 성공 | 모든 정상 응답 (생성 포함) | 응답 본문 사용 |
 | **404** | Not Found | 요청한 **대상이 없다** | 없는 세션 ID / 단순 요건 세션의 결과물 / 없는 체크리스트 항목 / 해당 영역에 없는 노드 ID | 안내 문구 표시. 결과물 404 는 "복잡 요건 결과물이 없습니다" (단순 응답이면 정상) |
-| **409** | Conflict | 요청은 맞지만 **지금 상태와 충돌**한다 | 분석 중(`status: running`)인 세션에 후속 입력·체크리스트 답변 | 분석이 끝난 뒤 다시 시도 (UI 는 분석 중 입력을 막아 평소엔 안 생김) |
+| **409** | Conflict | 요청은 맞지만 **지금 상태와 충돌**한다 | 분석 중(`status: running`)인 세션에 후속 입력·체크리스트 답변 / 이미 있는 사용자 / 이미 처리된 재적재 요청 / 마지막 관리자 해제 | 분석이 끝난 뒤 다시 시도 또는 안내 문구 표시 |
 | **422** | Unprocessable Entity | 요청 **형식·값이 틀렸다** (Pydantic 검증 실패, FastAPI 자동) | `smPart` 가 `prod`·`dbm` 외 값, `kind` 가 허용 목록 밖, 필수 필드 누락, `sm` 쿼리 값 오류, `nodeId` 누락 | 개발 오류 (UI 는 정해진 값만 보냄). 본문 `detail` 에 어느 필드가 틀렸는지 목록 |
-| **501 (관리(권한))** | Not Implemented | 경로는 계약에 있지만 **아직 구현하지 않았다**. 권한 거부(401·403)가 아니라 미구현 | `/api/admin/*` (관리(권한) API) | 관리 화면이 비어 보임. 404 와 구분해 "없는 기능"이 아니라 "만들 예정"임을 알린다 |
+| **401** | Unauthorized | **"누구인지 모른다"** | 사용자 없음·미등록 | 사용자 선택 확인 |
+| **403** | Forbidden | **"누구인지는 알지만 권한이 없다"** | 유저가 `/api/admin/*`·KPI 초기화 호출, 다른 SM 파트 세션·적재 현황 접근. 감사 로그에 `권한 거부` 로 남음 | 안내 문구 표시 |
 | **503** | Service Unavailable | 서버는 살아 있지만 **의존 서비스(Neo4j)에 연결할 수 없다** | `GET /api/graph/search`, `GET /api/graph/neighbors` 에서 그래프 저장소 연결 실패 | 잠시 후 재시도. `docker compose up -d` 로 Neo4j 확인 |
 | 500 | Internal Server Error | 예상하지 못한 서버 오류 (직접 내지 않음, FastAPI 기본) | 코드 버그 | 서버 터미널 traceback 확인 |
 
@@ -86,11 +99,9 @@
 | 201 | Created | 성공 코드를 200 으로 통일 (3-1 원칙 1) | 외부 공개 API 로 바꿀 때 검토 |
 | 204 | No Content | 삭제(`DELETE /api/kpi/records`)도 지운 건수 `{deleted}` 를 돌려줘야 함 | - |
 | 400 | Bad Request | 형식 오류는 FastAPI 가 422 로 처리. 따로 검사하는 업무 규칙 오류가 아직 없음 | 업무 규칙 검증(예: 빈 요청 문장 거부)이 생기면 400 |
-| **401** | Unauthorized | **"누구인지 모른다"** (로그인 안 함·토큰 없음·만료). PoC 는 인증이 없음 | 사내 SSO 연동 시. 토큰 없거나 만료 → 401 → 프론트가 로그인 화면으로 이동 |
-| **403** | Forbidden | **"누구인지는 알지만 권한이 없다"**. 지금은 권한을 프론트(`useAuth().can()`)에서만 숨김 | 인증 도입 시 백엔드 검증: 다른 SM 파트 세션 조회, 유저가 `/api/admin/*` 호출, 재적재 승인 → 403 |
 | 429 | Too Many Requests | 분석은 한 번에 하나씩 대기열처럼 순서대로 처리 (거부하지 않음) | 다중 사용자 운영 시 |
 
-> **401 과 403 의 차이**: 401 은 "로그인부터 하세요"(신원 확인 실패), 403 은 "로그인은 됐지만 이 작업은 못 합니다"(권한 부족). 예를 들어 김유저(유저 · DBM)가 상품 세션을 열면 403, 로그인하지 않고 열면 401.
+> **401 과 403 의 차이**: 401 은 누구인지 모르는 요청, 403 은 누구인지는 알지만 권한이 없는 요청. 예를 들어 이세은(유저 · 상품)이 DBM 세션을 열면 403, 사용자 없이 열면 401.
 
 ## 4. 엔드포인트 상세
 
@@ -169,7 +180,8 @@ data: {"node": "retriever", "status": "done", ..., "evidence": [{"nodeId": "SCR:
 - 현재 라운드의 이벤트를 처음부터 다시 보낸 뒤 새 이벤트를 이어 보낸다 (새로고침해도 진행 패널 복원).
 - 15초 동안 이벤트가 없으면 `: keepalive` 주석 줄 (프록시 타임아웃 방지).
 - `supervisor done` 을 보낸 뒤 스트림을 닫는다.
-- 같은 이벤트가 서버 터미널에도 한 줄씩 찍힌다: `[세션ID 8자] planner    done    12.3s · 단순 · 항목 2개`.
+- `EventSource` 는 헤더를 못 보내서 사용자 이름을 `?user=` 로 받는다 (이 경로만).
+- 같은 이벤트가 상세 실행 로그에도 남는다 (4-5).
 
 ### 4-3. KPI
 
@@ -229,25 +241,47 @@ data: {"node": "retriever", "status": "done", ..., "evidence": [{"nodeId": "SCR:
   "requestedAt": "2026-10-29T21:56:23+09:00", "status": "pending" }
 ```
 
-- 요청만 저장한다 (승인·실행은 관리자 → 적재 파이프라인). 인증이 없어 `requestedBy` 는 목업과 같은 `현재 사용자`.
+- 요청만 저장한다. 승인·반려는 `/api/admin/reload-requests`, 실행은 관리자 적재 파이프라인(승인해도 자동 적재하지 않음). `requestedBy` 는 로그인 사용자 이름.
 
-## 5. 인증 · 권한 도입 시 (TBD)
+### 4-5. 상세 실행 로그
 
-| 단계 | 내용 |
+목적: 어떤 에이전트가 앞 단계에서 무엇을 받아 무엇을 했고, 무엇을 근거로 무엇을 넘겼는지 추적한다.
+
+구조: 실행 머리 → `0 요청 접수` 블록(입력·권한·공유 상태) → 에이전트 블록 → 블록 사이 라우팅(`↓ 다음 노드  이유`) → 실행 요약·KPI 블록. 에이전트 블록 섹션은 아래 순서로 고정한다.
+
+| 섹션 | 내용 | 만드는 곳 |
+|---|---|---|
+| 받은 입력 ← 앞 단계 | 실행 직전 state 에서 이 에이전트가 쓰는 것 (탐색 명세, 경로, 근거, 재탐색 요청, 재분석 요청 등과 LLM 입력 범위) | `api/agent_log.input_rows` |
+| 동작 · … | tool 호출과 결과, 언급별 후보 채택·탈락(점수·기준), 시작 노드 분류, 탐색 경로, 점검 신호, ReAct 행동·Thought·Observation, 읽은 파일·줄, 핵심 근거 인용, LLM 호출(모델·소요·토큰) | 에이전트 `trace()`, `llm.py` |
+| 근거 | Retriever 근거 목록, Simulator hop 별 영향·근거 위치, Verifier 점검 전체, Composer 주장-근거 표 | `api/agent_log.output_rows` |
+| 결과 → 다음 단계 | 다음 단계로 넘기는 출력 (판정·항목, 경로 전체, 재탐색 요청, 영역 판정, 결론·권장 사유 등) | `api/agent_log.output_rows` |
+
+- 터미널(`impact_agent.console`, uvicorn 머리표 없음) · `outputs/logs/<세션 8자>.log` · `GET /api/sessions/{id}/logs`(세션 화면 "실행 로그") 모두 같은 내용이다. 줄이거나 숨기지 않는다 (긴 Thought·Observation 만 한 행 400~500자).
+- 로그 항목: `{at, agent, kind, section, label, text}`. `kind` = run · note · open · row · plain · close · route.
+- 파트너 에이전트(Simulator·Verifier·Composer)는 코드를 고치지 않고, 받은 입력·결과를 state·출력에서 뽑는다.
+- CLI·평가 스크립트는 받는 곳이 없어 출력하지 않는다.
+
+## 5. 인증 · 권한
+
+| 항목 | 내용 |
 |---|---|
-| 인증 | 사내 SSO 토큰 검증 미들웨어. 토큰 없음·만료 → **401** |
-| 권한 | 기본: 자기 SM 파트 세션·적재 현황 조회, 재적재 요청 / 슈퍼: 전체 세션, `/api/admin/*`, 재적재 승인 → 위반 시 **403** |
-| 세션 목록 | `GET /api/sessions` 를 사용자 SM 파트로 필터 (지금은 프론트에서만 필터) |
-| `requestedBy` · 감사 로그 | 토큰의 사번·이름으로 기록 |
+| 사용자 구분 | `Auth._identify` 가 이름으로 사용자를 찾음 (이름이 곧 사용자 ID, 수정 불가) |
+| 기본 권한 (유저·관리자) | `analyze` · `report` · `graph.view` · `reload.request` |
+| 슈퍼 권한 (관리자) | `reload.approve` · `settings` · `users.manage` · `audit.view` · `sessions.all` |
+| SM 파트 | 기본: 자기 SM 파트의 세션·적재 현황·KPI만. `sessions.all`: 다른 파트 조회 가능, 분석·후속 입력·체크리스트 답변은 자기 파트만 |
+| 사용자 변경 | 저장 즉시 다음 요청부터 적용. 마지막 관리자는 해제 불가 (409) |
+| 감사 로그 | 사용자 추가 · 권한 변경 · 재적재 승인/반려 · KPI 기록 초기화 · 권한 거부 |
+| 초기 사용자 | 이세은(유저 · 상품) · 권예지(유저 · DBM) · 김관리(관리자 · 상품/DBM). 프론트 mock 사용자와 같음 |
 
 ## 6. 테스트
 
 | 테스트 | 내용 |
 |---|---|
-| `tests/test_api.py` | 세션·결과물·체크리스트·SSE·KPI·501(관리(권한)) (가짜 Planner·Explorer·Retriever, LLM·Neo4j 없음) |
+| `tests/test_api.py` | 세션·결과물·체크리스트·SSE·KPI·상세 로그 (가짜 Planner·Explorer·Retriever, LLM·Neo4j 없음) |
+| `tests/test_admin_api.py` | 401·403, SM 파트 제한, SSE 사용자 구분, 사용자 추가·변경·검증, 마지막 관리자 보호, 재적재 승인·반려, 감사 로그 |
 | `tests/test_graph_api.py` | 적재 현황 (작은 CSV 그래프 + 임시 소스 루트): 집계·품질 점검·master 대비(변경·추가·삭제)·검색 순위·2 hop·404·재적재 요청·연결 끊김(200 + `connected:false`, 검색 503) |
 | 시나리오 | Neo4j + LLM 으로 UI 에서 tos SC-003 · swing L-4 실행 (결과: [api_integration_test.md](api_integration_test.md)) |
 
 ```bash
-PYTHONPATH=src pytest tests/test_api.py tests/test_graph_api.py -q
+PYTHONPATH=src pytest tests/test_api.py tests/test_admin_api.py tests/test_graph_api.py -q
 ```

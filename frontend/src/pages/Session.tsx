@@ -5,6 +5,7 @@ import { useParams } from 'react-router-dom';
 import { useSendMessage, useSession, useToggleStar } from '@/api/client';
 import { openAgentStream } from '@/api/stream';
 import { INPUT_KINDS, MESSAGE_KIND_LABEL, SM_LABEL, type MessageKind, type Session as SessionT } from '@/api/types';
+import { AgentLog } from '@/components/AgentLog';
 import { AgentProgress, NODES, emptyProgress, reduceProgress, type ProgressState } from '@/components/AgentProgress';
 import { AnswerCard } from '@/components/AnswerCard';
 import { Badge } from '@/components/Badge';
@@ -29,6 +30,7 @@ export function Session() {
   const [progress, setProgress] = useState<ProgressState>(emptyProgress);
   const [kind, setKind] = useState<MessageKind>('chat');
   const [text, setText] = useState('');
+  const [logOpen, setLogOpen] = useState(false);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const running = session?.status === 'running';
@@ -183,9 +185,10 @@ export function Session() {
         </div>
 
         <aside className="xl:sticky xl:top-[76px] xl:flex xl:max-h-[calc(100vh-92px)] xl:flex-col xl:self-start">
-          <AgentProgress state={progress} />
+          <AgentProgress state={progress} onOpenLog={() => setLogOpen(true)} />
         </aside>
       </div>
+      <AgentLog sessionId={id} running={!!running} open={logOpen} onClose={() => setLogOpen(false)} />
     </>
   );
 }

@@ -36,6 +36,7 @@ from ..schemas import (
     VerifyResult,
 )
 from ..state import AgentState
+from ..trace import trace
 from .composer import ComposerAgent
 from .explorer import ExplorerAgent
 from .kpi import KpiAgent
@@ -170,33 +171,42 @@ class Supervisor:
 
     # --- 라우팅 (조건부 엣지) --------------------------------------------------------
 
+    @staticmethod
+    def _go(target: str, why: str) -> str:
+        """라우팅 결정을 실행 로그에 남긴다."""
+        trace(f"{target}  {why}", "supervisor", kind="route")
+        return target
+
     def _route_start(self, state: AgentState) -> str:
         last = state.followups[-1] if state.followups else None
         if last is not None and last.type in COMPOSER_FOLLOWUPS and state.planner is not None:
-            return "COMPOSER"
-        return "PLANNER"
+            return self._go("COMPOSER", f"후속 입력 {last.type.value} (결과물만 갱신)")
+        return self._go("PLANNER", f"후속 입력 {last.type.value}" if last else "새 요건")
 
     def _route_planner(self, state: AgentState, until: str | None) -> str:
         if until == "planner":
             return END
         if not state.planner.items:  # 분석 대상 없음 (예: 업무와 무관한 질문) → 탐색·시뮬레이션 생략
-            return END if until in ("explorer", "retriever", "simulator", "verifier") else "COMPOSER"
+            return END if until in ("explorer", "retriever", "simulator", "verifier") else self._go("COMPOSER", "분석 대상 없음")
         if AgentName.EXPLORER in self._steps(state):
-            return "EXPLORER"
+            return self._go("EXPLORER", f"{state.planner.complexity.value} · 항목 {len(state.planner.items)}개")
         return self._after_explore(state, until)
 
     def _route_retriever(self, state: AgentState, until: str | None) -> str:
-        if (state.retriever.reexplore_request and state.explore_loop_count < config.MAX_EXPLORE_LOOP
-                and state.tools_left() >= MIN_CALLS_FOR_REEXPLORE):
-            return "EXPLORER"
+        requests, left = state.retriever.reexplore_request, state.tools_left()
+        count = f"왕복 {state.explore_loop_count}/{config.MAX_EXPLORE_LOOP} · 남은 tool {left}"
+        if requests and state.explore_loop_count < config.MAX_EXPLORE_LOOP and left >= MIN_CALLS_FOR_REEXPLORE:
+            return self._go("EXPLORER", f"재탐색 요청 {len(requests)}건 · {count}")
+        if requests:
+            trace(f"재탐색 요청 {len(requests)}건 미진행 (한도)  {count}", "supervisor", kind="route")
         return self._after_explore(state, until)
 
     def _after_explore(self, state: AgentState, until: str | None) -> str:
         if until in ("explorer", "retriever"):
             return END
         if state.planner.complexity is Complexity.SIMPLE:
-            return "COMPOSER"
-        return self._next_after_sim(state) if AgentName.SIMULATOR not in self._steps(state) else "SIMULATOR"
+            return self._go("COMPOSER", "단순 흐름 (Simulator · Verifier 생략)")
+        return self._next_after_sim(state) if AgentName.SIMULATOR not in self._steps(state) else self._go("SIMULATOR", "복잡 흐름")
 
     def _next_after_sim(self, state: AgentState) -> str:
         return "VERIFIER" if AgentName.VERIFIER in self._steps(state) else "COMPOSER"
@@ -204,9 +214,11 @@ class Supervisor:
     def _route_verifier(self, state: AgentState, until: str | None) -> str:
         # 이번 Verifier 실행에서 재계획이 잡혔으면 (replan_count 가 지금까지의 Planner 실행 수만큼 올라감) Planner 로
         planner_runs = sum(r.agent == "planner" for r in state.agent_runs)
+        count = f"재계획 {state.replan_count}/{config.MAX_REPLAN}"
         if state.verifier.result is VerifyResult.NEEDS_SUPPLEMENT and state.replan_count >= planner_runs:
-            return "PLANNER"
-        return END if until == "verifier" else "COMPOSER"
+            return self._go("PLANNER", f"Verifier 보완 필요 · {count}")
+        why = "Verifier 통과" if state.verifier.result is VerifyResult.PASS else f"보완 필요지만 재계획 한도 · {count}"
+        return END if until == "verifier" else self._go("COMPOSER", why)
 
     @staticmethod
     def _steps(state: AgentState) -> set[AgentName]:

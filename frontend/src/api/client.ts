@@ -11,15 +11,17 @@ import type {
   ReloadRequest,
   Report,
   Session,
+  SessionLog,
   SessionSummary,
   SmPart,
   User,
 } from './types';
+import { useAuthStore } from '@/store/auth';
 
 async function request<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
     ...init,
-    headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
+    headers: { 'Content-Type': 'application/json', 'X-User': encodeURIComponent(useAuthStore.getState().user.name), ...(init?.headers ?? {}) },
   });
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
   return res.json() as Promise<T>;
@@ -34,6 +36,15 @@ export const useSessions = () =>
 
 export const useSession = (id: string) =>
   useQuery({ queryKey: ['session', id], queryFn: () => request<Session>(`/api/sessions/${id}`), enabled: !!id });
+
+/** 상세 실행 로그. 분석 중에는 2초마다 다시 읽는다 */
+export const useSessionLogs = (id: string, enabled: boolean, running: boolean) =>
+  useQuery({
+    queryKey: ['session-logs', id],
+    queryFn: () => request<SessionLog[]>(`/api/sessions/${id}/logs`),
+    enabled: enabled && !!id,
+    refetchInterval: running ? 2000 : false,
+  });
 
 export function useCreateSession() {
   const qc = useQueryClient();
@@ -130,11 +141,14 @@ export function useSaveUser() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: ({ isNew, ...user }: User & { isNew?: boolean }) =>
-      request<User>(isNew ? '/api/admin/users' : `/api/admin/users/${user.empNo}`, {
+      request<User>(isNew ? '/api/admin/users' : `/api/admin/users/${encodeURIComponent(user.name)}`, {
         method: isNew ? 'POST' : 'PATCH',
         ...json(user),
       }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['users'] }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['users'] });
+      qc.invalidateQueries({ queryKey: ['me'] });
+    },
   });
 }
 

@@ -1,7 +1,7 @@
 import { X } from 'lucide-react';
 import { useEffect, useRef, type ReactNode } from 'react';
 
-export function Modal({ title, open, onClose, children }: { title: string; open: boolean; onClose: () => void; children: ReactNode }) {
+export function Modal({ title, open, onClose, wide, children }: { title: string; open: boolean; onClose: () => void; wide?: boolean; children: ReactNode }) {
   const ref = useRef<HTMLDialogElement>(null);
   useEffect(() => {
     const d = ref.current;
@@ -14,7 +14,7 @@ export function Modal({ title, open, onClose, children }: { title: string; open:
       ref={ref}
       onClose={onClose}
       aria-label={title}
-      className="glass w-[min(520px,calc(100vw-32px))] p-0 text-text backdrop:bg-black/40 backdrop:backdrop-blur-sm"
+      className={`glass ${wide ? 'w-[min(1200px,calc(100vw-32px))]' : 'w-[min(520px,calc(100vw-32px))]'} p-0 text-text backdrop:bg-black/40 backdrop:backdrop-blur-sm`}
     >
       <div className="flex items-center justify-between border-b border-border px-5 py-3">
         <h2 className="text-base font-semibold">{title}</h2>

@@ -37,8 +37,9 @@ from ..schemas import (
 )
 from ..state import AgentState
 from ..tools import GraphStore, SourceRoots, get_graph_store, read_source
+from ..trace import clip, trace
 from .base import BaseAgent
-from .react import InvalidAction, run_react
+from .react import REACT_SECTION, InvalidAction, run_react
 
 MAX_READ_NODES = 80  # 한 번에 읽을 노드 수 상한 (토큰 보호)
 CONTEXT_LINES_PER_EVIDENCE = 10  # ReAct 입력에 보여 줄 근거별 원문 줄 수 (더 필요하면 read_source)
@@ -50,6 +51,7 @@ SINGLE_NODE_OBSERVATION_CHARS = 6000  # 노드 1개만 읽을 때
 MAX_KEY_EVIDENCE = 5
 KEY_BEFORE, KEY_AFTER = 3, 8  # 핵심 근거로 잘라 낼 줄 (찾은 줄 앞뒤)
 KEY_TAG = "[핵심]"
+READ_SECTION = "동작 · 원문 읽기"
 ATTACHED = re.compile(r"^// ---- (.+?) ----$")
 
 
@@ -118,6 +120,14 @@ class RetrieverAgent(BaseAgent[RetrieverOutput]):
             items = read_source(ReadSourceInput(node_ids=to_read), self.store, self.roots)
             evidence += [self._evidence(i) for i in items if i.found]
             calls = 1
+            trace(f"노드 {len(to_read)}개 → 원문 {sum(i.found for i in items)}건 · 없음 {sum(not i.found for i in items)}건", section=READ_SECTION, label="tool 1")
+            for i in items:
+                trace(f"{i.node_id} → {i.file_path} L{i.start_line}-{i.end_line} ({i.source_kind}, {len(i.content.splitlines())}줄)"
+                      if i.found else f"{i.node_id} → 원문 없음", section=READ_SECTION, label="  읽음")
+        else:
+            trace(f"새 노드 {len(to_read)}개 · 남은 tool {state.tools_left()}회", section=READ_SECTION, label="생략")
+        if skipped:
+            trace(f"상한 {MAX_READ_NODES}개 초과로 {len(skipped)}개 생략: {skipped}", section=READ_SECTION, label="상한")
         found = {e.node_id for e in evidence}
         out = RetrieverOutput(
             evidence=_merge(evidence),
@@ -129,6 +139,8 @@ class RetrieverAgent(BaseAgent[RetrieverOutput]):
         self.last_usage = None
         if self.llm is not None and out.evidence and state.tools_left() - out.tool_call_count > 0:
             self._react(state, out)
+        else:
+            trace("LLM 없음" if self.llm is None else "근거 없음" if not out.evidence else "남은 tool 없음", section=REACT_SECTION, label="생략")
         out.evidence = _merge(out.evidence)
         return out
 
@@ -186,17 +198,21 @@ class RetrieverAgent(BaseAgent[RetrieverOutput]):
             body = SINGLE_NODE_OBSERVATION_CHARS if len(d.node_ids or []) == 1 else OBSERVATION_CHARS
             return body + 300 * max(len(d.node_ids or []), 1)
 
-        trace, self.last_usage = run_react(
+        steps, self.last_usage = run_react(
             self.llm, self.system_prompt, self._react_context(state, out), RetrieverDecision,
             lambda d: self._react_execute(d, state, out, added), budget,
             max_steps=RETRIEVER_MAX_REACT_STEPS, max_observation=observation_len)
-        out.react_trace = trace
+        out.react_trace = steps
         out.tool_call_count = max(out.tool_call_count, base)
-        keys = [k for k in (trace[-1].args.get("key_evidence") or []) if isinstance(k, dict)] if trace else []
+        keys = [k for k in (steps[-1].args.get("key_evidence") or []) if isinstance(k, dict)] if steps else []
         explored = {n.node_id for n in state.explorer.nodes}
         found = [ev for k in keys[:MAX_KEY_EVIDENCE] if k.get("node_id") in explored
                  and (ev := self._key_evidence(k, out.evidence)) is not None]
         out.evidence = found + out.evidence
+        for k in keys[:MAX_KEY_EVIDENCE]:
+            ok = any(ev.node_id == k.get("node_id") and ev.summary.endswith(str(k.get("note") or "")) for ev in found)
+            trace(f"{k.get('node_id')} \"{clip(k.get('quote'), 150)}\" → {k.get('note')}" + ("" if ok else " (버림: 원문에 없는 인용·범위 밖 노드)"),
+                  section=REACT_SECTION, label="  핵심 근거")
 
     def _react_context(self, state: AgentState, out: RetrieverOutput) -> str:
         exp, plan = state.explorer, state.planner
@@ -322,6 +338,7 @@ class RetrieverAgent(BaseAgent[RetrieverOutput]):
                 raise InvalidAction(f"{done} 는 이미 끝까지 읽었습니다. 범위 밖 내용이 필요하면 context_lines 를 주거나 request_reexplore")
             items = read_source(ReadSourceInput(node_ids=ids, context_lines=context), self.store, self.roots)
             out.tool_call_count += 1
+            trace(f"{ids} (앞뒤 {context}줄) → 원문 {sum(i.found for i in items)}건", section=REACT_SECTION, label="  tool")
             for i in items:
                 if i.found:
                     out.evidence.append(self._evidence(i))

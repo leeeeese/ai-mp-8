@@ -1,4 +1,4 @@
-import { Check, Circle, Loader2, MinusCircle } from 'lucide-react';
+import { Check, Circle, Loader2, MinusCircle, ScrollText } from 'lucide-react';
 import type { AgentCounters, AgentEvent, AgentNode, NodeStatus } from '@/api/types';
 import { LIMITS } from '@/config';
 import { cn, formatMs } from '@/lib/cn';
@@ -65,10 +65,15 @@ function Meter({ label, value, max }: { label: string; value: number; max: numbe
 }
 
 /** 우측 "Agent 진행" 패널 (SSE 로 실시간 갱신) */
-export function AgentProgress({ state }: { state: ProgressState }) {
+export function AgentProgress({ state, onOpenLog }: { state: ProgressState; onOpenLog: () => void }) {
   return (
     <section aria-label="Agent 진행" aria-live="polite" className="glass flex max-h-full min-h-0 flex-col gap-4 p-4">
-      <h2 className="text-sm font-semibold">Agent 진행</h2>
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold">Agent 진행</h2>
+        <button type="button" className="btn min-h-[28px] px-2.5 text-xs" onClick={onOpenLog}>
+          <ScrollText size={14} /> 실행 로그
+        </button>
+      </div>
       <ol className="flex shrink-0 flex-col">
         {NODES.map((n, i) => {
           const st = state.status[n.node];

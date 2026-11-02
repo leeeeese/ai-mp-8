@@ -19,6 +19,7 @@
 요건 유형 판단은 하지 않는다.
 """
 
+import time
 from typing import Literal
 
 from pydantic import BaseModel, Field
@@ -48,10 +49,11 @@ from ..schemas import (
 from ..state import AgentState
 from ..tools import GraphStore, get_graph_store, get_node_detail, search_graph_nodes, traverse_graph
 from ..tools.graph import term_score
+from ..trace import clip, trace
 from .base import BaseAgent
 from .react import InvalidAction, run_react
 
-MIN_SCORE = 0.5  # 이보다 낮은 후보는 시작 노드로 쓰지 않음
+MIN_SCORE = 0.5  # 이보다 낮은 후보는 시작 노드로 쓰지 않음 (로그의 채택·탈락 기준)
 RELATIVE_SCORE = 0.8  # 1등 점수 대비 이 비율 이상인 후보까지 시작 노드로 채택
 MAX_START_PER_MENTION = 3
 MAX_CONTEXT_PATHS = 40  # ReAct 입력에 보여 줄 경로 수
@@ -108,22 +110,33 @@ class ExplorerAgent(BaseAgent[ExplorerOutput]):
         self._searches: dict[tuple, list] = {}  # 같은 검색(표현·라벨)은 항목이 달라도 한 번만 호출
         requests = state.retriever.reexplore_request if state.retriever else []
         if state.explorer is not None and requests:
+            self._section = "동작 · 재탐색"
+            trace(f"요청 {len(requests)}건 · tool 최대 {self._budget - self._reserve}회", section=self._section, label="범위")
             out = state.explorer.model_copy(deep=True)
             before = len(out.paths)
             for req in requests:
                 self._guard(out, lambda: self._reexplore(req, plan, out))
             self._arrange_paths(plan, out, supplements=out.paths[before:])
         else:
+            self._section = "동작 · 규칙 탐색"
+            trace(f"항목 {len(plan.items)}개 · tool 최대 {self._budget - self._reserve}회", section=self._section, label="범위")
             out = ExplorerOutput(start_nodes=[], nodes=[], edges=[])
             for item in plan.items:
                 self._guard(out, lambda: self._explore_item(item, plan, out))
             self._arrange_paths(plan, out)
             signals = self._signals(plan, out)
+            trace(f"경로 {len(out.paths)} · tool {self._calls}회", section=self._section, label="결과")
+            self._section = "동작 · ReAct 보완"
+            for s in signals:
+                trace(s, section="동작 · 점검 신호 (코드 계산, 있을 때만 ReAct)", label="신호")
             if self.llm is not None and signals and self._budget - self._calls > RESERVED_FOR_RETRIEVER:
                 self._reserve = RESERVED_FOR_RETRIEVER
                 before = len(out.paths)
                 self._guard(out, lambda: self._react(plan, out, signals))
                 self._arrange_paths(plan, out, supplements=out.paths[before:])
+                trace(f"경로 {before} → {len(out.paths)} · tool 누적 {self._calls}회", section=self._section, label="끝")
+            else:
+                trace("LLM 없음" if self.llm is None else "점검 신호 없음" if not signals else "남은 tool 부족", section=self._section, label="생략")
         out.tool_call_count = self._calls
         out.hops_used = max((r.hops_used for r in out.item_results), default=0)
         return out
@@ -137,12 +150,17 @@ class ExplorerAgent(BaseAgent[ExplorerOutput]):
             note = f"tool 호출 상한({config.MAX_TOOL_CALLS}) 도달 - 이후 탐색 생략"
             if note not in out.unresolved:
                 out.unresolved.append(note)
+                trace(f"{self._calls}회 사용 · Retriever 몫 {self._reserve}회 예약 → 이후 탐색 생략", label="tool 한도")
 
     def _tool(self, fn, params):
         if self._calls >= self._budget - self._reserve:
             raise ToolBudgetExceeded
         self._calls += 1
-        return fn(params, self.store)
+        start = time.perf_counter()
+        res = fn(params, self.store)
+        trace(f"{_tool_call(params)} → {_tool_result(res)} · {(time.perf_counter() - start) * 1000:.0f}ms", section=self._section,
+              label=f"tool {self._calls}")
+        return res
 
     # --- 항목 탐색 ---------------------------------------------------------------
 
@@ -152,8 +170,11 @@ class ExplorerAgent(BaseAgent[ExplorerOutput]):
         for area in item.out_of_graph:
             out.unresolved.append(f"[항목 {item.item_id}] 그래프 밖: {area}")
 
+        trace(f"목표 {item.target_role.value} · {item.direction.value} · hop {item.hop_cap} | {item.text}", section=self._section,
+              label=f"항목 {item.item_id}")
         starts = self._match_starts(item, plan, out, result)
         if not starts:
+            trace("시작 노드 없음 → 경로 탐색 생략", section=self._section, label="  판단")
             return
         target = ROLE_RANK[item.target_role]
         rank = {nid: ROLE_RANK[self.store.node(nid).role] for nid in starts}
@@ -162,6 +183,8 @@ class ExplorerAgent(BaseAgent[ExplorerOutput]):
         at = [n for n in starts if rank[n] == target]
         columns = [n for n in starts if self.store.node(n).label == "Column"]
         exclude = plan.exclude.is_common
+        trace(f"목표보다 진입 쪽 {low or '-'} / 목표 역할 {at or '-'} / DB 쪽 {high or '-'} → {item.direction.value} 탐색",
+              section=self._section, label="  시작 분류")
 
         for n in at:
             self._add_paths(out, item.item_id, Direction.FORWARD,
@@ -204,12 +227,17 @@ class ExplorerAgent(BaseAgent[ExplorerOutput]):
                     terms=[m.phrase, *m.synonyms], domains=plan.domains, labels=MENTION_LABELS[m.kind], top_k=5))
             hits = self._searches[key]
             good = [h for h in hits if h.score >= MIN_SCORE]
+            chosen = [h for h in good if h.score >= good[0].score * RELATIVE_SCORE][:MAX_START_PER_MENTION] if good else []
+            trace(f"'{m.phrase}'" + (f" (+동의어 {len(m.synonyms)})" if m.synonyms else "") + " → 채택 "
+                  + (", ".join(f"{h.node_id} '{h.name}' {h.score:g}" for h in chosen) or "없음")
+                  + (" / 탈락 " + ", ".join(f"{h.node_id} {h.score:g}" for h in hits if h not in chosen) if len(hits) > len(chosen) else ""),
+                  section=self._section, label=f"  {m.kind.value}")
             if not good:
                 result.unmatched_mentions.append(m.phrase)
                 kind = "신규 후보" if m.maybe_new else "매칭 실패"
                 out.unresolved.append(f"[항목 {item.item_id}] {kind}: {m.phrase} ({m.kind.value})")
                 continue
-            for h in [h for h in good if h.score >= good[0].score * RELATIVE_SCORE][:MAX_START_PER_MENTION]:
+            for h in chosen:
                 starts.append(h.node_id)
                 out.start_nodes.append(StartNodeChoice(
                     item_id=item.item_id, node_id=h.node_id, matched_keyword=h.matched_term or m.phrase,
@@ -224,6 +252,10 @@ class ExplorerAgent(BaseAgent[ExplorerOutput]):
         res = self._tool(traverse_graph, TraverseGraphInput(
             start_ids=start_ids, direction=direction, target_role=target, hop_cap=hop_cap, exclude_common=exclude,
             focus_ids=focus, writes_only=writes_only))
+        for p in res.paths:
+            trace(f"{p.stop_reason.value}: {' > '.join(p.nodes)}", section=self._section, label="    경로")
+        if res.excluded_common:
+            trace(f"공통이라 확장 안 함: {', '.join(res.excluded_common)}", section=self._section, label="    공통 제외")
         self._add_paths(out, item_id, Direction(direction), res, join_from=start_ids if join else None)
         return res
 
@@ -367,11 +399,11 @@ class ExplorerAgent(BaseAgent[ExplorerOutput]):
     def _react(self, plan: PlannerOutput, out: ExplorerOutput, signals: list[str]) -> None:
         context = self._react_context(plan, out) + "\n[점검 신호] (규칙 결과에서 계산. 이 항목만 확인)\n" + "\n".join(
             f"- {s}" for s in signals)
-        trace, self.last_usage = run_react(
+        steps, self.last_usage = run_react(
             self.llm, self.system_prompt, context, ExplorerDecision,
             lambda d: self._react_execute(d, plan, out),
             budget=lambda: self._budget - self._calls - self._reserve, max_steps=EXPLORER_MAX_REACT_STEPS)
-        out.react_trace = trace
+        out.react_trace = steps
 
     def _react_context(self, plan: PlannerOutput, out: ExplorerOutput) -> str:
         lines = [f"[탐색 영역] {[d.value for d in plan.domains]} / 공통 제외 {plan.exclude.is_common}", "[탐색 명세]"]
@@ -438,6 +470,24 @@ class ExplorerAgent(BaseAgent[ExplorerOutput]):
         self._update_result(out, result)
         new = out.paths[before:]
         return "\n".join(f"{p.stop_reason.value}: {' > '.join(p.nodes)}" for p in new) or "새 경로 없음"
+
+
+def _tool_call(params) -> str:
+    if isinstance(params, SearchGraphNodesInput):
+        more = f" 외 {len(params.terms) - 1}" if len(params.terms) > 1 else ""
+        return f"검색 '{clip(params.terms[0], 30)}'{more}" + (f" [{','.join(params.labels)}]" if params.labels else "")
+    if isinstance(params, TraverseGraphInput):
+        return f"탐색 {clip(params.start_ids[0], 40)}" + (f" 외 {len(params.start_ids) - 1}" if len(params.start_ids) > 1 else "") \
+            + f" {params.direction} → {params.target_role.value}"
+    return f"노드 상세 {params.node_id}"
+
+
+def _tool_result(res) -> str:
+    if isinstance(res, TraverseGraphOutput):
+        return f"경로 {len(res.paths)} · 노드 {len(res.nodes)}" + (f" · 공통 제외 {len(res.excluded_common)}" if res.excluded_common else "")
+    if isinstance(res, list):
+        return f"후보 {len(res)}" + (f" · 1위 {res[0].node_id}({res[0].score:g})" if res else "")
+    return res.node_id if res is not None else "없음"
 
 
 def _end(path: ExplorePath) -> str:

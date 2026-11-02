@@ -11,9 +11,11 @@ LLM 판정과 관계없이 complex 로 정하고 실행 계획에 Simulator·Ver
 Verifier 재계획 라운드(이전 판정 complex + replan_feedback)도 complex 를 유지한다 (복잡 흐름 도중 단순 응답으로 빠지지 않게).
 """
 
+import os
+
 from pydantic import BaseModel, Field
 
-from ..llm import LLMClient, OpenAIClient, Usage
+from ..llm import DEFAULT_MODEL, LLMClient, OpenAIClient, Usage
 from ..rules import CHANGE_TYPE_RULES, SM_PART_DOMAINS, hop_cap
 from ..schemas import (
     AgentName,
@@ -31,6 +33,7 @@ from ..schemas import (
     StructuredRequest,
 )
 from ..state import AgentState
+from ..trace import trace
 from .base import BaseAgent
 
 # --- LLM 응답 형식 (Structured Outputs 호환: 기본값 없이 모든 필드 명시) ---------------------
@@ -107,6 +110,7 @@ def build_output(draft: PlannerDraft, state: AgentState) -> PlannerOutput:
     )
 
 
+LLM_SECTION = "동작 · LLM 판정"
 REANALYSIS_REASON = "사용자 상세 분석 요청"
 REPLAN_REASON = "재계획 (복잡 흐름 유지)"
 
@@ -145,6 +149,15 @@ def user_message(state: AgentState) -> str:
     return "\n".join(lines)
 
 
+def _log_input(system: str, user: str, state: AgentState) -> None:
+    """LLM 에 넘기는 내용: 시스템 프롬프트 크기와 사용자 메시지 (요청 문장·후속 입력·재계획 사유)."""
+    model = os.environ.get("LLM_MODEL") or DEFAULT_MODEL
+    trace(f"{model} · PlannerDraft (Structured Output) · 판정 예시 6개 (Few-shot)", section=LLM_SECTION, label="모델")
+    trace(f"공통 페르소나 + 판정 기준·예시 {len(system):,}자", section=LLM_SECTION, label="시스템")
+    trace(f"{len(user):,}자 · 후속 입력 {len(state.followups)}건 · 재계획 사유 {len(state.replan_feedback)}건 · 이전 탐색 명세 "
+          f"{'있음' if state.replan_feedback and state.planner else '없음'}", section=LLM_SECTION, label="사용자")
+
+
 class PlannerAgent(BaseAgent[PlannerOutput]):
     name = "planner"
     output_model = PlannerOutput
@@ -160,5 +173,11 @@ class PlannerAgent(BaseAgent[PlannerOutput]):
         return self._llm
 
     def run(self, state: AgentState) -> PlannerOutput:
-        draft, self.last_usage = self.llm.parse(self.system_prompt, user_message(state), PlannerDraft)
-        return apply_reanalysis(build_output(draft, state), state)
+        user = user_message(state)
+        _log_input(self.system_prompt, user, state)
+        draft, self.last_usage = self.llm.parse(self.system_prompt, user, PlannerDraft)
+        trace(f"LLM 판단 {draft.complexity.value} · 항목 {len(draft.items)}개 · 공통 제외 {draft.exclude_common}", section=LLM_SECTION, label="응답")
+        out = apply_reanalysis(build_output(draft, state), state)
+        if out.complexity is not draft.complexity or state.followups or state.replan_feedback:
+            trace(f"최종 {out.complexity.value}" + (" (코드 규칙으로 변경)" if out.complexity is not draft.complexity else ""), section=LLM_SECTION, label="규칙 적용")
+        return out
