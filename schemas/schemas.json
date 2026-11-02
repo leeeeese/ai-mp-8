@@ -586,16 +586,24 @@
         },
         "detail_analysis_recommended": {
           "default": false,
-          "description": "변경 요소가 보이면 True",
+          "description": "강한 탐색 신호가 있으면 True",
           "title": "Detail Analysis Recommended",
           "type": "boolean"
         },
         "detail_analysis_reasons": {
-          "description": "상세 분석 권장 사유 (노드 ID 를 그대로 포함. 사용자가 재분석을 요청하면 이 문장이 reanalysis 후속 입력이 된다)",
+          "description": "상세 분석 권장 사유 = 강한 신호 (노드 ID 를 그대로 포함. 사용자가 재분석을 요청하면 이 문장이 reanalysis 후속 입력이 된다)",
           "items": {
             "type": "string"
           },
           "title": "Detail Analysis Reasons",
+          "type": "array"
+        },
+        "detail_analysis_notes": {
+          "description": "참고 신호 = 약한 신호 (권장하지 않음, 노드 ID 포함. 재분석 요청 때 사유와 함께 reanalysis 후속 입력에 넣는다)",
+          "items": {
+            "type": "string"
+          },
+          "title": "Detail Analysis Notes",
           "type": "array"
         },
         "query_result_summary": {

@@ -63,3 +63,12 @@
 - {{ r }}
 {% endfor %}
 {% endif %}
+{% if answer.detail_analysis_notes %}
+
+## 참고 신호
+
+상세 분석을 권장할 정도는 아니지만 확인해 볼 만한 탐색 신호입니다. 상세 분석을 요청하면 함께 확인합니다.
+{% for r in answer.detail_analysis_notes %}
+- {{ r }}
+{% endfor %}
+{% endif %}

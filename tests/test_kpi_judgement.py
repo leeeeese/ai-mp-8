@@ -7,7 +7,9 @@ from pathlib import Path
 import pytest
 
 from impact_agent.agents import ComposerAgent, KpiAgent, SimulatorAgent, VerifierAgent
+from impact_agent.agents.composer import SimpleDraft
 from impact_agent.agents.kpi import infer_system, judge, load_answer_key, node_type, stage_of
+from impact_agent.llm import Usage
 from impact_agent.schemas import (
     AnswerKey,
     AnswerNode,
@@ -139,9 +141,17 @@ def test_reanalyzed_flag_and_verifier_unresolved():
 # --- 판정 품질: 단순 flow (상세 분석 권장) ------------------------------------------------------------
 
 
+class TagLLM:
+    """단순 응답 hop 에 [변경]/[참조] 만 표시하는 가짜 LLM (MOD:PntSvc.checkLimit [변경]). 권장 신호는 [변경] 노드에서만 센다."""
+
+    def parse(self, system, user, schema):
+        return SimpleDraft(conclusion_lines=[], hops=CHANGE_HOPS, claims=[], check_queries=[], inquiry_contacts=[],
+                           detail_analysis_recommended=False, mail=None), Usage()
+
+
 def run_simple(state):
     state.planner.complexity = Complexity.SIMPLE
-    state.composer = ComposerAgent(use_llm=False).run(state)
+    state.composer = ComposerAgent(llm=TagLLM()).run(state)
     return state
 
 

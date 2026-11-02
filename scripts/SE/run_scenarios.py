@@ -77,11 +77,12 @@ def run_case(case: str) -> tuple[AgentState, float, dict]:
     first = state.planner.complexity
     simple = state.composer.simple_answer if state.composer else None
     reasons = list(simple.detail_analysis_reasons) if simple else []
+    notes = list(simple.detail_analysis_notes) if simple else []
     recommended = bool(simple and simple.detail_analysis_recommended)
     flow = {"first": first.value, "expected": gt.get("complexity"), "recommended": recommended if simple else None,
-            "reasons": reasons, "reanalysis": None, "first_kpi": state.kpi.model_dump(mode="json") if state.kpi else None}
+            "reasons": reasons, "notes": notes, "reanalysis": None, "first_kpi": state.kpi.model_dump(mode="json") if state.kpi else None}
     if first is Complexity.SIMPLE and gt.get("complexity") == "complex":
-        content = "\n".join(reasons) or "상세 분석 요청"
+        content = "\n".join(reasons + [f"참고: {x}" for x in notes]) or "상세 분석 요청"  # 약한 신호도 함께 (UI 와 같음)
         flow["reanalysis"] = content
         print("  --- 사용자 확인 가정 → reanalysis 후속 입력 → 2차", flush=True)
         state = runner.run(sink(2), lambda: sup.followup(
@@ -187,6 +188,8 @@ def md_case(case: str, gt: dict, state: AgentState, pf: dict, flow: dict) -> str
          f"- simple 판정 시 상세 분석 권장: {flow['detail_flow']}"]
     if flow["reasons"]:
         L += [f"  - {r}" for r in flow["reasons"]]
+    if flow.get("notes"):
+        L += [f"  - 참고: {r}" for r in flow["notes"]]
     if flow["reanalysis"] is not None:
         L.append("- 사용자 확인 가정 → reanalysis 후속 입력 → 2차 전체 흐름")
     if p is not None:
@@ -246,6 +249,8 @@ def md_case(case: str, gt: dict, state: AgentState, pf: dict, flow: dict) -> str
             s = c.simple_answer
             L += ["**결론**", ""] + [f"- {x}" for x in s.conclusion_lines]
             L += ["", f"상세 분석 권장 **{s.detail_analysis_recommended}**"] + [f"- {x}" for x in s.detail_analysis_reasons]
+            if s.detail_analysis_notes:
+                L += ["", f"**참고 신호** ({len(s.detail_analysis_notes)})", ""] + [f"- {x}" for x in s.detail_analysis_notes]
             if s.check_queries:
                 L += ["", "**확인 쿼리**", ""] + [f"- {q.purpose}: `{q.sql}`" for q in s.check_queries]
             if s.analysis_limits:

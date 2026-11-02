@@ -109,7 +109,8 @@ def test_simple_rule_only():
     assert 3 <= len(a.conclusion_lines) <= 5 and a.conclusion_lines[1] == "영향 경로 1개, 노드 6개 중 원문 근거 확보 5개"
     assert [p.path_id for p in a.impact_paths] == ["P1-1"] and [h.node for h in a.impact_paths[0].hops] == P_SCREEN
     assert len(a.evidence_table) == 5 and a.evidence_table[0].claim == "SCR:CMP01 요약"
-    assert a.detail_analysis_recommended          # 항목 1 이 data_add
+    assert not a.detail_analysis_recommended      # data_add 유형만으로는 약한 신호 → 참고 신호로만
+    assert "[항목 1] 저장·조회·연계 항목이 바뀌는 요건 (data_add)" in a.detail_analysis_notes
     assert "근거(원문) 없음: TBL:TCP_CMP" in a.analysis_limits
     assert "## 결론" in out.markdown and "- P1-1: SCR:CMP01 → CTL:CmpCtl.save" in out.markdown
     assert out.mail_draft is None and out.report_file_path is None
@@ -136,7 +137,7 @@ def test_simple_llm_sentences_queries_and_mail():
     assert {r.claim for r in a.evidence_table} >= {"광고여부 컬럼 존재"}
     assert [q.purpose for q in a.check_queries] == ["값 분포"] and not a.check_queries[0].sql.endswith(";")
     assert a.inquiry_contacts == ["캠페인 운영 담당"] and "## 문의처" in out.markdown
-    assert a.detail_analysis_recommended          # LLM 은 false 지만 규칙(data_add)으로 true
+    assert not a.detail_analysis_recommended      # data_add 는 약한 신호, [변경] 표시 노드 없음
     assert out.mail_draft.subject == "[회신] 비광고 여부" and agent.last_usage.output_tokens == 8
     assert llm.schemas == [SimpleDraft] and "[출력 요청] mail_draft" in llm.users[0]
 
@@ -319,44 +320,71 @@ def swing_simple_state(paths):
     return state
 
 
-def test_detail_reasons_swing_signals_with_node_ids():
+def simple_draft(hops=(), recommended=False):
+    return SimpleDraft(conclusion_lines=["a", "b", "c"], hops=list(hops), claims=[], check_queries=[], inquiry_contacts=[],
+                       detail_analysis_recommended=recommended, mail=None)
+
+
+def notes(answer):
+    return answer.detail_analysis_notes
+
+
+def test_detail_reasons_swing_changed_shared_node_only():
     state = swing_simple_state(SHARED_PATHS)                 # 화면·배치가 TP·Module 공유, 요건은 logic_change
     state.explorer.excluded_common = ["MOD:BatchLauncher.runJob"]
     state.explorer.unresolved = ["[항목 1] 신규 후보: 운영중단일 (Term)", "[항목 1] 그래프 밖: CDTS 수신 시스템"]
-    out = composer().run(state)
-    a = out.simple_answer
-    assert a.detail_analysis_recommended
-    assert a.detail_analysis_reasons == [
-        "공통 모듈 MOD:BatchLauncher.runJob 이 탐색에서 제외되어 다른 화면·처리 영향 확인 필요",
-        "TP:PntSvc.savePnt 을 여러 진입점에서 호출 (진입점 2개)",
-        "MOD:PntSvc.checkLimit 을 여러 진입점에서 호출 (진입점 2개)",
+    # [변경] 표시가 없으면 (LLM 없음) 공유 노드는 신호가 아님 → 약한 신호만 → 권장 없음, 참고 신호로만
+    a = composer().run(state).simple_answer
+    assert not a.detail_analysis_recommended and a.detail_analysis_reasons == []
+    assert notes(a) == [
+        "공통 모듈 MOD:BatchLauncher.runJob 은 탐색에서 제외됨 - 이 요건으로 바뀌는지 확인",
         "그래프에 없는 항목이 있어 신규 개발 여부 확인 필요: [항목 1] 신규 후보: 운영중단일 (Term)",
         "적재 범위 밖 연계 확인 필요: [항목 1] 그래프 밖: CDTS 수신 시스템",
     ]
-    assert "## 상세 분석 권장" in out.markdown and "- TP:PntSvc.savePnt 을 여러 진입점에서 호출 (진입점 2개)" in out.markdown
-    # UI 가 사유를 이어 붙여 reanalysis 로 보내면 Simulator 가 노드 ID 를 그대로 확인 대상으로 쓴다
-    again = with_followups(make_swing_state(SHARED_PATHS), (FollowupType.REANALYSIS, " / ".join(a.detail_analysis_reasons)))
-    assert reanalysis_nodes(again) == ["MOD:BatchLauncher.runJob", "TP:PntSvc.savePnt", "MOD:PntSvc.checkLimit"]
+    # checkLimit 만 [변경] → 공유 노드 중 그것만 강한 신호 (savePnt 는 [참조])
+    out = composer(ScriptLLM(simple_draft(CHANGE_HOPS))).run(state)
+    a = out.simple_answer
+    assert a.detail_analysis_recommended
+    assert a.detail_analysis_reasons == ["변경 대상 MOD:PntSvc.checkLimit 을 여러 진입점에서 호출 (진입점 2개)"]
+    assert len(notes(a)) == 3
+    assert "## 참고 신호" in out.markdown and "## 상세 분석 권장" in out.markdown and "- 변경 대상 MOD:PntSvc.checkLimit 을 여러 진입점에서 호출 (진입점 2개)" in out.markdown
+    # UI 가 사유와 참고 신호를 이어 붙여 reanalysis 로 보내면 Simulator 가 노드 ID 를 그대로 확인 대상으로 쓴다
+    content = " / ".join(a.detail_analysis_reasons + [f"참고: {x}" for x in a.detail_analysis_notes])
+    again = with_followups(make_swing_state(SHARED_PATHS), (FollowupType.REANALYSIS, content))
+    assert reanalysis_nodes(again) == ["MOD:PntSvc.checkLimit", "MOD:BatchLauncher.runJob"]
 
 
-def test_detail_reasons_tos_common_on_path_and_change_type():
+def test_detail_reasons_tos_change_type_weak_common_and_areas_strong():
     nodes = [n.model_copy(update={"properties": {"is_common": True}}) if n.node_id == "CTL:CmpCtl.save" else n for n in TOS]
+    # 구조 변경 유형(data_add·interface_field_add)만 있으면 약한 신호, 경로 위 공통 모듈도 [변경] 이 아니면 신호 아님
     a = composer().run(simple_state(nodes=nodes)).simple_answer
+    assert not a.detail_analysis_recommended
+    assert notes(a) == ["[항목 1] 저장·조회·연계 항목이 바뀌는 요건 (data_add)",
+                        "[항목 2] 저장·조회·연계 항목이 바뀌는 요건 (interface_field_add)"]
+    # 공통 모듈이 [변경] + 항목 2개가 screen·db 를 함께 변경 → 강한 신호 2개
+    hops = [DraftHop(path_id="P1-1", node="CTL:CmpCtl.save", impact="[변경] 저장 파라미터 추가"),
+            DraftHop(path_id="P1-1", node="TBL:TCP_CMP", impact="[변경] 컬럼 추가")]
+    a = composer(ScriptLLM(simple_draft(hops))).run(simple_state(nodes=nodes)).simple_answer
     assert a.detail_analysis_reasons == [
-        "[항목 1] 저장·조회·연계 항목이 바뀌는 요건 (data_add)",
-        "[항목 2] 저장·조회·연계 항목이 바뀌는 요건 (interface_field_add)",
-        "공통 모듈 CTL:CmpCtl.save 이 경로에 있어 다른 화면·처리 영향 확인 필요",
+        "공통 모듈 CTL:CmpCtl.save 이 변경 대상이라 다른 화면·처리 영향 확인 필요",
+        "요건 항목 2개가 screen·db 영역을 함께 변경 (CTL:CmpCtl.save, TBL:TCP_CMP)",
     ]
 
 
-def test_detail_not_recommended_without_signals_unless_llm_says():
+def test_detail_reasons_unresolved_strong_only_with_structural_change():
+    state = simple_state()                                   # data_add · interface_field_add
+    state.explorer.unresolved = ["[항목 1] 신규 후보: 비광고 여부 (Term)"]
+    a = composer().run(state).simple_answer
+    assert a.detail_analysis_reasons == ["그래프에 없는 항목이 있어 신규 개발 여부 확인 필요: [항목 1] 신규 후보: 비광고 여부 (Term)"]
+
+
+def test_detail_not_recommended_by_llm_alone():
     state = swing_simple_state([(1, SW_SCREEN, StopReason.TARGET_REACHED)])   # 진입점 1개, 공통·미해결 없음
     a = composer().run(state).simple_answer
-    assert not a.detail_analysis_recommended and a.detail_analysis_reasons == []
-    draft = SimpleDraft(conclusion_lines=["a", "b", "c"], hops=[], claims=[], check_queries=[], inquiry_contacts=[],
-                        detail_analysis_recommended=True, mail=None)
-    a = composer(ScriptLLM(draft)).run(swing_simple_state([(1, SW_SCREEN, StopReason.TARGET_REACHED)])).simple_answer
-    assert a.detail_analysis_recommended and a.detail_analysis_reasons == [LLM_DETAIL_REASON]
+    assert not a.detail_analysis_recommended and a.detail_analysis_reasons == [] and notes(a) == []
+    a = composer(ScriptLLM(simple_draft(recommended=True))).run(
+        swing_simple_state([(1, SW_SCREEN, StopReason.TARGET_REACHED)])).simple_answer
+    assert not a.detail_analysis_recommended and notes(a) == [f"{LLM_DETAIL_REASON}"]
 
 
 # --- 복잡: 복잡도·난이도 표시, 체크리스트 필수 항목 (설계서 3-2) ---------------------------------------

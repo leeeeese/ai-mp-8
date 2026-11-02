@@ -67,10 +67,14 @@ class SimpleAnswer(BaseModel):
     check_queries: list[GuidanceQuery] = Field(default_factory=list)
     inquiry_contacts: list[str] = Field(default_factory=list)
     analysis_limits: list[str] = Field(default_factory=list)
-    detail_analysis_recommended: bool = Field(default=False, description="변경 요소가 보이면 True")
+    detail_analysis_recommended: bool = Field(default=False, description="강한 탐색 신호가 있으면 True")
     detail_analysis_reasons: list[str] = Field(
         default_factory=list,
-        description="상세 분석 권장 사유 (노드 ID 를 그대로 포함. 사용자가 재분석을 요청하면 이 문장이 reanalysis 후속 입력이 된다)",
+        description="상세 분석 권장 사유 = 강한 신호 (노드 ID 를 그대로 포함. 사용자가 재분석을 요청하면 이 문장이 reanalysis 후속 입력이 된다)",
+    )
+    detail_analysis_notes: list[str] = Field(
+        default_factory=list,
+        description="참고 신호 = 약한 신호 (권장하지 않음, 노드 ID 포함. 재분석 요청 때 사유와 함께 reanalysis 후속 입력에 넣는다)",
     )
     query_result_summary: QueryResultSummary | None = None
 
