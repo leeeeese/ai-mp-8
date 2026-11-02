@@ -442,6 +442,18 @@ def test_reanalysis_request_block_in_llm_input():
     assert user.index("[요건 항목]") < user.index("[재분석 요청]") < user.index("[영역별 경로]")
 
 
+def test_reanalysis_nodes_split_note_lines():
+    reason = ("변경 대상 MOD:PntSvc.checkLimit 을 여러 진입점에서 호출 (진입점 2개)\n"
+              "참고: 공통 모듈 MOD:BatchLauncher.runJob 은 탐색에서 제외됨\n"
+              "참고: MOD:PntSvc.checkLimit 도 확인")                       # 사유에도 있으면 요청 노드
+    state = with_followups(make_swing_state(SHARED_PATHS), (FollowupType.REANALYSIS, reason))
+    assert reanalysis_nodes(state) == ["MOD:PntSvc.checkLimit", "MOD:BatchLauncher.runJob"]
+    assert reanalysis_nodes(state, notes=False) == ["MOD:PntSvc.checkLimit"]
+    limits = SimulatorAgent(use_llm=False).run(state).unverified_segments
+    assert "재분석 참고 노드 미탐색: MOD:BatchLauncher.runJob (참고 신호, 이번 탐색 경로에 없어 판정하지 못함)" in limits
+    assert not any(x.startswith("재분석 요청 노드 미탐색") for x in limits)
+
+
 @pytest.mark.parametrize("followups", [
     [],                                                                    # 처음부터 complex
     [(FollowupType.CHANGE_ANALYSIS, "변경 분석 요청")],                     # 재분석이 아닌 후속 입력

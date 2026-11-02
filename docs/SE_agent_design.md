@@ -225,7 +225,7 @@ Simulator 는 시스템을 나눠 판단하지 않는다. **역할 → 변경 �
 
 | 항목 | 내용 |
 |---|---|
-| 입력 (반영됨) | 가장 최근 `reanalysis` 후속 입력의 `content`(권장 사유 요약)를 `[재분석 요청]` 블록으로 넘긴다. 사유는 Composer 가 만든 문장이라 노드 ID 가 들어 있다 (예: "공통 모듈 CTL:… 이 경로에 있어 다른 화면·처리 영향 확인 필요") |
+| 입력 (반영됨) | 가장 최근 `reanalysis` 후속 입력의 `content`(권장 사유 요약)를 `[재분석 요청]` 블록으로 넘긴다. 사유는 Composer 가 만든 문장이라 노드 ID 가 들어 있다 (예: "변경 대상 TP:… 을 여러 진입점에서 호출 (진입점 2개)"). (2026-11-02) 참고 신호도 "참고: " 로 시작하는 줄로 함께 온다 (줄바꿈 구분). `reanalysis_nodes(state, notes=False)` 는 권장 사유 줄의 노드만, 기본값은 둘 다. 경로에 없는 노드는 분석 한계에 "재분석 요청 노드 미탐색" / "재분석 참고 노드 미탐색" 으로 나눠 남긴다 |
 | 판정 (반영됨, 프롬프트) | 사유에 나온 노드·신호마다 hop 설명에 **확인 결과**를 쓴다. 바꿔야 하면 `[변경]`, 아니면 `[참조] 확인 결과 …` 로 근거와 함께. 사용자가 물어본 것에 답이 비지 않게 하기 위해서다 |
 | 경로 제외 가드 (반영됨) | 사유 문장에서 노드 ID(`NODE_ID_IN_TEXT`, `<접두어>:<키>`)를 뽑아(`reanalysis_nodes`), 그 노드가 있는 경로는 제외 제안을 거절한다 (처리 4) |
 | 공유 노드 정의 | Composer 권장 신호("공통 노드", "여러 진입점")와 Simulator `[공유 노드]` 가 **같은 정의**를 쓴다: `rules.shared_nodes` (반영됨, Simulator 에서 옮김). 단순 응답에서 "공유 노드"라고 알린 노드가 재분석 결과에서도 공유 노드로 판정되게 하기 위해서다 |
@@ -256,7 +256,7 @@ Simulator 는 시스템을 나눠 판단하지 않는다. **역할 → 변경 �
 | `cross_domain_link` | 규칙 | 경로 노드의 domain 이 섞였는데 `cross_domain=false` |
 | `redundant_path` | 규칙 | 같은 노드 순서 중복, 한 경로가 다른 경로에 완전히 포함 (경고만, 재계획 사유 아님) |
 | `alternative_basis` | 규칙 + LLM | `hard` 영역에 대안 없음 / 대안 설명이 근거(Evidence·노드)를 가리키지 않음 |
-| `reanalysis_coverage` | 규칙 | 재분석으로 들어온 요건(1-4)에서 사용자가 확인을 요청한 노드(사유 속 노드 ID)가 영향 경로에 없음 → 보완 필요, `additional_scope` 에 `node:<ID>`, 공통 제외된 노드는 사유에 "공통 모듈이라 탐색에서 제외됨" (Planner 가 공통 제외를 끌 근거). 경로에는 있지만 그 노드 hop 에 `[변경]`/`[참조]` 판정 문장이 없음 → 경고 (Simulator 가 표시를 하나도 안 쓴 경우는 점검 안 함). 다음 라운드에도 같으면 반복 규칙으로 pass |
+| `reanalysis_coverage` | 규칙 | 재분석으로 들어온 요건(1-4)에서 사용자가 확인을 요청한 노드(사유 속 노드 ID)가 영향 경로에 없음 → 보완 필요, `additional_scope` 에 `node:<ID>`, 공통 제외된 노드는 사유에 "공통 모듈이라 탐색에서 제외됨" (Planner 가 공통 제외를 끌 근거). (2026-11-02) "참고:" 줄(참고 신호)에만 나온 노드는 경로에 없어도 경고만 (재계획 사유 아님, 탐색 제외 공통 모듈이 참고 신호로 매번 들어와 재계획이 반복되지 않게). 경로에는 있지만 그 노드 hop 에 `[변경]`/`[참조]` 판정 문장이 없음 → 경고 (Simulator 가 표시를 하나도 안 쓴 경우는 점검 안 함). 다음 라운드에도 같으면 반복 규칙으로 pass |
 
 2. 필수 영역 (`rules.CHANGE_TYPE_RULES` 목표 역할과 맞춤)
 
@@ -307,11 +307,11 @@ Simulator 는 시스템을 나눠 판단하지 않는다. **역할 → 변경 �
 | 필드 | 작성 |
 |---|---|
 | `conclusion_lines` (3~5줄) | LLM. 결론 먼저, 노드명·테이블명을 붙여 쓴다 |
-| `impact_paths` | 코드. `explorer.paths` → `ImpactPath` (Simulator 1단계와 같은 함수, `impact` 는 LLM 한 줄, `[변경]`/`[참조]` 로 시작) |
-| `evidence_table` | 코드. Evidence 마다 `claim`(LLM 요약 또는 노드 설명) · `evidence` · `location` · `confidence`. `claim` 은 원문으로 확인한 조건·코드값·컬럼 |
+| `impact_paths` | 코드. `explorer.paths` → `ImpactPath` (Simulator 1단계와 같은 함수). (2026-11-02) LLM 은 이 요건으로 고칠 노드만 `SimpleDraft.changes` 로 노드당 한 번 고르고, 코드가 그 노드 hop 에 `[변경] <문장>`, 나머지 hop 에 `[참조] 경로상 호출·조회 (이 요건으로 바뀌지 않음)` 을 채운다 (경로마다 같은 노드 문장을 다시 쓰지 않음). `[변경]` 노드를 지나는 경로를 앞으로 정렬. LLM 이 없으면 표시 없이 "영향 검토 필요" |
+| `evidence_table` | 코드. Evidence 마다 `claim`(LLM 요약 또는 노드 설명) · `evidence` · `location` · `confidence`. `claim` 은 원문으로 확인한 조건·코드값·컬럼, LLM 은 `[변경]` 노드·결론 노드 근거만 10개 이내. `[변경]` 노드 근거 → `[변경]` 경로 위 노드 근거 → 나머지 순. MD 는 경로 5개·근거 10행만 펼치고 나머지는 개수만 |
 | `check_queries` | LLM. 운영 문의일 때 확인용 SQL. **Oracle 문법의 읽기 전용 SELECT 한 문장**(`SELECT`/`WITH`, 세미콜론·PL/SQL 블록·`FOR UPDATE` 없음), 실데이터 대신 바인드 변수(`:svc_mgmt_no`), 건수 제한은 `FETCH FIRST n ROWS ONLY`/`ROWNUM`, 테이블·컬럼은 입력 경로·근거에 있는 것만. **코드에서 SELECT 단일 문장만 통과**. 코드값 해석은 Column `code_values`(swing) / `TCP_CMM_CD` 조회(tos) (SC-006) |
 | `analysis_limits` | 코드. `explorer.unresolved`, `nodes_without_evidence` |
-| `detail_analysis_recommended` | 규칙 + LLM. 변경 유형이 add/modify 이거나 LLM 이 변경 요소를 찾으면 `true`. `detail_reasons` 가 신호별 사유를 `detail_analysis_reasons` 에 넣고, 사유가 있으면 권장 (LLM 이 true 인데 신호가 없으면 "Agent 판단" 사유 1개). 신호: 구조 변경 유형, 경로 위·탐색 제외 공통 모듈, 여러 진입점(`rules.shared_nodes`), 신규 후보, 그래프 밖 연계. 사유 문장에 노드 ID 를 그대로 넣어 재분석 시 Simulator·Verifier 가 확인 대상으로 쓴다. 최대 5개 ([planner_detail_analysis_to-be.md](planner_detail_analysis_to-be.md)) |
+| `detail_analysis_recommended` · `detail_analysis_reasons` · `detail_analysis_notes` | 규칙 (2026-11-02 개정). `detail_reasons` 가 신호를 강/약으로 나눠 **강한 신호가 있을 때만 권장**하고 사유(`detail_analysis_reasons`)에 넣는다. 약한 신호는 참고 신호(`detail_analysis_notes`, 권장 안 함). 공통 모듈·여러 진입점 신호는 `[변경]` 노드에서만 센다. 강: `[변경]` 노드가 공통 모듈·여러 진입점, 요건 항목 2개 이상이 2개 영역 이상 변경, 구조 변경 유형 요건의 신규 후보·그래프 밖 연계. 약: 구조 변경 유형만, 탐색 제외 공통 모듈, 구조 변경이 아닌 요건의 신규 후보·그래프 밖, LLM 판단만(`SimpleDraft.detail_analysis_recommended`), LLM 응답 없음(`[변경]` 표시 없음 → "권장 판단 제한"). 문장에 노드 ID 를 그대로 넣어 재분석 시 Simulator·Verifier 가 확인 대상으로 쓴다 (재분석 입력 = 사유 + "참고: " 참고 신호). 각 최대 5개. 신호 표는 [planner_detail_analysis_to-be.md](planner_detail_analysis_to-be.md) 3장 |
 
 ### 3-2. 복잡 요건 결과물 (`ComplexReport`)
 
@@ -445,7 +445,7 @@ Supervisor 의 `Supervisor.followup(session_id, FollowupInput)` 이 진입점을
 | `ComplexReport` | + `dropped_paths` |
 | `PathHop.evidence_ref` | 설명 `file_path#location` (Retriever Evidence 와 맞춤) |
 | LLM 응답 (`schemas.json` 비공개) | `SimulatorDraft`, `VerifierDraft`, `SimpleDraft`·`ComplexDraft`·`FollowupDraft` 신규 |
-| `SimpleAnswer` | + `detail_analysis_reasons` (상세 분석 권장 사유, 노드 ID 포함) |
+| `SimpleAnswer` | + `detail_analysis_reasons` (상세 분석 권장 사유 = 강한 신호, 노드 ID 포함), `detail_analysis_notes` (참고 신호 = 약한 신호, 2026-11-02) |
 | `AreaImpact`, `ComplexReport`, `SimulatorDraft` (예정) | + `new_elements[NewElement{suggested_id, area, reason}]` (정답셋 `expected.new` 형식) |
 
 `python scripts/export_schema.py --write` 로 `schemas.json` 갱신, `tests/test_schema_sync.py` 가 일치 검사. 출력 모델이 바뀌면 프론트 목업(`frontend/src/mocks/fixtures/scenarios.ts`)도 맞춘다.

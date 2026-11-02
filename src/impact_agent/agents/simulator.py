@@ -55,6 +55,7 @@ META_KEYS = ["images", "events", "cycle", "cron", "program", "steps", "interface
 MAX_META_VALUE = 120  # 속성 값 하나의 글자 수 상한
 # 재분석 사유 문장 안의 그래프 노드 ID (<접두어>:<키>, docs/mock_data.md 노드 ID 규칙)
 NODE_ID_IN_TEXT = re.compile(r"\b(?:SCR|CTL|TP|BAT|SVC|MOD|DBIO|SQL|TBL|COL):[A-Za-z0-9_.#$]+")
+NOTE_PREFIX = "참고:"  # 재분석 입력에서 참고 신호(Composer detail_analysis_notes, 약한 신호) 줄의 머리
 
 
 # --- LLM 응답 형식 (Structured Outputs 호환: 기본값 없이 모든 필드 명시) ---------------------
@@ -131,7 +132,11 @@ class SimulatorAgent(BaseAgent[SimulationOutput]):
         limits = unverified_segments(state, [p for p, _ in built])
         on_paths = {h.node for p, _ in built for h in p.hops}
         if missing := [n for n in reanalysis_nodes(state) if n not in on_paths]:
-            limits.append(f"재분석 요청 노드 미탐색: {', '.join(missing)} (이번 탐색 경로에 없어 판정하지 못함)")
+            asked = set(reanalysis_nodes(state, notes=False))
+            if req := [n for n in missing if n in asked]:
+                limits.append(f"재분석 요청 노드 미탐색: {', '.join(req)} (이번 탐색 경로에 없어 판정하지 못함)")
+            if ref := [n for n in missing if n not in asked]:
+                limits.append(f"재분석 참고 노드 미탐색: {', '.join(ref)} (참고 신호, 이번 탐색 경로에 없어 판정하지 못함)")
 
         draft = None
         if built and self.llm is not None:
@@ -391,12 +396,17 @@ def reanalysis_request(state: AgentState) -> str | None:
     return last.content.strip() or None
 
 
-def reanalysis_nodes(state: AgentState) -> list[str]:
-    """재분석 사유에 나온 노드 ID (문장 끝 마침표는 뗀다, 순서 유지·중복 제거)."""
+def reanalysis_nodes(state: AgentState, notes: bool = True) -> list[str]:
+    """재분석 사유에 나온 노드 ID (문장 끝 마침표는 뗀다, 순서 유지·중복 제거).
+
+    재분석 입력은 권장 사유 줄과 "참고:" 로 시작하는 참고 신호 줄로 온다 (줄바꿈으로 구분).
+    notes=False 면 참고 신호 줄에만 나온 노드는 뺀다 (권장 사유 노드만 = Verifier 가 막는 대상).
+    """
     reason = reanalysis_request(state)
     if reason is None:
         return []
-    return list(dict.fromkeys(m.rstrip(".") for m in NODE_ID_IN_TEXT.findall(reason)))
+    lines = [x for x in reason.splitlines() if notes or not x.strip().startswith(NOTE_PREFIX)]
+    return list(dict.fromkeys(m.rstrip(".") for x in lines for m in NODE_ID_IN_TEXT.findall(x)))
 
 
 def user_message(
@@ -407,7 +417,8 @@ def user_message(
     if state.planner:
         lines += [f"- 항목 {it.item_id} ({it.change_type.value}) {it.text}" for it in state.planner.items]
     if reason := reanalysis_request(state):
-        lines += ["", "[재분석 요청] 사용자가 단순 응답을 보고 상세 분석을 요청했다. 아래 사유에 나온 노드·확인 사항마다 판정 결과를 쓴다.",
+        lines += ["", "[재분석 요청] 사용자가 단순 응답을 보고 상세 분석을 요청했다. 아래 사유에 나온 노드·확인 사항마다 판정 결과를 쓴다. "
+                  f"'{NOTE_PREFIX}' 로 시작하는 줄은 참고 신호다 (경로에 있으면 같은 방식으로 판정을 쓴다).",
                   reason]
 
     lines += ["", "[영역별 경로] path_id: 노드 -관계-> 노드 … (진입 → DB 순서, 근거 없는 노드는 *)"]

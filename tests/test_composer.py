@@ -359,7 +359,7 @@ def test_detail_reasons_swing_changed_shared_node_only():
     assert len(notes(a)) == 3
     assert "## 참고 신호" in out.markdown and "## 상세 분석 권장" in out.markdown and "- 변경 대상 MOD:PntSvc.checkLimit 을 여러 진입점에서 호출 (진입점 2개)" in out.markdown
     # UI 가 사유와 참고 신호를 이어 붙여 reanalysis 로 보내면 Simulator 가 노드 ID 를 그대로 확인 대상으로 쓴다
-    content = " / ".join(a.detail_analysis_reasons + [f"참고: {x}" for x in a.detail_analysis_notes])
+    content = "\n".join(a.detail_analysis_reasons + [f"참고: {x}" for x in a.detail_analysis_notes])   # 줄바꿈 구분
     again = with_followups(make_swing_state(SHARED_PATHS), (FollowupType.REANALYSIS, content))
     assert reanalysis_nodes(again) == ["MOD:PntSvc.checkLimit", "MOD:BatchLauncher.runJob"]
 
