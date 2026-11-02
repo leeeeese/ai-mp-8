@@ -3,11 +3,14 @@
  * mock: 타이머로 같은 이벤트 순서를 흉내 내고, 끝나면 mock 저장소에 답변을 붙인다.
  */
 import { USE_MOCK } from '@/config';
+import { useAuthStore } from '@/store/auth';
 import type { AgentEvent, Complexity, SmPart } from './types';
 
 export function openAgentStream(sessionId: string, onEvent: (e: AgentEvent) => void, onDone: () => void): () => void {
   if (!USE_MOCK) {
-    const es = new EventSource(`/api/sessions/${sessionId}/stream`);
+    // EventSource 는 헤더를 못 보내서 사용자 이름을 쿼리로 넘긴다
+    const user = encodeURIComponent(useAuthStore.getState().user.name);
+    const es = new EventSource(`/api/sessions/${sessionId}/stream?user=${user}`);
     es.onmessage = (msg) => {
       const e = JSON.parse(msg.data) as AgentEvent;
       onEvent(e);

@@ -41,7 +41,7 @@ export function Admin() {
 
 function UserForm({ initial, onDone }: { initial?: User; onDone: () => void }) {
   const save = useSaveUser();
-  const [u, setU] = useState<User>(initial ?? { empNo: '', name: '', role: 'user', smParts: [], active: true });
+  const [u, setU] = useState<User>(initial ?? { name: '', role: 'user', smParts: [] });
   const toggleSm = (p: SmPart) => setU({ ...u, smParts: u.smParts.includes(p) ? u.smParts.filter((x) => x !== p) : [...u.smParts, p] });
   return (
     <form
@@ -52,13 +52,9 @@ function UserForm({ initial, onDone }: { initial?: User; onDone: () => void }) {
         onDone();
       }}
     >
-      <label className="flex flex-col gap-1 text-sm">
-        사번
-        <input className="input" required pattern="[A-Z][0-9]{5}" title="예: A11001" value={u.empNo} disabled={!!initial} onChange={(e) => setU({ ...u, empNo: e.target.value.toUpperCase() })} />
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
+      <label className="flex flex-col gap-1 text-sm sm:col-span-2">
         이름
-        <input className="input" required value={u.name} onChange={(e) => setU({ ...u, name: e.target.value })} />
+        <input className="input" required value={u.name} disabled={!!initial} onChange={(e) => setU({ ...u, name: e.target.value })} />
       </label>
       <fieldset className="flex flex-col gap-1 text-sm">
         <legend className="mb-1">역할</legend>
@@ -82,11 +78,6 @@ function UserForm({ initial, onDone }: { initial?: User; onDone: () => void }) {
           ))}
         </div>
       </fieldset>
-      {initial && (
-        <label className="flex items-center gap-1.5 text-sm">
-          <input type="checkbox" checked={u.active} onChange={(e) => setU({ ...u, active: e.target.checked })} /> 활성
-        </label>
-      )}
       <div className="flex justify-end gap-2 sm:col-span-2">
         {save.isError && <span className="mr-auto self-center text-xs text-warn">{String(save.error.message)}</span>}
         <button type="submit" className="btn-primary" disabled={!u.smParts.length || save.isPending}>
@@ -111,15 +102,13 @@ function Users() {
       <section className="glass p-4">
         <h2 className="mb-2 text-sm font-semibold">사용자 목록</h2>
         <div className="overflow-x-auto">
-          <table className="table-base min-w-[720px]">
+          <table className="table-base min-w-[480px]">
             <thead>
               <tr>
-                <th scope="col">사번 · 이름</th>
+                <th scope="col">이름</th>
                 <th scope="col">역할</th>
                 <th scope="col">권한</th>
                 <th scope="col">SM 파트</th>
-                <th scope="col">최근 접속</th>
-                <th scope="col">상태</th>
                 <th scope="col">
                   <span className="sr-only">편집</span>
                 </th>
@@ -127,17 +116,11 @@ function Users() {
             </thead>
             <tbody>
               {users.map((u) => (
-                <tr key={u.empNo}>
-                  <td>
-                    <span className="node-id">{u.empNo}</span> {u.name}
-                  </td>
+                <tr key={u.name}>
+                  <td>{u.name}</td>
                   <td>{ROLE_LABEL[u.role]}</td>
                   <td>{u.role === 'admin' ? '기본 + 슈퍼' : '기본'}</td>
                   <td>{u.smParts.map((p) => SM_LABEL[p]).join(', ')}</td>
-                  <td className="whitespace-nowrap text-muted">{u.lastLoginAt ? formatDateTime(u.lastLoginAt) : '-'}</td>
-                  <td>
-                    <Badge tone={u.active ? 'ok' : 'muted'}>{u.active ? '활성' : '비활성'}</Badge>
-                  </td>
                   <td>
                     <button type="button" className="icon-btn" onClick={() => setEditing(u)} aria-label={`${u.name} 편집`}>
                       <Pencil size={16} />
@@ -150,7 +133,7 @@ function Users() {
         </div>
       </section>
       <Modal title={`사용자 편집 · ${editing?.name ?? ''}`} open={!!editing} onClose={() => setEditing(null)}>
-        {editing && <UserForm key={editing.empNo} initial={editing} onDone={() => setEditing(null)} />}
+        {editing && <UserForm key={editing.name} initial={editing} onDone={() => setEditing(null)} />}
       </Modal>
     </>
   );

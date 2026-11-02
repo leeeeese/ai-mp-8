@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { RotateCcw } from 'lucide-react';
 import { useKpiRecords, useResetKpiRecords } from '@/api/client';
+import { useAuth } from '@/store/auth';
 import { SM_LABEL, type KpiMetricName, type KpiRecord, type SmPart } from '@/api/types';
 import { Badge } from '@/components/Badge';
 import { Modal } from '@/components/Modal';
@@ -58,6 +59,7 @@ function ThresholdMeter({ label, value, target, better, sub }: {
 export function Kpi() {
   const { data: records = [], isLoading } = useKpiRecords();
   const reset = useResetKpiRecords();
+  const { can } = useAuth();
   const [confirmReset, setConfirmReset] = useState(false);
   const [sm, setSm] = useState<SmFilter>('all');
   const shown = useMemo(() => records.filter((r) => sm === 'all' || r.sm_part === sm), [records, sm]);
@@ -84,9 +86,11 @@ export function Kpi() {
           <div className="flex flex-wrap items-center gap-2">
             <Segmented<SmFilter> label="SM 파트" value={sm} onChange={setSm}
               options={[{ value: 'all', label: '전체' }, { value: 'prod', label: SM_LABEL.prod }, { value: 'dbm', label: SM_LABEL.dbm }]} />
-            <button type="button" className="btn" onClick={() => setConfirmReset(true)} disabled={records.length === 0 || reset.isPending}>
-              <RotateCcw size={16} /> 기록 초기화
-            </button>
+            {can('settings') && (
+              <button type="button" className="btn" onClick={() => setConfirmReset(true)} disabled={records.length === 0 || reset.isPending}>
+                <RotateCcw size={16} /> 기록 초기화
+              </button>
+            )}
           </div>
         }
       />

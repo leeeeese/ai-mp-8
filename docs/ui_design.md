@@ -180,7 +180,7 @@ Dribbble "Forge – AI Agent Code Workspace"(라이트) · "AI Knowledge Base Em
 
 | 탭 | 내용 |
 |---|---|
-| 사용자 | 추가 폼(사번 `A12345` 형식, 이름, 역할 유저/관리자, 접근 SM 파트 체크) / 목록(사번·이름, 역할, 권한 기본 또는 기본+슈퍼, SM 파트, 최근 접속, 상태, 편집 모달) |
+| 사용자 | 추가 폼(이름, 역할 유저/관리자, 접근 SM 파트 체크) / 목록(이름, 역할, 권한 기본 또는 기본+슈퍼, SM 파트, 편집 모달) |
 | 권한 구성 | 기본 권한 / 슈퍼 권한 항목 |
 | 재적재 요청 | 요청 목록, 대기 건 승인·반려 (감사 로그에 기록) |
 | 감사 로그 | 시각, 수행자, 작업, 대상 |
@@ -213,7 +213,7 @@ Dribbble "Forge – AI Agent Code Workspace"(라이트) · "AI Knowledge Base Em
 - 기본: 요건 분석 실행, 결과물 조회·체크리스트 답변, 회신 메일 초안·PDF 저장, 적재 현황 조회, 재적재 **요청**
 - 슈퍼: 재적재 승인·실행, 루프 한도·프롬프트 설정, 사용자 추가·권한 변경, 감사 로그 조회, SM 파트 무관 전체 세션 열람
 - 프론트는 `useAuth()` 의 `role`·`smParts`·`can(permission)` 으로 메뉴·버튼을 숨김/비활성 (`src/store/auth.ts`). **최종 권한 검증은 백엔드**
-- mock 사용자 2명 (사이드바에서 전환, localStorage 저장): 김유저(유저 · DBM), 이관리(관리자 · 상품/DBM)
+- mock 사용자 3명 (사이드바에서 전환, localStorage 저장): 이세은(유저 · 상품), 권예지(유저 · DBM), 김관리(관리자 · 상품/DBM)
 - Neo4j 쓰기는 적재 파이프라인 전용. 프론트·Agent 는 읽기 API 만
 
 ## 7. API (가안, `src/api/types.ts`)
@@ -249,7 +249,7 @@ echo "VITE_USE_MOCK=false" > frontend/.env.local                     # 프론트
 cd frontend && npm run dev                                           # Vite 프록시가 /api 를 8000 으로 보냄
 ```
 
-- 구현됨: 세션(목록·생성·조회·후속 입력·즐겨찾기·결과물·체크리스트 답변·진행 SSE), KPI 기록(조회·초기화), 적재 현황(`/api/graph/*`, `api/graph.py`). 관리(권한)(`/api/admin/*`)는 501 → 실제 API 모드에서는 관리 화면이 비어 보인다. API 전체 설계: [api_design.md](api_design.md).
+- 구현됨: 세션(목록·생성·조회·후속 입력·즐겨찾기·결과물·체크리스트 답변·진행 SSE), KPI 기록(조회·초기화), 적재 현황(`/api/graph/*`, `api/graph.py`). 관리(권한)(`/api/admin/*`, `api/auth.py`), 상세 실행 로그(`GET /api/sessions/{id}/logs`).
 - 적재 현황: Neo4j(.env)를 읽기만 한다 (`GRAPH_BACKEND=csv` 면 `data/graph` CSV). 노드 수·라벨·품질 점검·검색·2 hop 은 실제 그래프 값. 재적재 요청은 `outputs/graph/reload_requests.json` 에 요청만 쌓는다.
 - master 대비: `data/` 가 git 밖이라 커밋 대신 **소스 지문**으로 비교한다. `python scripts/build_graph.py --load` 가 영역별 `:LoadMeta`(적재 시각·파일별 sha1·노드/관계 수)를 남기고, API 가 `SOURCE_ROOT_<영역>` 현재 파일과 비교해 미반영 파일·반영률을 낸다. `loadedCommit`/`masterCommit` = 적재 시점/현재 지문 앞 7자, `behindCommits` = 다르면 1. 적재 이력 = `:LoadMeta` 목록. `:LoadMeta` 가 없으면(이 기능 전 적재) 반영률 0%·이력 없음으로 보인다 → 한 번 다시 적재.
 - Supervisor·Planner 코드는 고치지 않는다. 진행 SSE 는 API 가 각 에이전트를 감싸(`runner.ProgressAgent`) 실행 시작·완료 때 이벤트를 만든다. Supervisor 하나를 공유하므로 분석은 한 번에 하나씩 순서대로 돈다.

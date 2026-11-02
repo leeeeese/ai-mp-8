@@ -1,6 +1,6 @@
 """적재 현황 API (UI-04 `/graph`): Neo4j 그래프를 읽어 frontend `GraphStatus` · `Neighborhood` 모양으로 돌려준다.
 
-- 그래프에 쓰지 않는다. 재적재 요청은 요청만 JSON 파일에 쌓는다 (승인·실행은 관리자 → 적재 파이프라인).
+- 그래프에 쓰지 않는다. 재적재 요청은 요청만 JSON 파일에 쌓는다 (승인은 /api/admin/*, 실행은 관리자 → 적재 파이프라인).
 - master 대비: data/ 가 git 밖이라 커밋 대신 소스 지문으로 비교한다. `build_graph.py --load` 가 영역별 :LoadMeta
   (파일별 sha1)를 남기고, 여기서 SOURCE_ROOT_<DOMAIN> 의 현재 파일과 비교한다.
   loadedCommit / masterCommit = 적재 시점 / 현재 지문 앞 7자, behindCommits = 지문이 다르면 1, 같으면 0.
@@ -23,10 +23,11 @@ from datetime import datetime
 from pathlib import Path
 from typing import Literal, Protocol
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
-from .runner import KpiStore
+from .auth import Auth
+from .runner import JsonStore
 
 ROOT = Path(__file__).resolve().parents[3]
 SM_TO_DOMAIN = {"dbm": "tos", "prod": "swing"}
@@ -237,10 +238,9 @@ def default_source() -> GraphSource:
     return Neo4jGraphSource(os.environ["NEO4J_URI"], os.environ["NEO4J_USER"], os.environ["NEO4J_PASSWORD"])
 
 
-def graph_router(source_factory: Callable[[], GraphSource], reload_path: Path) -> APIRouter:
-    """source_factory 는 처음 요청 때 한 번 부른다 (앱 생성만으로 Neo4j 에 붙지 않게)."""
+def graph_router(source_factory: Callable[[], GraphSource], reload_requests: JsonStore, auth: Auth) -> APIRouter:
+    """source_factory 는 처음 요청 때 한 번 부른다 (앱 생성만으로 Neo4j 에 붙지 않게). 조회는 자기 SM 파트만."""
     router = APIRouter(prefix="/api/graph")
-    reload_requests = KpiStore(reload_path)  # 같은 JSON 목록 저장소 (최근 순)
     lock = threading.Lock()
     state: dict = {"source": None, "cache": {}}
 
@@ -263,7 +263,8 @@ def graph_router(source_factory: Callable[[], GraphSource], reload_path: Path) -
         return g
 
     @router.get("/status")
-    def status(sm: Literal["prod", "dbm"] = "dbm") -> dict:
+    def status(sm: Literal["prod", "dbm"] = "dbm", user: dict = Depends(auth.require("graph.view"))) -> dict:
+        auth.check_sm(user, sm, view=True)
         try:
             g = graph(sm)
             metas = source().load_metas(SM_TO_DOMAIN[sm])
@@ -273,19 +274,23 @@ def graph_router(source_factory: Callable[[], GraphSource], reload_path: Path) -
         return graph_status(sm, g, metas)
 
     @router.get("/search")
-    def search_nodes(sm: Literal["prod", "dbm"] = "dbm", q: str = "") -> list[dict]:
+    def search_nodes(sm: Literal["prod", "dbm"] = "dbm", q: str = "", user: dict = Depends(auth.require("graph.view"))) -> list[dict]:
+        auth.check_sm(user, sm, view=True)
         return search(graph(sm), q)
 
     @router.get("/neighbors")
-    def node_neighbors(nodeId: str, sm: Literal["prod", "dbm"] = "dbm", hops: int = 2) -> dict:  # noqa: N803 - UI 쿼리 이름
+    def node_neighbors(nodeId: str, sm: Literal["prod", "dbm"] = "dbm", hops: int = 2,  # noqa: N803 - UI 쿼리 이름
+                       user: dict = Depends(auth.require("graph.view"))) -> dict:
+        auth.check_sm(user, sm, view=True)
         g = graph(sm)
         if nodeId not in g.by_id:
             raise HTTPException(404, "node not found")
         return neighbors(g, nodeId, max(1, min(hops, 3)))
 
     @router.post("/reload-requests")
-    def create_reload_request(req: ReloadRequestBody) -> dict:
-        r = {"id": "r" + uuid.uuid4().hex[:8], **req.model_dump(), "requestedBy": "현재 사용자",  # 인증 붙기 전 (목업과 같음)
+    def create_reload_request(req: ReloadRequestBody, user: dict = Depends(auth.require("reload.request"))) -> dict:
+        auth.check_sm(user, req.sm)
+        r = {"id": "r" + uuid.uuid4().hex[:8], **req.model_dump(), "requestedBy": user["name"],
              "requestedAt": datetime.now().astimezone().isoformat(timespec="seconds"), "status": "pending"}
         reload_requests.add(r)
         return r

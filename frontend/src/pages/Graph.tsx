@@ -26,7 +26,7 @@ function Tile({ label, value, sub, strong }: { label: string; value: string; sub
 
 export function Graph() {
   const { graphSm: sm, setGraphSm } = useUi();
-  const { can } = useAuth();
+  const { can, smParts } = useAuth();
   const { data: st } = useGraphStatus(sm);
   const [query, setQuery] = useState('');
   const [center, setCenter] = useState<string | null>(DEFAULT_NODE[sm]);
@@ -68,7 +68,7 @@ export function Graph() {
             label="적재 기준 SM 파트"
             options={(['prod', 'dbm'] as SmPart[]).map((p) => ({ value: p, label: SM_LABEL[p] }))}
             value={sm}
-            onChange={setGraphSm}
+            onChange={(v) => (can('sessions.all') || smParts.includes(v)) && setGraphSm(v)}
           />
         }
       />

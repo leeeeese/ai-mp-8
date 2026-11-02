@@ -1,7 +1,8 @@
 /**
- * 사내 SSO 를 가정한 mock 인증. 메뉴·버튼 숨김/비활성은 편의 기능이고,
+ * mock 사용자 전환. 메뉴·버튼 숨김/비활성은 편의 기능이고,
  * 최종 권한 검증은 백엔드에서 한다 (프론트 판단을 신뢰하지 않음).
  */
+import { useQuery } from '@tanstack/react-query';
 import { create } from 'zustand';
 import type { Role, SmPart } from '@/api/types';
 
@@ -32,27 +33,27 @@ export const PERMISSION_LABEL: Record<Permission, string> = {
 };
 
 export interface AuthUser {
-  empNo: string;
   name: string;
   role: Role;
   smParts: SmPart[];
 }
 
 export const MOCK_USERS: AuthUser[] = [
-  { empNo: 'A11001', name: '김유저', role: 'user', smParts: ['prod', 'dbm'] },
-  { empNo: 'A10001', name: '이관리', role: 'admin', smParts: ['prod', 'dbm'] },
+  { name: '이세은', role: 'user', smParts: ['prod'] },
+  { name: '권예지', role: 'user', smParts: ['dbm'] },
+  { name: '김관리', role: 'admin', smParts: ['prod', 'dbm'] },
 ];
 
 interface AuthState {
   user: AuthUser;
-  switchUser: (empNo: string) => void;
+  switchUser: (name: string) => void;
 }
 
 const USER_KEY = 'impact-mock-user';
 
 function savedUser(): AuthUser {
   try {
-    return MOCK_USERS.find((u) => u.empNo === localStorage.getItem(USER_KEY)) ?? MOCK_USERS[0];
+    return MOCK_USERS.find((u) => u.name === localStorage.getItem(USER_KEY)) ?? MOCK_USERS[0];
   } catch {
     return MOCK_USERS[0];
   }
@@ -60,19 +61,29 @@ function savedUser(): AuthUser {
 
 export const useAuthStore = create<AuthState>((set) => ({
   user: savedUser(),
-  switchUser: (empNo) => {
+  switchUser: (name) => {
     try {
-      localStorage.setItem(USER_KEY, empNo);
+      localStorage.setItem(USER_KEY, name);
     } catch {
       /* 저장 불가 환경은 무시 */
     }
-    set({ user: MOCK_USERS.find((u) => u.empNo === empNo) ?? MOCK_USERS[0] });
+    set({ user: MOCK_USERS.find((u) => u.name === name) ?? MOCK_USERS[0] });
   },
 }));
 
+/** 역할·SM 파트·권한은 백엔드(/api/auth/me) 기준. 응답이 없으면(연결 전) mock 사용자 값으로 그린다 */
 export function useAuth() {
-  const user = useAuthStore((s) => s.user);
-  const perms = user.role === 'admin' ? [...BASE_PERMISSIONS, ...SUPER_PERMISSIONS] : BASE_PERMISSIONS;
+  const mock = useAuthStore((s) => s.user);
+  const { data: me } = useQuery({
+    queryKey: ['me', mock.name],
+    queryFn: async () => {
+      const res = await fetch('/api/auth/me', { headers: { 'X-User': encodeURIComponent(mock.name) } });
+      return res.ok ? ((await res.json()) as AuthUser & { permissions: Permission[] }) : null;
+    },
+    staleTime: 60_000,
+  });
+  const user: AuthUser = me ?? mock;
+  const perms = me?.permissions ?? (mock.role === 'admin' ? [...BASE_PERMISSIONS, ...SUPER_PERMISSIONS] : BASE_PERMISSIONS);
   return {
     user,
     role: user.role,

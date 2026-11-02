@@ -56,18 +56,17 @@ export const db = {
   ] as Session[],
   checklists: {} as Record<string, ChecklistItem[]>,
   reloadRequests: [
-    { id: 'r1', sm: 'dbm', scope: 'online/java/com/tmk/tos/cp/msg', reason: 'CampMsgService 수정분 반영', requestedBy: '김유저', requestedAt: iso(120), status: 'pending' },
-    { id: 'r2', sm: 'prod', scope: '전체', reason: '정기 적재', requestedBy: '이관리', requestedAt: iso(60 * 30), status: 'approved' },
+    { id: 'r1', sm: 'dbm', scope: 'online/java/com/tmk/tos/cp/msg', reason: 'CampMsgService 수정분 반영', requestedBy: '권예지', requestedAt: iso(120), status: 'pending' },
+    { id: 'r2', sm: 'prod', scope: '전체', reason: '정기 적재', requestedBy: '김관리', requestedAt: iso(60 * 30), status: 'approved' },
   ] as ReloadRequest[],
   users: [
-    { empNo: 'A11001', name: '김유저', role: 'user', smParts: ['prod', 'dbm'], lastLoginAt: iso(5), active: true },
-    { empNo: 'A10001', name: '이관리', role: 'admin', smParts: ['prod', 'dbm'], lastLoginAt: iso(30), active: true },
-    { empNo: 'A11855', name: '박상품', role: 'user', smParts: ['prod'], lastLoginAt: iso(60 * 72), active: true },
-    { empNo: 'A10544', name: '최퇴사', role: 'user', smParts: ['dbm'], lastLoginAt: iso(60 * 24 * 40), active: false },
+    { name: '이세은', role: 'user', smParts: ['prod'] },
+    { name: '권예지', role: 'user', smParts: ['dbm'] },
+    { name: '김관리', role: 'admin', smParts: ['prod', 'dbm'] },
   ] as User[],
   audit: [
-    { id: 'l1', at: iso(60 * 30), actor: '이관리', action: '재적재 승인', target: 'r2 (상품 전체)' },
-    { id: 'l2', at: iso(60 * 48), actor: '이관리', action: '사용자 추가', target: 'A11855 박상품' },
+    { id: 'l1', at: iso(60 * 30), actor: '김관리', action: '재적재 승인', target: 'r2 (상품 전체)' },
+    { id: 'l2', at: iso(60 * 48), actor: '김관리', action: '사용자 추가', target: '이세은' },
   ] as AuditLog[],
 };
 

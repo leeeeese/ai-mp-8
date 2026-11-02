@@ -11,6 +11,9 @@ outputs/
 data/
 mock_dev/
 
+# 로컬 전용 _ YJ
+ignore_file/
+
 # frontend
 frontend/node_modules/
 frontend/dist/

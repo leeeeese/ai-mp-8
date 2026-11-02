@@ -1,4 +1,6 @@
+import { useQueryClient } from '@tanstack/react-query';
 import { ChevronRight, Database, FileText, Gauge, Home, Shield, Star, X } from 'lucide-react';
+import { useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useSessions } from '@/api/client';
 import { SM_LABEL, type SessionSummary } from '@/api/types';
@@ -29,6 +31,13 @@ const navCls = ({ isActive }: { isActive: boolean }) =>
 export function Sidebar() {
   const { user, can, smParts } = useAuth();
   const switchUser = useAuthStore((s) => s.switchUser);
+  const qc = useQueryClient();
+  const graphSm = useUi((s) => s.graphSm);
+  const setGraphSm = useUi((s) => s.setGraphSm);
+
+  useEffect(() => {
+    if (!can('sessions.all') && smParts.length > 0 && !smParts.includes(graphSm)) setGraphSm(smParts[0]); // 적재 현황은 자기 SM 파트만 조회
+  });
   const { drawerOpen, setDrawer } = useUi();
   const { data: sessions = [] } = useSessions();
   const location = useLocation();
@@ -110,12 +119,15 @@ export function Sidebar() {
           <span className="whitespace-nowrap">mock 사용자</span>
           <select
             className="input py-1 text-xs"
-            value={user.empNo}
-            onChange={(e) => switchUser(e.target.value)}
+            value={user.name}
+            onChange={(e) => {
+              switchUser(e.target.value);
+              void qc.invalidateQueries(); // 세션·KPI 목록이 사용자 권한으로 걸러지므로 다시 읽는다
+            }}
             aria-label="mock 사용자 전환"
           >
             {MOCK_USERS.map((u) => (
-              <option key={u.empNo} value={u.empNo}>
+              <option key={u.name} value={u.name}>
                 {u.name} ({u.role === 'admin' ? '관리자' : '유저'} · {u.smParts.map((p) => SM_LABEL[p]).join('/')})
               </option>
             ))}

@@ -13,7 +13,7 @@ from fastapi.testclient import TestClient  # noqa: E402
 
 from impact_agent.api import create_app  # noqa: E402
 from impact_agent.api.graph import CsvGraphSource, fingerprint, source_manifest  # noqa: E402
-from test_api import fake_supervisor  # noqa: E402
+from test_api import as_header, fake_supervisor  # noqa: E402
 
 NODES = [  # node_id, label, role, name, source_file, properties
     ("SCR:A", "Screen", "Entry", "캠페인 화면", "web/a.js", {"desc": "캠페인 등록", "url": "/a"}),
@@ -51,8 +51,9 @@ def env(tmp_path, monkeypatch):
             "fingerprint": fingerprint(manifest), "nodes": 6, "rels": 4, "warnings": 0}
     old = {**meta, "loaded_at": "2026-10-20T10:00:00+09:00", "fingerprint": "0" * 40, "nodes": 5, "warnings": 2}
     app = create_app(fake_supervisor, kpi_path=tmp_path / "kpi.json", run_in_thread=False,
-                     graph_source=lambda: CsvGraphSource(gdir, [old, meta]), reload_path=tmp_path / "reload.json")
-    return TestClient(app), src, tmp_path
+                     graph_source=lambda: CsvGraphSource(gdir, [old, meta]), reload_path=tmp_path / "reload.json",
+                     admin_dir=tmp_path / "admin", log_dir=tmp_path / "logs")
+    return TestClient(app, headers=as_header()), src, tmp_path
 
 
 def test_status_counts_checks_and_history(env):
@@ -107,19 +108,20 @@ def test_neighbors_two_hops_and_404(env):
     assert c.get("/api/graph/neighbors", params={"sm": "dbm", "nodeId": "없음"}).status_code == 404
 
 
-def test_reload_request_saved_and_admin_still_501(env):
+def test_reload_request_saved_with_requester(env):
     c, _, tmp = env
     r = c.post("/api/graph/reload-requests", json={"sm": "dbm", "scope": "online/cp", "reason": "수정분 반영"}).json()
     assert r["status"] == "pending" and r["sm"] == "dbm" and r["id"].startswith("r")
     assert json.loads((tmp / "reload.json").read_text(encoding="utf-8"))[0]["id"] == r["id"]
-    assert c.get("/api/admin/users").status_code == 501
+    assert r["requestedBy"] == "김관리"
 
 
 def test_disconnected_store_still_renders(tmp_path):
     def broken():
         raise ConnectionError("down")
     c = TestClient(create_app(fake_supervisor, kpi_path=tmp_path / "kpi.json", run_in_thread=False, graph_source=broken,
-                              reload_path=tmp_path / "r.json"))
+                              reload_path=tmp_path / "r.json", admin_dir=tmp_path / "admin", log_dir=tmp_path / "logs"),
+                   headers=as_header())
     s = c.get("/api/graph/status?sm=prod").json()
     assert s["connected"] is False and s["nodes"] == 0
     assert c.get("/api/graph/search?sm=prod&q=a").status_code == 503
