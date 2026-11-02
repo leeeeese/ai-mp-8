@@ -117,7 +117,7 @@ class DraftChange(BaseModel):
 
 class SimpleDraft(BaseModel):
     conclusion_lines: list[str] = Field(description="3~5줄. 결론 먼저, 노드명·테이블명을 붙여 쓴다")
-    changes: list[DraftChange] = Field(description="이 요건으로 코드·데이터를 고쳐야 하는 노드만, 노드당 한 번. 나머지는 [참조]")
+    changes: list[DraftChange] = Field(description="이 요건으로 코드·데이터를 고쳐야 하는 노드 빠짐없이, 노드당 한 번. 나머지는 [참조]")
     claims: list[DraftClaim] = Field(description="[변경] 노드와 결론에 쓴 노드의 근거만, 10개 이내")
     check_queries: list[DraftQuery] = Field(description="운영 문의일 때 확인용 SQL. 아니면 []")
     inquiry_contacts: list[str] = Field(description="문의가 필요한 담당·부서. 없으면 []")

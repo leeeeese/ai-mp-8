@@ -681,6 +681,16 @@ def test_hop_impact_shared_node_filled_by_node():
     assert hops[("P2-1", "BAT:TCMP100")] == f"[참조] {REFERENCE_IMPACT}"           # 쓰지 않은 노드는 [참조] 기본 문장
 
 
+def test_unseen_paths_keep_default_impact(monkeypatch):
+    # 경로 수 상한으로 LLM 에 보이지 않은 경로의 노드는 [참조] 로 채우지 않는다 (판정하지 않았으므로)
+    monkeypatch.setattr("impact_agent.agents.simulator.MAX_CONTEXT_PATHS", 1)
+    out = SimulatorAgent(llm=ScriptLLM(draft(hops=[]))).run(make_state())        # P1-1 만 보임, P2-1 은 잘림
+    hops = {h.node: h.impact for a in out.area_impacts for p in a.paths for h in p.hops}
+    assert hops["SVC:CmpSvc.save"] == f"[참조] {REFERENCE_IMPACT}"                 # 보인 경로의 노드
+    assert hops["BAT:TCMP100"] == "영향 검토 필요"                                  # 안 보인 경로에만 있는 노드
+    assert hops["TBL:TCP_CMP"] == f"[참조] {REFERENCE_IMPACT}"                      # 두 경로 모두에 있으면 보인 것으로
+
+
 def test_hop_impact_prefers_change_for_same_node():
     out = SimulatorAgent(llm=ScriptLLM(draft(hops=[
         DraftHop(path_id="P9-9", node="SVC:CmpSvc.save", impact="[참조] 호출만"),     # 없는 경로 id

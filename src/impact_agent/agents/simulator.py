@@ -148,8 +148,8 @@ class SimulatorAgent(BaseAgent[SimulationOutput]):
             except LLM_FAILURES as exc:  # LLM 실패는 규칙 판정으로 대체 (분석 흐름을 끊지 않음)
                 limits.append(f"LLM 판정 실패로 규칙 판정 사용: {exc}")
 
-        if draft is not None:
-            apply_node_impacts(draft, [p for p, _ in built])
+        if draft is not None:  # LLM 에 보여 준 경로(MAX_CONTEXT_PATHS)의 노드만 판정된 것으로 본다
+            apply_node_impacts(draft, [p for p, _ in built], {h.node for p, _ in built[:MAX_CONTEXT_PATHS] for h in p.hops})
         kept, dropped = apply_drops(draft, built, state, shared)
         return SimulationOutput(
             area_impacts=judge_areas(draft, kept, areas_of, state, limits, (shared, hop_areas)),
@@ -162,11 +162,12 @@ class SimulatorAgent(BaseAgent[SimulationOutput]):
 # --- 판정 보정 (규칙) ----------------------------------------------------------------------------
 
 
-def apply_node_impacts(draft: SimulatorDraft, paths: list[ImpactPath]) -> None:
+def apply_node_impacts(draft: SimulatorDraft, paths: list[ImpactPath], seen: set[str]) -> None:
     """LLM 의 노드별 영향을 골격 hop 에 반영한다 (노드당 한 문장을 그 노드가 지나는 모든 경로에 같이 씀).
 
-    LLM 이 쓰지 않은 노드는 [참조] + REFERENCE_IMPACT. 골격 밖 노드는 무시. 같은 노드가 여러 번 오면 [변경] 을 우선한다.
-    LLM 이 문장 앞에 표시를 붙여 와도 한 번만 붙게 뗀다.
+    LLM 이 쓰지 않은 노드는 [참조] + REFERENCE_IMPACT. 단 LLM 에 보여 주지 않은 노드(seen 밖, 경로 수 상한으로 잘림)는
+    판정하지 않았으므로 기본값(DEFAULT_IMPACT, 표시 없음)으로 둔다. 골격 밖 노드는 무시. 같은 노드가 여러 번 오면
+    [변경] 을 우선한다. LLM 이 문장 앞에 표시를 붙여 와도 한 번만 붙게 뗀다.
     """
     by_node: dict[str, tuple[bool, str]] = {}
     for d in draft.nodes:
@@ -175,8 +176,9 @@ def apply_node_impacts(draft: SimulatorDraft, paths: list[ImpactPath]) -> None:
             by_node[d.node] = (d.change, text)
     for p in paths:
         for h in p.hops:
-            change, text = by_node.get(h.node, (False, REFERENCE_IMPACT))
-            h.impact = f"{CHANGE_TAG if change else REFERENCE_TAG} {text}"
+            if h.node in by_node or h.node in seen:
+                change, text = by_node.get(h.node, (False, REFERENCE_IMPACT))
+                h.impact = f"{CHANGE_TAG if change else REFERENCE_TAG} {text}"
 
 
 def apply_drops(
