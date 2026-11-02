@@ -94,7 +94,8 @@ def snapshot(case: str) -> None:
     if first is Complexity.SIMPLE and gt.get("complexity") == "complex":  # run_scenarios.py 와 같은 가정 (사용자 상세 분석 요청)
         exp, ret = state.explorer, state.retriever
         paths = [p for p, _ in build_impact_paths(exp.paths, exp.edges, ret.evidence if ret else [])] if exp else []
-        content = "\n".join(detail_reasons(state, paths)) or "상세 분석 요청"
+        reasons, notes = detail_reasons(state, paths)  # 약한 신호도 함께 (run_scenarios.py·UI 와 같음)
+        content = "\n".join(reasons + [f"참고: {x}" for x in notes]) or "상세 분석 요청"
         state = sup.followup(sup.last_session_id, FollowupInput(type=FollowupType.REANALYSIS, content=content),
                              until="retriever")
     path = snapshot_path(case, "A")
