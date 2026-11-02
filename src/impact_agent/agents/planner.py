@@ -152,7 +152,7 @@ def user_message(state: AgentState) -> str:
 def _log_input(system: str, user: str, state: AgentState) -> None:
     """LLM 에 넘기는 내용: 시스템 프롬프트 크기와 사용자 메시지 (요청 문장·후속 입력·재계획 사유)."""
     model = os.environ.get("LLM_MODEL") or DEFAULT_MODEL
-    trace(f"{model} · PlannerDraft (Structured Output) · 판정 예시 6개 (Few-shot)", section=LLM_SECTION, label="모델")
+    trace(f"{model} · PlannerDraft (Structured Output) · 판정 예시 1개 + 경계 사례 5개 (Few-shot)", section=LLM_SECTION, label="모델")
     trace(f"공통 페르소나 + 판정 기준·예시 {len(system):,}자", section=LLM_SECTION, label="시스템")
     trace(f"{len(user):,}자 · 후속 입력 {len(state.followups)}건 · 재계획 사유 {len(state.replan_feedback)}건 · 이전 탐색 명세 "
           f"{'있음' if state.replan_feedback and state.planner else '없음'}", section=LLM_SECTION, label="사용자")

@@ -1,6 +1,6 @@
 """Explorer 출력 및 그래프 공통 모델."""
 
-from typing import Any
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -56,6 +56,17 @@ class ItemExploreResult(BaseModel):
     unmatched_mentions: list[str] = Field(default_factory=list, description="노드를 찾지 못한 언급 표현")
 
 
+UnresolvedKind = Literal["new_candidate", "out_of_graph", "unmatched", "tool_limit"]
+
+
+class UnresolvedItem(BaseModel):
+    """미해결 항목 (종류 포함). Composer 가 문구 대신 kind 로 신호를 가르게 한다 (planner_detail_analysis_to-be.md 2-4)."""
+
+    item_id: int | None = Field(default=None, description="탐색 명세 항목. tool 한도처럼 항목과 무관하면 null")
+    kind: UnresolvedKind = Field(description="new_candidate 신규 후보 / out_of_graph 그래프 밖 / unmatched 매칭 실패 / tool_limit tool 한도")
+    text: str = Field(description="unresolved 와 같은 문장")
+
+
 class ExplorerOutput(BaseModel):
     start_nodes: list[StartNodeChoice]
     nodes: list[GraphNode]
@@ -64,6 +75,7 @@ class ExplorerOutput(BaseModel):
     item_results: list[ItemExploreResult] = Field(default_factory=list)
     excluded_common: list[str] = Field(default_factory=list, description="공통이라 확장하지 않은 노드")
     unresolved: list[str] = Field(default_factory=list, description="그래프 밖 영역·신규 후보·매칭 실패 (보고서에서 분석 완료처럼 쓰지 않음)")
+    unresolved_items: list[UnresolvedItem] = Field(default_factory=list, description="unresolved 와 같은 내용을 종류와 함께 (호환을 위해 unresolved 유지)")
     hops_used: int = Field(default=0, ge=0, description="경로 중 가장 긴 hop 수")
     tool_call_count: int = 0
     react_trace: list[ReactStep] = Field(default_factory=list, description="규칙 탐색 뒤 ReAct 보완 탐색 기록")

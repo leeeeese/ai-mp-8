@@ -38,7 +38,7 @@
 | Table / Column | `TBL:` / `COL:` | `TBL:` / `COL:` |
 
 ### tool
-- `search_graph_nodes(terms, labels)`: 노드명·설명·컬럼 코멘트·용어사전 검색. 영역은 시스템이 SM 선택으로 정한다.
+- `search_graph_nodes(terms, labels)`: 노드명·설명·컬럼 코멘트 검색. 영역은 시스템이 SM 선택으로 정한다.
 - `traverse_graph(item_id, node_ids, direction, target_role)`: 시작 노드에서 목표 역할까지 경로. 결과는 그 항목의 경로로 합쳐진다.
   - `forward`: 진입(화면·배치) → DB 쪽. `reverse`: DB(테이블·컬럼) → 진입 쪽.
   - 역할 순서: Entry → EntryHandler → Logic → DataAccess → Table → Column

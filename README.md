@@ -246,19 +246,24 @@ cd ~/Desktop/impact-agent && PYTHONPATH=src PYTHONWARNINGS=ignore /Library/Frame
 ```
 
 - `Uvicorn running on http://127.0.0.1:8000` 이 나오면 준비 완료. `.env` 는 앱이 직접 읽는다.
-- 터미널에 에이전트 실행 로그가 찍힌다. 에이전트마다 **받은 입력 → 동작 → 근거 → 결과** 순서다. HTTP 요청 줄이 섞이는 게 싫으면 실행 명령에 `--no-access-log` 를 붙인다:
+- 터미널에는 에이전트 진행만 찍힌다 (▶ 시작 · ■ 끝 한 줄 · ↓ 라우팅). HTTP 요청 줄이 섞이는 게 싫으면 실행 명령에 `--no-access-log` 를 붙인다:
   ```
-  ┌─ 2-1 Explorer · 왕복 1/3 · 19:02:47 ─────────────────
-  │ ▸ 받은 입력 ← Planner
-  │   항목 1     screen_change → 목표 EntryHandler · forward · hop 5 | …
-  │ ▸ 동작 · 규칙 탐색
-  │     Screen   '결합상품' (+동의어 2) → 채택 SCR:ZCMBSS0100010 '결합상품 가입' 1.05 / 탈락 SCR:ZPRDSS0200010 0.4, …
-  │   tool 5     탐색 SCR:ZCMBSS0100010 외 1 forward → EntryHandler → 경로 10 · 노드 12 · 23ms
-  │ ▸ 결과 → Retriever
-  │   경로 1     [1] target_reached: SCR:ZCMBSS0100010 > TP:DocRsvSvc.regDocRsv
-  └─ 완료 14.5s │ 시작 노드 4 · 경로 10 │ tool 누적 7/20 │ 토큰 13,134
+  ▶ 2-1 Explorer · 왕복 1/3 · 19:02:47
+  ■ 2-1 Explorer     완료 14.5s │ 시작 노드 4 · 경로 10 │ tool 누적 7/20 │ 토큰 13,134
+    ↓ COMPOSER  단순 흐름 (Simulator · Verifier 생략)
   ```
-- 같은 내용이 `outputs/logs/<세션 8자>.log` 와 세션 화면 **실행 로그**에도 남는다.
+- 상세(에이전트마다 **받은 입력 → 동작 → 근거 → 결과**)는 `outputs/logs/<세션 8자>.log` 와 세션 화면 **실행 로그**에 남는다:
+  ```
+  ▶ 2-1 Explorer · 왕복 1/3 · 19:02:47
+    ▸ 받은 입력 ← Planner
+      항목 1     screen_change → 목표 EntryHandler · forward · hop 5 | …
+    ▸ 동작 · 규칙 탐색
+        Screen   '결합상품' (+동의어 2) → 채택 SCR:ZCMBSS0100010 '결합상품 가입' 1.05 / 탈락 SCR:ZPRDSS0200010 0.4, …
+      tool 5     탐색 SCR:ZCMBSS0100010 외 1 forward → EntryHandler → 경로 10 · 노드 12 · 23ms
+    ▸ 결과 → Retriever
+      경로 1     [1] target_reached: SCR:ZCMBSS0100010 > TP:DocRsvSvc.regDocRsv
+    ■ 완료 14.5s │ 시작 노드 4 · 경로 10 │ tool 누적 7/20 │ 토큰 13,134
+  ```
 - 확인 (다른 터미널):
   ```bash
   curl -s -H "X-User: %EA%B9%80%EA%B4%80%EB%A6%AC" localhost:8000/api/sessions    # []  (값은 "김관리" URL 인코딩, 없으면 401)
@@ -317,6 +322,21 @@ $PY -c "import json; print(json.load(open('eval/ground_truth/SC-003.json'))['req
 | 상품 | `ZDOCBB0100010` | 구비서류 배치 (Entry) |
 | 공통 | `MMS`, `발송` 등 단어 일부 | 이름·설명에 포함된 노드 목록 |
 | 공통 | 다른 SM 노드 (예: DBM 에서 `joinComb`) | 결과 없음 (SM 별 영역만 검색) |
+
+### 정답셋 16건 E2E 테스트 (터미널)
+
+화면 없이 정답셋 16건을 UI 와 같은 전체 흐름(Planner → … → Composer → KPI)으로 돌린다. **Neo4j 만 떠 있으면 된다** (백엔드·프론트 불필요). Python 은 스크립트가 패키지가 있는 것을 찾는다.
+
+```bash
+cd ~/Desktop/impact-agent && VERBOSE=1 zsh scripts/YJ/run_all.sh <실행 폴더> <기준 실행>   # 예: v6/v6-4 v6/v6-3 (약 40분). 터미널엔 에이전트 진행만, 상세는 <케이스>.log
+cd ~/Desktop/impact-agent && PYTHONPATH=src python3 scripts/YJ/run_scenarios.py --report <실행 폴더> --baseline <기준 실행>   # 실행 없이 report 만
+```
+
+- 버전 폴더 아래 `-1`, `-2`, … 순서로 쌓는다 (v6-1 = E2E 첫 기준선, v6-2 · v6-3 = 수정 후)
+- 결과: `outputs/runs/YJ/<실행 폴더>/` — `report.html`(기준 실행 대비 지표 · 케이스별 변화 산점도와 "이전 → 이후" 표 · 판정 흐름 · 단계별 정답 손실 · 시간·토큰·정밀도 · 개선 후보), `tos/` · `swing/` 아래 케이스별 `<케이스>.md` · `<케이스>.log`(실행 로그)와 영역별 `summary.md`
+- 개선 후보(report 5장)는 실행 폴더의 `findings.json` 에 적으면 그 내용으로, 없으면 자동 징후로 채운다
+- 흐름 가정: 1차 complex → 끝까지 / 1차 simple + 정답 complex → "상세 분석 요청" 클릭 가정 → 2차 complex / Verifier 재계획은 complex 유지
+- 끊겨도 같은 명령이면 끝난 케이스는 건너뛴다. 처음부터: `FRESH=1`
 
 ### 5. 종료
 

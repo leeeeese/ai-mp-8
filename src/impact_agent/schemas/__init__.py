@@ -49,6 +49,7 @@ from .explorer import (
     GraphNode,
     ItemExploreResult,
     StartNodeChoice,
+    UnresolvedItem,
 )
 from .inputs import (
     ConfirmedNode,
@@ -151,6 +152,7 @@ __all__ = [
     "InputSource",
     "InputType",
     "ItemExploreResult",
+    "UnresolvedItem",
     "KpiCategory",
     "KpiMetric",
     "KpiMetricName",

@@ -1,89 +1,79 @@
-# Planner 복잡도 판정 · 상세 분석 권장 (To-Be 수정 사항)
+# Planner · Explorer 반영 결과와 SE 반영 요청 (To-Be)
 
-> 작성: SE / 대상: Planner·Explorer 담당(YJ)과 함께 작업하는 Claude. 작성일 2026-10-29, 개정 2026-11-02.
-> 관련 문서: [YJ_agent_design.md](YJ_agent_design.md) (2 Planner, 3 Explorer), [SE_agent_design.md](SE_agent_design.md) (3-1 단순 요건 응답).
+> 작성: YJ / 대상: Simulator · Verifier · Composer · KPI Agent 담당(SE)과 함께 작업하는 Claude. 작성일 2026-11-03.
+> 이전 판(2026-11-02, SE 작성)의 "2. 추가 수정 사항"(YJ 담당 1~9)을 반영한 결과와, 그 과정에서 나온 SE 반영 요청을 정리한다.
+> 관련 문서: [YJ_agent_design.md](YJ_agent_design.md) (2 Planner, 3 Explorer), [SE_agent_design.md](SE_agent_design.md).
 
 ## 변경 이력
 
 | 일자 | 내용 |
 |---|---|
-| 2026-10-29 | 최초 작성. Planner 복잡도 기준(요건 문장 인용), reanalysis 시 complex 강제, Composer 상세 분석 권장·사유, UI 재분석 요청, 스키마 동기화 |
-| 2026-11-02 | 2026-10-29 수정 사항 1~7 이 모두 반영된 것을 확인하고 표에서 삭제 (Planner 프롬프트 "2. 복잡도"·`apply_reanalysis`·`test_planner`·`test_supervisor`, Composer `detail_reasons`·`detail_analysis_reasons`, UI mock). Composer 권장 신호를 강/약으로 나눈 것(3장)에 맞춰 Planner·Explorer·UI 추가 수정 사항(2장 1~5) 작성 |
-| 2026-11-02 (2차) | Composer 단순 응답 정리 반영에 맞춰 추가: 2장 6 (Explorer 단순 요건 경로 수), 3장 신호 출처 갱신. Composer 변경 내용은 아래 "SE 반영 내역" |
-| 2026-11-02 (3차) | Simulator 출력 정리 반영에 맞춰 추가: 2장 7 (Explorer 경로 순서 = Simulator 판정 범위), 2장 8 (Planner 복잡도 판정 흔들림). SE 반영 내역에 Simulator·Verifier·Composer 프롬프트 추가 |
-| 2026-11-02 (4차) | UI 반영 완료(SE)로 2장 5 (UI 단순 응답 카드) 삭제. 2장 번호는 다른 항목이 참조하므로 그대로 둔다 |
-| 2026-11-02 (5차) | 2장 9 추가 (정답셋 실행 두 번 모두 반복된 앞단 미탐: 공통코드 테이블·코드 컬럼). 제안·권고 수준 |
+| 2026-10-29 | (SE) 최초 작성. Planner 복잡도 기준, reanalysis 시 complex, Composer 상세 분석 권장·사유, UI 재분석 요청 |
+| 2026-11-02 | (SE) Composer 권장 신호 강/약에 맞춘 YJ 추가 수정 사항 1~9 |
+| 2026-11-03 | (YJ) 이 판으로 덮어씀: 1~9 반영 결과, E2E 16건 테스트(v6-1 · v6-2 · v6-3), SE 반영 요청 |
 
-## 1. 결정 사항
+## 1. 결정 사항 (유지)
 
-1. **Planner 는 요건 문장에서 확인되는 것만 판정한다.** 그래프·소스를 보지 않으므로, 탐색해야 알 수 있는 사실(공통 사용 여부·영향 범위·구현 난이도)로 복잡도를 정하지 않는다.
-2. **simple 로 처리된 요건은 결과에서 "상세 분석 권장"을 근거와 함께 보여 준다.** (2026-11-02 개정) 탐색 신호를 강/약으로 나눠, **강한 신호가 있을 때만** Composer 가 권장 표시와 사유(`detail_analysis_reasons`)를 낸다. 약한 신호는 권장하지 않고 참고 신호(`detail_analysis_notes`)로 보여 준다.
-3. **사용자가 확인하면 재분석한다.** 사용자의 재분석 요청("상세 분석 요청")은 `FollowupInput(type=reanalysis)` 로 Planner 에 들어가고, Planner 는 이 경우 complex 로 판정한다 → Simulator·Verifier 를 거친 복잡 요건 결과물이 나온다.
-   (2026-11-02 추가) 후속 입력 내용에는 **권장 사유와 참고 신호를 모두** 넣는다. 권장 여부는 좁게, 재분석 때 확인 범위는 넓게 잡는다.
-4. 어느 에이전트도 다른 에이전트가 정한 값을 덮어쓰지 않는다. 복잡도는 Planner 만 정한다 (재분석도 Planner 가 다시 판정하는 것).
-5. 공용 데이터(`data/`, `eval/ground_truth`)는 바꾸지 않는다.
+1. Planner 는 요건 문장에서 확인되는 것만으로 복잡도를 판정한다. 복잡도는 Planner 만 정한다 (재분석도 Planner 가 다시 판정).
+2. simple 응답의 상세 분석 권장은 강한 신호만 권장, 약한 신호는 참고 신호(`detail_analysis_notes`).
+3. 사용자 재분석 요청은 `FollowupInput(type=reanalysis, content=권장 사유 줄 + "참고: " 참고 신호 줄)` 로 Planner 에 들어가 complex 로 판정된다.
+4. 공용 데이터(`data/`)는 바꾸지 않는다.
 
-```
-요건 → Planner(simple) → Explorer ⇄ Retriever → Composer: 단순 응답 + [상세 분석 권장: 사유(강)] + [참고 신호(약)]
-                                                           │ 사용자 확인 (권장 또는 참고 신호)
-                                                           ▼
-          FollowupInput(type=reanalysis, content=사유 + "참고: " 참고 신호) → Planner(complex) → … → Simulator → Verifier → Composer
-```
+## 2. YJ 반영 결과 (이전 판 2장 1~9)
 
-## 2. 추가 수정 사항 (2026-11-02)
-
-Composer 의 권장 판단이 Planner·Explorer 출력에 더 직접 기대게 되었다 (3장 표의 "출처" 열). 그 입력이 흔들리면 권장이 과하거나 빠진다.
-
-| # | 위치 | 내용 | 이유 (run 20261102-all 근거) | 담당 |
-|---|---|---|---|---|
-| 1 | `prompts/planner.md` "## 3. 요건 항목 분리" | 항목은 **바뀌는 위치의 종류가 다를 때만** 나눈다고 명시한다 (같은 위치 종류의 변경을 문장마다 쪼개지 않음, 2장 "대상 개수가 아니라 위치의 종류" 기준과 같게). 구조 변경 유형(`data_add`·`column_spec_change`·`query_field_add`·`interface_field_add`)은 **저장·조회·연계 항목 자체가 바뀔 때만** 고른다. 같은 절의 change_type 표 머리글 행이 두 번 들어간 것도 정리 | 강한 신호 "요건 항목 2개 이상이 2개 영역 이상 변경"은 항목 수를, 신규 후보·그래프 밖 신호의 강/약은 구조 변경 유형 여부를 그대로 쓴다. 항목을 더 쪼개거나 유형을 넓게 고르면 권장이 늘어난다 | YJ |
-| 2 | `prompts/planner.md` "## 5. 그래프 밖 영역" | `out_of_graph` 에는 **소스 밖 시스템·채널만** 적고, 업무 절차·정책·담당자 안내는 넣지 않는다 (요건서에 없는 내용이면 `open_items`). 판정 예시에 반례 한 줄 추가 | SC-006(운영 문의)에서 "운영 조직의 IT 요청서 접수 정책", "타사 측 문의 접수 및 응대 절차"가 그래프 밖으로 들어가 Composer 신호가 됨. 구조 변경 요건이면 강한 신호라 불필요한 권장으로 이어진다 | YJ |
-| 3 | `prompts/planner.md` "## 7. 사용자 상세 분석 요청" | 후속 입력이 "권장 사유" 줄과 "참고: " 로 시작하는 참고 신호 줄로 온다고 적는다 (줄바꿈 구분). 권장 사유는 항목·언급 표현에 반영하고, 참고 신호는 언급 표현(동의어 포함)·확인 대상으로 반영하되 항목을 새로 만드는 것은 필요할 때만. 사유 예시 문구를 현행 형식으로 바꾼다 (예: "변경 대상 TP:… 을 여러 진입점에서 호출 (진입점 2개)", "요건 항목 2개가 screen·db 영역을 함께 변경 (…)", "참고: 공통 모듈 MOD:… 은 탐색에서 제외됨 - …") | 문장 형식이 바뀌었고 (`… 이 경로에 있어` → `변경 대상 …`), 약한 신호도 재분석 입력에 들어간다 (1장 3) | YJ |
-| 4 | `agents/explorer.py` · `schemas/explorer.py` `unresolved` | 미해결 항목을 종류가 있는 구조로도 넘긴다 (예: `unresolved_items: [{item_id, kind: new_candidate \| out_of_graph \| unmatched, text}]`). 기존 `unresolved` 문자열 목록은 호환을 위해 유지 | Composer 가 지금은 문자열 안의 "신규 후보"·"그래프 밖" 을 찾아 신호를 가른다 (`explorer.py` 153·209행 문구). 문구가 바뀌면 신호가 조용히 사라진다. 반영되면 Composer 가 `kind` 로 바꾼다 (SE) | YJ (Composer 전환은 SE) |
-| 6 | `agents/explorer.py` 경로 정리 · `rules.py` `CHANGE_TYPE_RULES` (hop 상한) | **단순 요건의 경로 수를 줄이는 방법 검토**: 항목당 경로 상한, 시작 노드 매칭 점수·목표 도달 순 정렬 후 상위만, 또는 단순 요건 change_type 의 hop 상한 하향. 어느 방법이든 정답 노드(`eval/ground_truth` `impacted`·`reference_only`)가 빠지지 않는지 함께 본다 | 단순 요건(항목 1~2개)인데 경로가 많고 실제 변경 경로는 적다: L-1 경로 56개 중 [변경] 경로 1개 (정답 노드 14개), SC-006 29개 중 0개, SC-005 33개. Composer 는 표시만 접고(2026-11-02) 입력·근거·정밀도(KPI 중앙값 0.106, Retriever 노드 기준)는 그대로라 근본 원인은 탐색량이다 | YJ |
-| 7 | `agents/explorer.py` 경로 정리 순서 (YJ_agent_design 3-4) | **경로가 많을 때 앞쪽에 둘 경로의 기준 정리**: 요건 항목·시작 노드 매칭이 강한 경로, 목표 역할에 도달한 경로, 변경 후보(쓰기 엣지·요건 컬럼)를 지나는 경로를 앞으로. 2-6 의 경로 수 줄이기와 함께 보면 된다 | Simulator 는 경로 앞 40개(`simulator.MAX_CONTEXT_PATHS`)만 LLM 에 보여 주고, 그 뒤 경로에만 있는 노드는 판정하지 않는다 ("영향 검토 필요" 로 남음, 2026-11-02 SE 반영). run 20261102-v1 에서 complex 5건이 40개를 넘었다: H-1 57, M-2 56, M-3 56, M-1 47, H-2 42. 정답 경로가 뒤로 밀리면 판정에서 빠진다 | YJ |
-| 8 | `agents/planner.py` · `prompts/planner.md` "## 2. 복잡도" | **같은 요건의 복잡도 판정이 실행마다 달라지는 것 확인**: 판정 예시(few-shot)에 조건부 변경(예: "특정 구분일 때만 문구·팝업을 바꿔 달라") 사례를 보강하거나, 사용하는 모델이 지원하면 temperature·seed 고정을 검토 | SC-003(정답 complex, 타사회선일 때만 문구 변경 + 등록 시 안내 팝업)이 run 20261102-all 에서는 1차 simple(→ 상세 분석 권장 → 재분석), run 20261102-v1 에서는 처음부터 complex 였다. 판정이 흔들리면 같은 요건이 실행마다 다른 흐름(단순 응답 / 복잡 결과물)을 탄다 | YJ |
-| 9 | `agents/explorer.py` 시작 노드 매칭·공통 제외 · `prompts/planner.md` "## 4. 언급 표현" (**제안·권고**) | **엣지로 이어지지 않는 코드·설정값 노드를 찾는 방법 검토.** 권고안 (택일·병행): (a) 시작 노드 매칭에 컬럼 `comment`·테이블 `desc` 를 검색 대상으로 넣는다 (예: 언급 "실패 고객의 사유" ↔ `FAIL_CD` comment "실패사유코드"). (b) 매칭된 컬럼의 comment 에 공통코드 그룹이 적혀 있으면(예: "공통코드 CD_CAMP_ERR_01") 공통코드 테이블(`TBL:TCP_CMM_CD`)을 조회 대상 노드로 함께 넘긴다 — 그래프에 엣지가 없으므로 Explorer 규칙으로 (공용 데이터 `data/graph` 는 바꾸지 않음). (c) `exclude_common` 은 공통 **모듈**을 거쳐 퍼지는 탐색을 막는 용도로 두고, 언급 표현으로 직접 매칭된 공통 **데이터**(공통코드 테이블·컬럼)는 제외하지 않는다. (d) Planner 언급 표현에서 문구·코드값을 바꾸거나 해석하는 요건이면 `synonyms` 에 "공통코드"·"코드값"·"설정값" 계열 표현을 넣도록 예시 보강 | run 20261102-all·v1 두 번 모두 같은 노드를 놓쳤다 (상류 변동과 무관한 반복 미탐). SC-003 (탐지율 0.333): 정답 신규 데이터가 `TBL:TCP_CMM_CD` (타사회선 문구를 공통코드로 신규 관리)인데 Explorer 가 `TBL:TCP_CMM_CD`·`SQL:CmmCdMapper.selectCdList` 에 한 번도 닿지 않음. 지금 화면(TOSCP0210M)은 공통코드를 쓰지 않아 그래프에 엣지가 없고(신규 사용), `CmmCd*` 는 `is_common`. SC-006 (탐지율 0.333): 실패 사유 운영 문의인데 `COL:TCH_MMS_SND_TGT.FAIL_CD` 가 Explorer 노드 목록에는 있으나 시작 노드·경로에 없어 Retriever 결과에서 빠지고, 코드 의미를 담은 `TBL:TCP_CMM_CD` 도 미탐색. 권고는 원인 추정이므로 반영 전 두 케이스로 매칭 로그를 먼저 확인할 것 | YJ |
-
-### SE 반영 내역 (2026-11-02, 참고)
-
-YJ 작업과 맞물리는 Composer·KPI 변경. 코드는 반영됨.
-
-| 위치 | 내용 |
-|---|---|
-| `agents/composer.py` `SimpleDraft` | `hops`(경로×노드마다 한 문장) → `changes`(이 요건으로 고칠 노드만, 노드당 한 번). 나머지 hop 은 코드가 `[참조]` 로 채운다. 근거 문장(`claims`) 10개 이내. SC-005 기준 hop 문장 168개(노드 51개) → `[변경]` 노드 수만큼 |
-| `agents/composer.py` 결과 순서 | `impact_paths` 는 `[변경]` 노드를 지나는 경로 먼저, `evidence_table` 은 `[변경]` 노드 근거 → `[변경]` 경로 위 노드 근거 → 나머지 순. 데이터는 모두 남기고 MD 는 경로 5개·근거 10행만 펼친다 |
-| `agents/composer.py` 참고 신호 | LLM 응답이 없으면(`[변경]` 표시 없음) `detail_analysis_notes` 에 "권장 판단 제한" 문구를 넣는다 (`NO_TAG_NOTE`) |
-| `agents/kpi.py` `change_tag_accuracy` | 단순 flow 도 Composer 경로 표시로 잰다. 기준값 (run 20261102-all): SC-005·SC-006·L-2·L-3·L-4 1.0, L-1 0.615 (배치 프로그램 5개를 `[참조]` 로 표시) |
-| `scripts/SE/replay_case.py` 스냅샷 | 1차 simple 이면 Composer 까지 실행해 실제 `[변경]` 표시 기반 사유·참고 신호로 reanalysis |
-| `agents/simulator.py` `SimulatorDraft` (3차) | `hops`(경로×노드, SC-001 기준 283개 문장·노드 49개) → `nodes`(노드당 한 번, `{node, change, impact}`). 고치는 노드는 빠짐없이, 확인만 하는 노드는 재분석 요청 노드·근거가 필요한 노드만 쓰고 나머지는 코드가 `[참조] 경로상 호출·조회` 로 채운다. LLM 에 보이지 않은 경로(40개 초과)에만 있는 노드는 "영향 검토 필요" (2장 7) |
-| `agents/verifier.py` `reanalysis_coverage` (3차) | 재분석 입력의 "참고:" 줄(참고 신호)에만 나온 노드는 경로에 없어도 경고만 (재계획 사유 아님). 요청 노드에 코드가 채운 기본 `[참조]` 문장만 있으면 "판정 문장 없음" 경고 |
-| `prompts/composer.md` `changes` (3차) | run 20261102-v1 에서 Composer 가 `[변경]` 노드를 덜 골라(L-2 화면 2개, L-1 설정 테이블) 단순 flow 태그 정확도가 0.94 → 0.81. "넓게 고르지 않는다" 를 "고치는 노드는 빠짐없이" 로 바꿈 |
-
-## 3. 참고: 현행 Composer 권장 신호 (2026-11-02 반영됨)
-
-`composer.detail_reasons`. 공통 모듈·여러 진입점 신호는 Composer 가 `[변경]` 으로 고른 노드(`SimpleDraft.changes`)에서만 센다
-(`[참조]` 노드는 거쳐 가기만 하므로 신호가 아님. Simulator 의 공유 노드 판단과 같은 기준).
-
-| 등급 | 신호 | 출처 | 문장 예 |
+| # | 요청 | 반영 | 위치 |
 |---|---|---|---|
-| 강 | `[변경]` 노드가 공통 모듈 | Composer hop `[변경]` + 노드 `is_common` | "공통 모듈 CTL:… 이 변경 대상이라 다른 화면·처리 영향 확인 필요" |
-| 강 | `[변경]` 노드를 여러 진입점이 지남 | 위 + `explorer.paths` (서로 다른 Entry 2개 이상) | "변경 대상 TP:… 을 여러 진입점에서 호출 (진입점 2개)" |
-| 강 | 요건 항목 2개 이상이 2개 영역 이상을 변경 | **`planner.items` 수** + `[변경]` 노드의 영역 (`rules.node_areas`) | "요건 항목 2개가 screen·db 영역을 함께 변경 (…)" |
-| 강 / 약 | 매칭 안 된 신규 후보 | `explorer.unresolved` "신규 후보". **구조 변경 유형**이 있으면 강, 없으면 약 | "그래프에 없는 항목이 있어 신규 개발 여부 확인 필요: …" |
-| 강 / 약 | 그래프 밖 연계 | `explorer.unresolved` "그래프 밖" (← `planner.out_of_graph`). 구조 변경 유형이 있으면 강, 없으면 약 | "적재 범위 밖 연계 확인 필요: …" |
-| 약 | 구조 변경 유형 | `planner.items[].change_type` ∈ data_add · column_spec_change · query_field_add · interface_field_add | "[항목 1] 저장·조회·연계 항목이 바뀌는 요건 (…)" |
-| 약 | 탐색에서 제외된 공통 모듈 | `explorer.excluded_common` | "공통 모듈 MOD:… 은 탐색에서 제외됨 - 이 요건으로 바뀌는지 확인" |
-| 약 | LLM 판단만 있음 | `SimpleDraft.detail_analysis_recommended` (규칙상 강한 신호 없음) | "원문에서 변경 요소가 보이나 탐색 신호가 없어 상세 분석은 권장하지 않음 (Agent 판단)" |
+| 1 | 항목 분리 기준 · 구조 변경 유형 | 바뀌는 위치의 종류나 **고르게 될 change_type** 이 다를 때만 나눔. 구조 변경 유형은 저장·조회·연계 항목 자체가 바뀔 때만. change_type 표 머리글 중복 정리 | `prompts/planner.md` 3장 |
+| 2 | 그래프 밖은 소스 밖 시스템·채널만 | 업무 절차·정책·접수 방법은 넣지 않고 `open_items` 로 | `prompts/planner.md` 5장 |
+| 3 | 재분석 입력 형식 | "권장 사유" 줄은 항목·언급 표현에, "참고: " 줄은 언급 표현(동의어)·확인 대상에 반영. 사유 예시를 현행 문구로 | `prompts/planner.md` 7장 |
+| 4 | 미해결 항목 구조화 | `ExplorerOutput.unresolved_items: [{item_id, kind, text}]` (kind = `new_candidate` · `out_of_graph` · `unmatched` · `tool_limit`). 기존 `unresolved` 문자열 유지 | `schemas/explorer.py`, `schemas.json`, `agents/explorer.py` |
+| 6 | 단순 요건 경로 수 | 원인은 ReAct 가 매칭 근거 없이 추가한 출발 노드에서 화면의 모든 호출로 퍼지는 것 → 그런 출발 노드에서 요건 언급 노드를 지나지 않는 경로는 출발 노드당 2개까지 (Retriever 재탐색 요청 노드 제외) | `agents/explorer.py` `_arrange_paths` |
+| 7 | 경로 순서 | 언급 노드를 많이 지나는 경로 먼저. 데이터 접근·테이블에서 끝난 경로는 언급 컬럼까지 이어 붙임 | `agents/explorer.py` `_arrange_paths`, `_extend_to_columns` |
+| 8 | 복잡도 판정 흔들림 | 조건부 변경 기준(고정 값을 구분별 값으로 → complex) + 경계 사례. Few-shot 은 형식 예시 1 + 경계 사례 5 로 축소 (14,332자 → 8,718자) | `prompts/planner.md` 2장 · 판정 예시 |
+| 9 | 공통코드 미탐 (권고) | (b)(c) 반영: 값(Column) 언급 표현이 문구·사유·코드값·설정값이면 공통코드 테이블을 시작 노드로, 그 테이블을 읽는 처리까지 역방향 (공통 제외 안 함). (d) 동의어 보강은 조건부 변경일 때만. (a) 컬럼 comment 검색은 기존 `search_text` 에 이미 포함 | `agents/explorer.py` `_code_table_starts`, `prompts/planner.md` 4장 |
 
-강한 신호 → `detail_analysis_recommended=true` + `detail_analysis_reasons`. 약한 신호 → `detail_analysis_notes` (권장 안 함).
-배경: 이전 기준("놓치지 않는 쪽으로 넓게", 신호 하나면 권장)에서 run 20261102-all 의 simple 6건 모두 불필요한 권장이 붙었다
-(경로 위 `[참조]` 노드의 진입점·공통 모듈, 유형만으로 권장, LLM 판단만으로 권장).
+함께 바뀐 것
+- 용어사전 코드 삭제: 파일이 없어 쓰이지 않던 코드(`scripts/build_graph.py` · `scripts/graph/model.py` · `tools/graph.py`)와 `MatchSource.GLOSSARY` 제거 → 그래프 결과 동일 (tos 322 · swing 366 노드, 엣지 850). Neo4j 재적재 불필요
+- 실행 로그: 에이전트마다 받은 입력 → 동작 → 근거 → 결과 (`api/agent_log.py`, `trace.py`). 파트너 에이전트는 코드를 고치지 않고 state·출력에서 뽑음
 
-## 4. 테스트 (2장 반영 시)
+## 3. 테스트 (E2E 16건, `scripts/YJ/run_all.sh`)
 
-| 대상 | 확인 |
-|---|---|
-| Planner (`tests/test_planner.py`) | 2-2: 업무 절차만 있는 운영 문의에서 `out_of_graph` 가 비는지 (가짜 LLM 응답이므로 프롬프트 예시로 확인). 2-3: "참고: " 줄이 있는 reanalysis 후속 입력이 LLM 입력에 그대로 들어가는지. 2-8: 조건부 변경 few-shot 추가 시 예시 형식 확인 (판정 흔들림 자체는 정답셋 반복 실행으로 확인) |
-| Explorer (`tests/test_explore.py`) | 2-4: 신규 후보·그래프 밖·매칭 실패가 `kind` 와 함께 나오는지, 기존 `unresolved` 문자열 유지. 2-6: 단순 요건 경로 상한·정렬이 정답 경로를 남기는지. 2-7: 경로 정렬 기준대로 앞쪽에 오는지. 2-9: 컬럼 comment 매칭으로 시작 노드가 잡히는지, comment 의 공통코드 그룹으로 공통코드 테이블이 함께 넘어가는지, 언급으로 직접 매칭된 공통 데이터가 `exclude_common` 에 걸리지 않는지 |
-| 정답셋 실행 | `scripts/SE/run_scenarios.py` 로 simple 6건(SC-005·SC-006·L-1~L-4) "불필요한 권장" 0건, SC-003 "권장 → 상세 분석 가능" 유지. 2-6 반영 전후로 simple 케이스 탐지율·정밀도·Composer 지연(타임라인) 비교, `change_tag_accuracy` 가 기준값(위 SE 반영 내역) 아래로 떨어지지 않는지. 2-9 반영 후 SC-003·SC-006 탐지율(현재 0.333) 확인 |
+UI 와 같은 전체 흐름(Planner → … → Composer → KPI). 1차 simple · 정답 complex 는 상세 분석 요청을 눌렀다고 가정(권장 사유 + "참고:" 줄). 기록: 로컬 `outputs/runs/YJ/v6/v6-{1,2,3}/report.html`.
+
+| 지표 | v6-1 (수정 전) | v6-2 | v6-3 |
+|---|---|---|---|
+| 1차 복잡도 일치 | 15/16 | 16/16 | 16/16 |
+| KPI 노드 탐지율 | 0.89 | 0.98 | 0.94 |
+| must_find | 51/56 | 56/56 | 53/56 |
+| Critical 경로 미탐 | 3/24 | 2/24 | 7/24 |
+| KPI 노드 정밀도 | 0.118 | 0.121 | 0.153 |
+| [변경] 노드 정밀도 | 0.96 | 0.92 | 1.00 |
+| [변경] 노드 재현율 | 0.64 | 0.60 | 0.65 |
+| Simulator 전달 경로 | 0.87 | 0.73 | 0.75 |
+| 불필요한 상세 분석 권장 | 0/6 | 0/6 | 0/6 |
+| 평균 지연 · 토큰 | 156초 · 17.1만 | 132초 · 13.7만 | 144초 · 14.9만 |
+
+- v6-2: SC-003 1차 complex · 탐지율 0.33 → 1.00 (공통코드 경로), SC-006 0.67 → 1.00, 경로 −32%, 재계획 2 → 0
+- v6-3: 단순 요건 정밀도 회복 (L-3 0.09 → 0.40, L-4 0.06 → 0.20). 재현율 하락은 주로 실행마다 Planner 가 언급 표현을 빼먹는 편차 (YJ 다음 과제)
+
+## 4. SE 반영 요청
+
+| # | 위치 | 내용 | 근거 (v6 E2E) |
+|---|---|---|---|
+| 1 | `agents/composer.py` `detail_reasons` | 신규 후보 · 그래프 밖 신호를 `explorer.unresolved` 문자열("신규 후보"·"그래프 밖" 문구 찾기) 대신 `explorer.unresolved_items[].kind` (`new_candidate` · `out_of_graph`) 로 판정 | 이전 판 2-4 의 SE 몫. 문자열 문구가 바뀌면 신호가 조용히 사라지는 문제 |
+| 2 | `agents/kpi.py` | 노드 정밀도와 함께 **[변경] 노드 정밀도**(Simulator·Composer 가 [변경] 으로 표시한 노드 중 정답 비율) 기록 | KPI 오탐 중 [참조]·표시 없음 노드 비율 v6-1 97.8% · v6-2 98.9% · v6-3 95.7%. [변경] 정밀도 0.96 · 0.92 · 1.00 |
+| 3 | `agents/kpi.py` · KPI 설계서 | 정답 노드가 1개뿐인 단순 요건의 정밀도 해석 기준 | SC-005 정밀도 0.02 · 0.02 · 0.03 (탐지율 1.00, [변경] 정밀도 1.00) |
+| 4 | `agents/simulator.py` · `prompts/simulator.md` | 정답 수정 영역을 모두 "참조만"으로 판정하는 케이스 확인 | SC-002 · SC-004 [변경] 재현율 0.00 (세 실행 모두). SC-004 는 정답 경로가 모두 Simulator 입력에 있었음 (전달 1.00) |
+| 5 | 〃 | [변경] 재현율 낮은 케이스 | M-2 0.17 · H-1 0.33 · M-4 0.50 (평균 0.64 → 0.60 → 0.65) |
+| 6 | 〃 | 공통코드 경로(`CTL:CmmCdController.selectCdList` → `SQL:CmmCdMapper.selectCdList` → `TBL:TCP_CMM_CD`)가 이제 입력에 들어감 → 공통코드 데이터 등록을 TBL [변경](add/modify)으로 판정하는지 확인 | SC-003 [변경] 재현율 0.50 (정답 변경 노드 2개 중 1개) |
+| 7 | 스키마 공유 | `ExplorerOutput.unresolved_items` 추가, `MatchSource` 에서 `glossary` 제거 | 머지 후 `tests/test_schema_sync.py` 로 확인 |
+
+## 5. 확인 방법
+
+```bash
+git merge dev                                              # (dev-yj) / (dev) git pull origin dev
+PYTHONPATH=src python3 -m pytest -q                        # 396 passed
+zsh scripts/YJ/run_all.sh <실행 폴더> <기준 실행>             # 예: v6/v6-4 v6/v6-3 → outputs/runs/YJ/<실행 폴더>/report.html
+```
+
+report.html 5장 "개선 후보" 아래쪽 `[SE]` 항목이 이 문서 4장과 같은 내용이다.

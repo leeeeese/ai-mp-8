@@ -15,6 +15,9 @@ from impact_agent.schemas import (
     Direction,
     Domain,
     ExploreItem,
+    ExplorePath,
+    ExplorerOutput,
+    MatchSource,
     Mention,
     MentionKind,
     NodeRole,
@@ -22,6 +25,7 @@ from impact_agent.schemas import (
     RequestType,
     SearchGraphNodesInput,
     SmPart,
+    StartNodeChoice,
     StopReason,
     StructuredRequest,
     TraverseGraphInput,
@@ -42,6 +46,8 @@ NODES = [
     ("BAT:TORD100", "Batch", "Entry", "주문 전송 배치", "job/TORD100.xml", 1, {"interfaces": ["IF-ORD-001 주문 전송"]}),
     ("SQL:tord100.C_ORD", "SQL", "DataAccess", "tord100.C_ORD", "job/TORD100.xml", 2, {}),
     ("CTL:CmmCdController.get", "Controller", "EntryHandler", "CmmCdController.get", "java/Cmm.java", 1, {"is_common": True}),
+    ("SQL:CmmCdMapper.list", "SQL", "DataAccess", "CmmCdMapper.list", "mapper/Cmm.xml", 1, {"is_common": True}),
+    ("TBL:TCM_CMM_CD", "Table", "Table", "공통코드", "ddl/TCM_CMM_CD.sql", 1, {"desc": "공통코드"}),
 ]
 EDGES = [
     ("SCR:ORD01", "CTL:OrdController.save", "CALLS", {"event": "save"}),
@@ -54,6 +60,8 @@ EDGES = [
     ("TBL:TOR_ORD", "COL:TOR_ORD.ORD_ID", "HAS_COLUMN", {}),
     ("BAT:TORD100", "SQL:tord100.C_ORD", "EXECUTES", {}),
     ("SQL:tord100.C_ORD", "TBL:TOR_ORD", "READS", {"columns": "ORD_ID"}),
+    ("CTL:CmmCdController.get", "SQL:CmmCdMapper.list", "EXECUTES", {}),
+    ("SQL:CmmCdMapper.list", "TBL:TCM_CMM_CD", "READS", {"columns": "CD_VAL"}),
 ]
 SOURCES = {
     "web/ORD01.jsp": "<%-- 화면ID: ORD01 --%>\n<input id=\"chkAdvt\">",
@@ -297,4 +305,60 @@ def test_paths_alternate_items_and_drop_contained(env):
     assert [p.item_id for p in state.explorer.paths][:2] == [1, 2]  # 항목을 번갈아
     paths = [p.nodes for p in state.explorer.paths]
     assert not any(len(x) < len(y) and any(y[i:i + len(x)] == x for i in range(len(y))) for x in paths for y in paths)
+
+
+def test_code_value_mention_adds_common_code_table(env):
+    # 값(Column) 언급이 문구·코드값이면 공통코드 테이블을 시작 노드로 더하고, 읽는 처리까지 역방향 (공통 모듈이어도 제외 안 함)
+    mentions = [Mention(kind=MentionKind.SCREEN, phrase="주문 등록"), Mention(kind=MentionKind.COLUMN, phrase="하단 안내 문구")]
+    state = analyze(supervisor(env, plan([item(ChangeType.SCREEN_CHANGE, mentions, Direction.FORWARD, NodeRole.ENTRY_HANDLER)])))
+    exp = state.explorer
+    assert any(s.node_id == "TBL:TCM_CMM_CD" and s.reason.startswith("공통코드") for s in exp.start_nodes)
+    assert ["CTL:CmmCdController.get", "SQL:CmmCdMapper.list", "TBL:TCM_CMM_CD"] in [p.nodes for p in exp.paths]
+
+    plain = [Mention(kind=MentionKind.SCREEN, phrase="주문 등록"), Mention(kind=MentionKind.TERM, phrase="하단 안내 문구")]
+    state = analyze(supervisor(env, plan([item(ChangeType.SCREEN_CHANGE, plain, Direction.FORWARD, NodeRole.ENTRY_HANDLER)])))
+    assert "TBL:TCM_CMM_CD" not in {s.node_id for s in state.explorer.start_nodes}  # Term 언급은 대상 아님
+
+
+def test_unsupported_paths_from_unmatched_start_are_capped(env):
+    # 매칭 근거 없는 출발 노드(ReAct 가 고른 노드, 점수 없음)에서 언급 노드를 지나지 않는 경로는 출발 노드당 2개까지, 언급 노드를 지나는 경로가 앞
+    store, _ = env
+    p = plan([item(ChangeType.STRUCTURE_QUERY, [Mention(kind=MentionKind.TERM, phrase="광고여부")], Direction.FORWARD, NodeRole.COLUMN)])
+    bat = "BAT:TORD100"
+    out = ExplorerOutput(start_nodes=[StartNodeChoice(item_id=1, node_id=bat, matched_keyword=bat, match_source=MatchSource.TEXT, reason="ReAct")],
+                         nodes=[], edges=[], paths=[
+        ExplorePath(item_id=1, nodes=[bat, n], direction=Direction.FORWARD, reached_role=NodeRole.LOGIC, stop_reason=StopReason.TARGET_REACHED)
+        for n in ("SQL:tord100.C_ORD", "CTL:OrdController.save", "SVC:OrdService.save", "SQL:OrdMapper.insert", "COL:TOR_ORD.ADVT_YN")])
+    ExplorerAgent(store=store)._arrange_paths(p, out)
+    assert [q.nodes[-1] for q in out.paths] == ["COL:TOR_ORD.ADVT_YN", "SQL:tord100.C_ORD", "CTL:OrdController.save"]
+
+
+def test_path_ending_at_data_access_extends_to_mentioned_column(env):
+    # 데이터 접근에서 끝난 경로가 언급 매칭 컬럼의 테이블을 쓰면 테이블·컬럼까지 잇는다 (같은 항목만)
+    store, _ = env
+    p = plan([item(ChangeType.QUERY_FIELD_ADD, [Mention(kind=MentionKind.COLUMN, phrase="광고여부")], Direction.FORWARD, NodeRole.DATA_ACCESS)])
+    path = ["SCR:ORD01", "CTL:OrdController.save", "SVC:OrdService.save", "SVC:OrdService.saveItem", "SQL:OrdMapper.insert"]
+    out = ExplorerOutput(start_nodes=[StartNodeChoice(item_id=1, node_id="COL:TOR_ORD.ADVT_YN", matched_keyword="광고여부",
+                                                      match_source=MatchSource.TEXT, score=1.0, reason="r")],
+                         nodes=[store.node(n) for n in path], edges=[],
+                         paths=[ExplorePath(item_id=1, nodes=path, direction=Direction.FORWARD, reached_role=NodeRole.DATA_ACCESS,
+                                            stop_reason=StopReason.TARGET_REACHED)])
+    ExplorerAgent(store=store)._arrange_paths(p, out)
+    assert out.paths[0].nodes[-2:] == ["TBL:TOR_ORD", "COL:TOR_ORD.ADVT_YN"]
+    assert {"TBL:TOR_ORD", "COL:TOR_ORD.ADVT_YN"} <= {n.node_id for n in out.nodes}
+    assert {("SQL:OrdMapper.insert", "TBL:TOR_ORD"), ("TBL:TOR_ORD", "COL:TOR_ORD.ADVT_YN")} <= {(e.from_id, e.to_id) for e in out.edges}
+
+
+def test_reexplore_request_nodes_are_not_capped(env):
+    # Retriever 가 원문 근거로 재탐색을 요청한 노드에서 나온 경로는 근거가 있으므로 상한에서 뺀다
+    store, _ = env
+    p = plan([item(ChangeType.STRUCTURE_QUERY, [Mention(kind=MentionKind.TERM, phrase="광고여부")], Direction.FORWARD, NodeRole.COLUMN)])
+    bat = "BAT:TORD100"
+    paths = [ExplorePath(item_id=1, nodes=[bat, n], direction=Direction.FORWARD, reached_role=NodeRole.LOGIC, stop_reason=StopReason.TARGET_REACHED)
+             for n in ("SQL:tord100.C_ORD", "CTL:OrdController.save", "SVC:OrdService.save")]
+    agent = ExplorerAgent(store=store)
+    agent._evidence_starts = {bat}
+    out = ExplorerOutput(start_nodes=[], nodes=[], edges=[], paths=paths)
+    agent._arrange_paths(p, out)
+    assert len(out.paths) == 3
 

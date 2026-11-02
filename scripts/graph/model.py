@@ -146,22 +146,8 @@ COMMON_DESC = re.compile(r"공통\s*(유틸|모듈|코드|기동기|클라이언
 SEARCH_PROPS = ("desc", "comment", "program_name", "program_desc", "code_grp_nm")
 
 
-def enrich(graph: ParseResult, glossary: list[dict]) -> None:
-    """역할(role), 공통 여부(is_common), 용어사전(terms), 검색 문자열(search_text)을 노드에 붙인다.
-
-    glossary: [{term, synonyms: [..], node_id, domain}] (data/glossary/<domain>.csv)
-    """
-    by_id = {n["node_id"]: n for n in graph.nodes}
-    for g in glossary:
-        node = by_id.get(g["node_id"])
-        if node is None:
-            graph.errors.append(f"용어사전 {g['domain']}: 노드 없음 {g['node_id']} (용어 {g['term']})")
-            continue
-        terms = node["properties"].setdefault("terms", [])
-        for t in [g["term"], *g["synonyms"]]:
-            if t and t not in terms:
-                terms.append(t)
-
+def enrich(graph: ParseResult) -> None:
+    """역할(role), 공통 여부(is_common), 검색 문자열(search_text)을 노드에 붙인다."""
     for n in graph.nodes:
         n["role"] = LABEL_ROLE[n["label"]]
         p = n["properties"]
@@ -170,7 +156,7 @@ def enrich(graph: ParseResult, glossary: list[dict]) -> None:
             program.startswith(COMMON_PREFIXES) or n["name"].startswith(COMMON_PREFIXES)
             or any(COMMON_DESC.search(str(p.get(k, ""))) for k in ("program_name", "program_desc", "desc")))
         key = n["node_id"].split(":", 1)[1]
-        parts = [key, n["name"], *(str(p[k]) for k in SEARCH_PROPS if p.get(k)), *p.get("terms", [])]
+        parts = [key, n["name"], *(str(p[k]) for k in SEARCH_PROPS if p.get(k))]
         p["search_text"] = " ".join(dict.fromkeys(parts))
 
 
@@ -221,7 +207,7 @@ def write_cypher(graph_dir: Path, nodes: list[dict], edges: list[dict]) -> None:
     (graph_dir / "seed.cypher").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
 
-# 노드명·설명·컬럼 코멘트·용어사전을 묶은 search_text 검색용. cjk 분석기는 한글을 2글자 단위로 나눠 부분 일치("광고" → "광고여부")를 지원한다
+# 노드명·설명·컬럼 코멘트를 묶은 search_text 검색용. cjk 분석기는 한글을 2글자 단위로 나눠 부분 일치("광고" → "광고여부")를 지원한다
 FULLTEXT_INDEX = ("CREATE FULLTEXT INDEX node_search IF NOT EXISTS FOR (n:Node) ON EACH [n.search_text] "
                   "OPTIONS {indexConfig: {`fulltext.analyzer`: 'cjk'}}")
 

@@ -23,11 +23,11 @@ from .. import config
 from ..schemas import Complexity
 from ..state import AgentState
 from ..trace import logger as trace_logger
-from .agent_log import TITLE, input_rows, output_rows, render
+from .agent_log import TITLE, input_rows, output_rows, render, render_brief
 
 Emit = Callable[[dict], None]
 Log = Callable[..., None]  # SessionRecord.log
-console = logging.getLogger("impact_agent.console")  # 실행 로그 터미널 출력 (uvicorn 머리표 없이 블록 그대로)
+console = logging.getLogger("impact_agent.console")  # 터미널 진행 출력 (uvicorn 머리표 없이, 에이전트 시작·끝·라우팅만)
 console.propagate = False
 if not console.handlers:
     console.addHandler(logging.StreamHandler())
@@ -169,17 +169,20 @@ class SessionRecord:
     logs: list[dict] = field(default_factory=list)  # 상세 실행 로그 (라운드를 넘어 누적)
     log_path: Path | None = None
     _section: str | None = None  # 마지막으로 찍은 섹션 (섹션 머리 줄 판단)
+    _title: str = ""  # 지금 열려 있는 블록 제목 (터미널 블록 끝 줄에 붙임)
     finished: bool = False
     state: AgentState | None = None
     cond: threading.Condition = field(default_factory=threading.Condition)
 
     def log(self, agent: str, text: str, kind: str = "row", section: str | None = None, label: str = "") -> None:
-        """로그 한 건을 저장하고 터미널 · 세션 로그 파일에 같은 블록 형식으로 찍는다 (표시는 agent_log.render)."""
+        """로그 한 건을 저장하고, 터미널엔 진행만(agent_log.render_brief), 세션 로그 파일엔 전체 블록(agent_log.render)을 찍는다."""
         entry = {"at": datetime.now().strftime("%H:%M:%S"), "agent": agent, "kind": kind, "section": section, "label": label, "text": text}
         self.logs.append(entry)
-        lines, self._section = render(entry, self._section)
-        for line in lines:
+        if kind == "open":
+            self._title = text
+        for line in render_brief(entry, self._title):
             console.info(line)
+        lines, self._section = render(entry, self._section)
         if self.log_path is not None:
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.log_path, "a", encoding="utf-8") as f:

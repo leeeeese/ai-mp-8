@@ -256,7 +256,7 @@ data: {"node": "retriever", "status": "done", ..., "evidence": [{"nodeId": "SCR:
 | 근거 | Retriever 근거 목록, Simulator hop 별 영향·근거 위치, Verifier 점검 전체, Composer 주장-근거 표 | `api/agent_log.output_rows` |
 | 결과 → 다음 단계 | 다음 단계로 넘기는 출력 (판정·항목, 경로 전체, 재탐색 요청, 영역 판정, 결론·권장 사유 등) | `api/agent_log.output_rows` |
 
-- 터미널(`impact_agent.console`, uvicorn 머리표 없음) · `outputs/logs/<세션 8자>.log` · `GET /api/sessions/{id}/logs`(세션 화면 "실행 로그") 모두 같은 내용이다. 줄이거나 숨기지 않는다 (긴 Thought·Observation 만 한 행 400~500자).
+- 터미널(`impact_agent.console`)은 진행만 (▶ 시작 · ■ 끝 한 줄 · ↓ 라우팅). `outputs/logs/<세션 8자>.log` · `GET /api/sessions/{id}/logs`(세션 화면 "실행 로그")는 전체 (긴 Thought·Observation 만 한 행 400~500자). 테두리·막대 없이 들여쓰기로 구조를 보인다.
 - 로그 항목: `{at, agent, kind, section, label, text}`. `kind` = run · note · open · row · plain · close · route.
 - 파트너 에이전트(Simulator·Verifier·Composer)는 코드를 고치지 않고, 받은 입력·결과를 state·출력에서 뽑는다.
 - CLI·평가 스크립트는 받는 곳이 없어 출력하지 않는다.

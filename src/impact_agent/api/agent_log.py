@@ -4,7 +4,8 @@
 에이전트 블록은 받은 입력(← 앞 단계) → 동작 → 근거 → 결과(→ 다음 단계) 섹션으로 나눈다.
 받은 입력은 실행 직전 state 에서(input_rows), 결과·근거는 에이전트 출력에서(output_rows) ProgressAgent 가 뽑고,
 동작(tool·ReAct·LLM)은 에이전트가 진행 중에 trace 로 남긴다. 파트너 에이전트 코드는 건드리지 않는다.
-터미널·파일·화면 모두 같은 내용 (줄이거나 숨기지 않음).
+파일·화면은 전체 내용 (줄이거나 숨기지 않음). 터미널은 진행만 (render_brief): 어떤 에이전트가 돌고 있는지(▶),
+무엇을 넘기고 끝났는지(■ 블록 끝 한 줄), 어디로 갔는지(↓ 라우팅). 블록 안 행은 찍지 않는다.
 """
 
 import unicodedata
@@ -16,7 +17,6 @@ from ..schemas import AgentRunRecord, Complexity, SmPart, VerifyResult
 from ..state import AgentState
 from ..trace import clip
 
-WIDTH = 110  # 블록 머리·꼬리 선 길이 (한글은 2칸)
 LABEL_WIDTH = 10
 SEP = " > "
 INTAKE_TITLE = "0 요청 접수"
@@ -41,29 +41,43 @@ def _pad(text: str, cells: int) -> str:
     return text + " " * max(cells - _cells(text), 0)
 
 
-def _fill(head: str, ch: str) -> str:
-    return head + ch * max(WIDTH - _cells(head), 3)
-
-
 def render(e: dict, last_section: str | None) -> tuple[list[str], str | None]:
     """로그 한 건 → 출력 줄. 섹션이 바뀌면 머리 줄을 넣는다. (줄, 현재 섹션) 을 돌려준다."""
-    kind, text = e["kind"], e["text"]
+    kind, text = e["kind"], e["text"]  # 테두리·막대 없이 들여쓰기로만 구조를 보인다
     if kind == "run":
-        return ["", _fill(f"══ {text} ", "═")], None
+        return ["", f"[{text}]"], None
     if kind == "open":
-        return [_fill(f"┌─ {text} ", "─")], None
+        return ["", f"▶ {text}"], None
     if kind == "close":
-        return [f"└─ {text}"], None
+        return [f"  ■ {text}"], None
     if kind == "route":
-        return [f"   ↓ {text}"], None
+        return [f"  ↓ {text}"], None
     if kind == "note":
-        return [f"   {_pad(e['label'], LABEL_WIDTH)} {text}"], last_section
+        return [f"  {_pad(e['label'], LABEL_WIDTH)} {text}"], last_section
     lines = []
     section = e["section"] or last_section
     if section and section != last_section:
-        lines.append(f"│ ▸ {section}")
-    lines.append(f"│     {text}" if kind == "plain" else f"│   {_pad(e['label'], LABEL_WIDTH)} {text}")
+        lines.append(f"  ▸ {section}")
+    lines.append(f"      {text}" if kind == "plain" else f"    {_pad(e['label'], LABEL_WIDTH)} {text}")
     return lines, section
+
+
+def render_brief(e: dict, title: str) -> list[str]:
+    """터미널용 한 줄 (진행만). title = 지금 열려 있는 블록 제목 (블록 끝 줄에 붙인다)."""
+    kind, text = e["kind"], e["text"]
+    if kind == "run":
+        return ["", f"[{text}]"]
+    if kind == "open":
+        return [f"▶ {text}"]
+    if kind == "close":
+        return [f"■ {_pad(title.split(' · ')[0], 16)} {text}"]
+    if kind == "route":
+        return [f"   ↓ {text}"]
+    if kind == "note" and e["label"] in ("입력", "분석 실패") or (kind == "note" and "생략" in text):
+        return [f"   {e['label']} {clip(text, 100)}"]
+    if kind == "row" and e["label"] in ("LLM 오류", "tool 한도"):
+        return [f"   ! {e['label']} {clip(text, 120)}"]
+    return []
 
 
 # --- 받은 입력 (실행 직전 state) ------------------------------------------------------------------
@@ -294,6 +308,17 @@ def run_table(runs: list[AgentRunRecord]) -> list[str]:
 def run_total(runs: list[AgentRunRecord]) -> str:
     tokens = sum((r.input_tokens or 0) + (r.output_tokens or 0) for r in runs)
     return f"합계 {sum(r.latency_ms for r in runs) / 1000:.1f}s │ tool {sum(r.tool_calls for r in runs)} │ 토큰 {tokens:,}"
+
+
+def kpi_brief(state: AgentState) -> str:
+    """KPI 블록 끝 한 줄 (터미널에도 보임). KPI 는 결과물에 반영하지 않는다."""
+    k = state.kpi
+    if k is None or not k.evaluable:
+        return "정답셋 없음 · 결과물에 반영 안 함"
+    v = {m.name.value: m.value for m in k.metrics}
+    parts = [f"{label} {v[n]:.2f}" for n, label in (("node_recall", "탐지율"), ("node_precision", "정밀도"), ("complexity_match", "복잡도 일치"))
+             if v.get(n) is not None]
+    return " │ ".join(parts + ["결과물에 반영 안 함"])
 
 
 def kpi_rows(state: AgentState) -> list[tuple[str, str]]:

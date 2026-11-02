@@ -948,7 +948,6 @@
     "MatchSource": {
       "enum": [
         "confirmed",
-        "glossary",
         "text"
       ],
       "title": "MatchSource",
@@ -1233,6 +1232,14 @@
             "$ref": "#/$defs/ReactStep"
           },
           "title": "React Trace",
+          "type": "array"
+        },
+        "unresolved_items": {
+          "description": "unresolved 와 같은 내용을 종류와 함께 (호환을 위해 unresolved 유지)",
+          "items": {
+            "$ref": "#/$defs/UnresolvedItem"
+          },
+          "title": "Unresolved Items",
           "type": "array"
         }
       },
@@ -3026,6 +3033,46 @@
         "req_id"
       ],
       "title": "AnswerKey",
+      "type": "object"
+    },
+    "UnresolvedItem": {
+      "description": "미해결 항목 (종류 포함). Composer 가 문구 대신 kind 로 신호를 가르게 한다 (planner_detail_analysis_to-be.md 2-4).",
+      "properties": {
+        "item_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "탐색 명세 항목. tool 한도처럼 항목과 무관하면 null",
+          "title": "Item Id"
+        },
+        "kind": {
+          "description": "new_candidate 신규 후보 / out_of_graph 그래프 밖 / unmatched 매칭 실패 / tool_limit tool 한도",
+          "enum": [
+            "new_candidate",
+            "out_of_graph",
+            "unmatched",
+            "tool_limit"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "text": {
+          "description": "unresolved 와 같은 문장",
+          "title": "Text",
+          "type": "string"
+        }
+      },
+      "required": [
+        "kind",
+        "text"
+      ],
+      "title": "UnresolvedItem",
       "type": "object"
     }
   }

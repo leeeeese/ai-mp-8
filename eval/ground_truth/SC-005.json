@@ -6,14 +6,14 @@
   "sm_part": "marketing",
   "domain": "tos",
   "input_type": "requirement",
-  "request_text": "RCS 는 '무료' 문구를 뺄 수 없으니, RCS 로 발송하는 캠페인은 기획 화면에서 회선구분 '타사' 옵션을 딤 처리해서 선택하지 못하게 해 주세요. [협의 경과] SM 검토 후 개발 담당자·현업과 딤 대신 히든 처리로 합의",
+  "request_text": "RCS 는 '무료' 문구를 뺄 수 없으니, RCS 로 발송하는 캠페인은 캠페인 등록 화면에서 회선구분 '타사' 옵션을 딤 처리해서 선택하지 못하게 해 주세요. [협의 경과] SM 검토 후 개발 담당자·현업과 딤 대신 히든 처리로 합의",
   "expected": {
     "feasibility": "feasible",
     "start_keywords": [
       "RCS",
       "회선구분",
       "타사",
-      "캠페인 기획",
+      "캠페인 등록",
       "히든"
     ],
     "start_nodes": [

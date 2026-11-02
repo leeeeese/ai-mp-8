@@ -166,13 +166,14 @@ def test_render_keeps_full_text_and_heads_sections_once(tmp_path, gt_dir):
     from impact_agent.api.agent_log import render
     long = {"at": "", "agent": "x", "kind": "row", "section": "S", "label": "L", "text": "가" * 300}
     lines, section = render(long, None)
-    assert lines[0] == "│ ▸ S" and section == "S" and lines[1].endswith("가" * 300)          # 자르지 않음
-    assert render({**long, "section": None}, "S")[0][0].startswith("│   L")                   # 같은 섹션은 머리 줄 없음
+    assert lines[0] == "  ▸ S" and section == "S" and lines[1].endswith("가" * 300)          # 자르지 않음
+    assert render({**long, "section": None}, "S")[0][0].startswith("    L")                   # 같은 섹션은 머리 줄 없음
+    assert not any(ch in "".join(lines) for ch in "┌│└═─")                                      # 테두리·막대 없음
 
     c = client(tmp_path, gt_dir)
     sid = create(c)
     text = (tmp_path / "logs" / f"{sid[:8]}.log").read_text(encoding="utf-8")
-    assert "┌─ 1 Planner" in text and "│ ▸ 받은 입력 ← Planner" in text and "└─ 완료" in text and "   ↓ EXPLORER" in text
+    assert "▶ 1 Planner" in text and "  ▸ 받은 입력 ← Planner" in text and "  ■ 완료" in text and "  ↓ EXPLORER" in text
 
 
 def test_trace_goes_nowhere_after_run(tmp_path, gt_dir, caplog):

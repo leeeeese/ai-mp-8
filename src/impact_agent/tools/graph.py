@@ -66,14 +66,11 @@ def _term_weight(term: str, index: int) -> float:
 def _score_node(node: GraphNode, terms: list[str]) -> tuple[float, str, MatchSource]:
     """가장 잘 맞는 표현의 (점수 × 가중치) + 함께 통째로 맞은 다른 표현마다 0.05."""
     text = node.properties.get("search_text") or node.name
-    glossary = [t.lower() for t in node.properties.get("terms") or []]
     best = (0.0, terms[0], MatchSource.TEXT)
     full = 0
     for i, t in enumerate(terms):
         raw = term_score(t, text)
-        src = MatchSource.GLOSSARY if any(term_score(t, g) == 1.0 for g in glossary) else MatchSource.TEXT
-        if src is MatchSource.GLOSSARY:
-            raw = 1.0
+        src = MatchSource.TEXT
         full += raw == 1.0
         s = raw * _term_weight(t, i)
         if s > best[0]:

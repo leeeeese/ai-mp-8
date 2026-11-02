@@ -27,7 +27,7 @@ from ..agents.supervisor import COMPOSER_FOLLOWUPS
 from ..schemas import AnswerKey, ChecklistOwner, ChecklistStatus, FollowupInput, FollowupType, SmPart, UserInput
 from ..state import AgentState
 from ..trace import clip as _clip
-from .agent_log import INTAKE_TITLE, Row, followup_rows, intake_rows, kpi_rows, run_table, run_total
+from .agent_log import INTAKE_TITLE, Row, followup_rows, intake_rows, kpi_brief, kpi_rows, run_table, run_total
 from .auth import Auth, admin_router, auth_router, can
 from .graph import GraphSource, default_source, graph_router
 from .runner import JsonStore, Runner, SessionRecord
@@ -162,7 +162,7 @@ def create_app(supervisor_factory: Callable[[], Any] | None = None, kpi_path: Pa
             rec.log("kpi", f"KPI 평가 · 정답셋 {state.kpi.req_id if state.kpi and state.kpi.req_id else '없음'}", kind="open")
             for label_, value in kpi_rows(state):
                 rec.log("kpi", value, label=label_)
-            rec.log("kpi", "KPI 는 결과물에 반영하지 않음", kind="close")
+            rec.log("kpi", kpi_brief(state), kind="close")
         finally:
             rec.push({"node": "supervisor", "status": "done", "detail": "완료"})
             rec.finish()

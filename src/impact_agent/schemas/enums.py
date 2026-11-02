@@ -99,7 +99,6 @@ class MentionKind(str, Enum):
 
 class MatchSource(str, Enum):
     CONFIRMED = "confirmed"  # 사용자가 확정한 매핑
-    GLOSSARY = "glossary"  # 용어사전(terms) 일치
     TEXT = "text"  # 노드명·설명·코멘트 검색
 
 
