@@ -38,11 +38,9 @@ load_dotenv(ROOT / ".env")
 from run_scenarios import fmt, md_case, metric_values, perf  # noqa: E402
 
 from impact_agent.agents import Supervisor  # noqa: E402
-from impact_agent.agents.composer import detail_reasons  # noqa: E402
 from impact_agent.agents.kpi import load_answer_key  # noqa: E402
 from impact_agent.agents.retriever import _summary  # noqa: E402
 from impact_agent.agents.simulator import NODE_ID_IN_TEXT, requirement_difficulty  # noqa: E402
-from impact_agent.rules import build_impact_paths  # noqa: E402
 from impact_agent.schemas import (  # noqa: E402
     Complexity,
     Direction,
@@ -92,9 +90,9 @@ def snapshot(case: str) -> None:
     state = sup.analyze(user_input, until="retriever", answer_key=load_answer_key(GT_DIR / f"{case}.json"))
     first = state.planner.complexity
     if first is Complexity.SIMPLE and gt.get("complexity") == "complex":  # run_scenarios.py 와 같은 가정 (사용자 상세 분석 요청)
-        exp, ret = state.explorer, state.retriever
-        paths = [p for p, _ in build_impact_paths(exp.paths, exp.edges, ret.evidence if ret else [])] if exp else []
-        reasons, notes = detail_reasons(state, paths)  # 약한 신호도 함께 (run_scenarios.py·UI 와 같음)
+        # 1차 단순 응답을 실제 흐름처럼 Composer 로 만든다 (권장 신호가 Composer 의 [변경] 표시를 쓰므로)
+        answer = sup.composer.run(state.model_copy(deep=True)).simple_answer
+        reasons, notes = answer.detail_analysis_reasons, answer.detail_analysis_notes  # 약한 신호도 함께 (run_scenarios.py·UI 와 같음)
         content = "\n".join(reasons + [f"참고: {x}" for x in notes]) or "상세 분석 요청"
         state = sup.followup(sup.last_session_id, FollowupInput(type=FollowupType.REANALYSIS, content=content),
                              until="retriever")

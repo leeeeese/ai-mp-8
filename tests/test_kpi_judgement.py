@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from impact_agent.agents import ComposerAgent, KpiAgent, SimulatorAgent, VerifierAgent
-from impact_agent.agents.composer import SimpleDraft
+from impact_agent.agents.composer import DraftChange, SimpleDraft
 from impact_agent.agents.kpi import infer_system, judge, load_answer_key, node_type, stage_of
 from impact_agent.llm import Usage
 from impact_agent.schemas import (
@@ -142,10 +142,11 @@ def test_reanalyzed_flag_and_verifier_unresolved():
 
 
 class TagLLM:
-    """단순 응답 hop 에 [변경]/[참조] 만 표시하는 가짜 LLM (MOD:PntSvc.checkLimit [변경]). 권장 신호는 [변경] 노드에서만 센다."""
+    """단순 응답에서 MOD:PntSvc.checkLimit 만 [변경] 으로 고르는 가짜 LLM (나머지는 [참조]). 권장 신호는 [변경] 노드에서만 센다."""
 
     def parse(self, system, user, schema):
-        return SimpleDraft(conclusion_lines=[], hops=CHANGE_HOPS, claims=[], check_queries=[], inquiry_contacts=[],
+        return SimpleDraft(conclusion_lines=[], changes=[DraftChange(node="MOD:PntSvc.checkLimit", impact="한도 상수 변경")],
+                           claims=[], check_queries=[], inquiry_contacts=[],
                            detail_analysis_recommended=False, mail=None), Usage()
 
 
@@ -165,6 +166,7 @@ def test_detail_recommended_simple_flow(paths, gt, recommended, note):
     kpi = kpi_of(state, swing_key(complexity=gt))
     v = values(kpi)
     assert v[M.DETAIL_RECOMMENDED] == recommended
+    assert v[M.CHANGE_TAG_ACCURACY] == 1.0                                                # 단순 flow 도 Composer 표시를 잰다
     assert v[M.COMPLEXITY_MATCH] == (1.0 if gt is Complexity.SIMPLE else 0.0)
     assert M.DIFFICULTY_MATCH not in v and M.AREA_IMPACT_MATCH not in v                   # 단순 flow 는 Simulator 없음
     assert any(note in n for n in kpi.judgement_notes) if note else kpi.judgement_notes == [f"복잡도: 정답 {gt.value} / 실행 simple"]

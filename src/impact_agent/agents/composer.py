@@ -63,8 +63,7 @@ from ..tools import save_report
 from .base import BaseAgent
 from .simulator import (
     CHANGE_TAG,
-    DraftHop,
-    apply_hop_impacts,
+    REFERENCE_TAG,
     reanalysis_request,
     requirement_difficulty,
     unverified_segments,
@@ -82,6 +81,9 @@ MAX_EVIDENCE_NAMES = 5
 MAX_CONTEXT_EVIDENCE = 40
 MAX_DETAIL_REASONS = 5  # 상세 분석 권장 사유 수
 LLM_DETAIL_REASON = "원문에서 변경 요소가 보이나 탐색 신호가 없어 상세 분석은 권장하지 않음 (Agent 판단)"
+NO_TAG_NOTE = "LLM 응답이 없어 노드별 [변경] 표시를 하지 못함 - 공통 모듈·여러 진입점 신호로는 권장 여부를 판단하지 못함"
+REFERENCE_IMPACT = "경로상 호출·조회 (이 요건으로 바뀌지 않음)"  # LLM 이 [변경] 으로 고르지 않은 hop
+MAX_CLAIMS = 10  # 단순 응답 LLM 이 쓰는 근거 문장 수
 
 
 # --- LLM 응답 형식 (Structured Outputs 호환: 기본값 없이 모든 필드 명시) ---------------------
@@ -108,10 +110,15 @@ class DraftMail(BaseModel):
     body: str
 
 
+class DraftChange(BaseModel):
+    node: str = Field(description="[경로 노드] 에 있는 노드 ID 그대로")
+    impact: str = Field(description="이 요건으로 이 노드에서 바뀌는 것 한 문장")
+
+
 class SimpleDraft(BaseModel):
     conclusion_lines: list[str] = Field(description="3~5줄. 결론 먼저, 노드명·테이블명을 붙여 쓴다")
-    hops: list[DraftHop] = Field(description="경로 노드별 영향 한 문장")
-    claims: list[DraftClaim]
+    changes: list[DraftChange] = Field(description="이 요건으로 코드·데이터를 고쳐야 하는 노드만, 노드당 한 번. 나머지는 [참조]")
+    claims: list[DraftClaim] = Field(description="[변경] 노드와 결론에 쓴 노드의 근거만, 10개 이내")
     check_queries: list[DraftQuery] = Field(description="운영 문의일 때 확인용 SQL. 아니면 []")
     inquiry_contacts: list[str] = Field(description="문의가 필요한 담당·부서. 없으면 []")
     detail_analysis_recommended: bool = Field(description="원문에서 변경 요소가 보이면 true (참고 신호로만 쓰임)")
@@ -193,15 +200,18 @@ class ComposerAgent(BaseAgent[ComposerOutput]):
         paths = [p for p, _ in build_impact_paths(exp.paths if exp else [], exp.edges if exp else [], evidence)]
         draft: SimpleDraft | None = self._draft(SimpleDraft, simple_message(state, paths))
         if draft is not None:
-            apply_hop_impacts(draft, paths)
-        claims = {c.node_id: c.claim for c in draft.claims} if draft else {}
+            apply_changes(draft.changes, paths)
+            paths = changed_first(paths)
+        claims = {c.node_id: c.claim for c in draft.claims[:MAX_CLAIMS]} if draft else {}
         reasons, notes = detail_reasons(state, paths)
-        if not reasons and draft is not None and draft.detail_analysis_recommended:  # LLM 판단만으로는 권장하지 않음
+        if draft is None:  # [변경] 표시가 없으면 노드 신호가 조용히 빠지므로 알린다
+            notes.append(NO_TAG_NOTE)
+        elif not reasons and draft.detail_analysis_recommended:  # LLM 판단만으로는 권장하지 않음
             notes.append(LLM_DETAIL_REASON)
         answer = SimpleAnswer(
             conclusion_lines=fit_lines(draft.conclusion_lines if draft else [], rule_conclusion(state, paths, evidence)),
             impact_paths=paths,
-            evidence_table=evidence_rows(evidence, claims),
+            evidence_table=evidence_rows(ordered_evidence(evidence, paths), claims),
             check_queries=safe_queries(draft.check_queries) if draft else [],
             inquiry_contacts=draft.inquiry_contacts if draft else [],
             analysis_limits=unverified_segments(state, paths) + self.notes,
@@ -315,6 +325,29 @@ def rule_conclusion(state: AgentState, paths: list[ImpactPath], evidence: list[E
     lines.append(f"주요 경로: {'; '.join(path_summary(p) for p in paths[:2])}" if paths else "탐색된 영향 경로가 없습니다 (분석 한계 참고)")
     lines.append("상세 내용은 아래 영향 경로·근거를 확인해 주세요.")
     return lines
+
+
+def apply_changes(changes: list[DraftChange], paths: list[ImpactPath]) -> None:
+    """LLM 이 고른 노드는 [변경] + 영향 문장, 나머지 hop 은 [참조] 로 채운다 (노드당 한 문장을 모든 경로에 같이 씀).
+
+    경로 밖 노드는 무시한다. LLM 이 문장 앞에 표시를 붙여 와도 한 번만 붙게 뗀다.
+    """
+    by_node = {c.node: c.impact.strip().removeprefix(CHANGE_TAG).strip() for c in changes if c.impact.strip()}
+    for p in paths:
+        for h in p.hops:
+            h.impact = f"{CHANGE_TAG} {by_node[h.node]}" if h.node in by_node else f"{REFERENCE_TAG} {REFERENCE_IMPACT}"
+
+
+def changed_first(paths: list[ImpactPath]) -> list[ImpactPath]:
+    """[변경] 노드를 지나는 경로를 앞으로 (원래 순서 유지). 결과물은 앞쪽 경로만 펼쳐 보여 준다."""
+    return sorted(paths, key=lambda p: not any(h.impact.startswith(CHANGE_TAG) for h in p.hops))
+
+
+def ordered_evidence(evidence: list[Evidence], paths: list[ImpactPath]) -> list[Evidence]:
+    """[변경] 노드 근거 → [변경] 경로 위 노드 근거 → 나머지 (원래 순서 유지)."""
+    changed = {h.node for p in paths for h in p.hops if h.impact.startswith(CHANGE_TAG)}
+    on_changed = {h.node for p in paths if any(h.node in changed for h in p.hops) for h in p.hops}
+    return sorted(evidence, key=lambda e: 0 if e.node_id in changed else 1 if e.node_id in on_changed else 2)
 
 
 def evidence_rows(evidence: list[Evidence], claims: dict[str, str]) -> list[SimpleEvidenceRow]:
@@ -540,6 +573,8 @@ def simple_message(state: AgentState, paths: list[ImpactPath]) -> str:
     lines = _request_lines(state) + ["", "[영향 경로] path_id: 노드 → … (근거 없는 노드는 *)"]
     lines += [f"- {p.path_id}: " + " → ".join(h.node + ("" if h.confidence is Confidence.CONFIRMED else "*") for h in p.hops)
               for p in paths] or ["- 없음"]
+    nodes = list(dict.fromkeys(h.node for p in paths for h in p.hops))
+    lines += ["", f"[경로 노드] {len(nodes)}개 (중복 없음, changes 는 이 중에서 고른다)", ", ".join(nodes) or "-"]
     lines += _evidence_lines(state)
     limits = unverified_segments(state, paths)
     if limits:

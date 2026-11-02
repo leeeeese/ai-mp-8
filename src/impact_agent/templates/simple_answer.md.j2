@@ -3,20 +3,30 @@
 - {{ line }}
 {% endfor %}
 
+{# 변경 경로·변경 노드 근거가 앞에 오도록 정렬되어 있다 (composer.changed_first·ordered_evidence). 앞쪽만 펼치고 나머지는 개수만 #}
+{% set max_paths = 5 %}
+{% set max_evidence = 10 %}
 {% if answer.impact_paths %}
 ## 영향 경로
-{% for p in answer.impact_paths %}
-- {{ p.path_id }}: {% for h in p.hops %}{{ h.node }}{% if not loop.last %} → {% endif %}{% endfor %}
+{% for p in answer.impact_paths[:max_paths] %}
+- {{ p.path_id }}: {% for h in p.hops %}{{ h.node }}{% if h.impact.startswith("[변경]") %} [변경]{% endif %}{% if not loop.last %} → {% endif %}{% endfor %}
 
 {% endfor %}
+{% if answer.impact_paths|length > max_paths %}
+- 외 참조 경로 {{ answer.impact_paths|length - max_paths }}개
+{% endif %}
 
 {% endif %}
 ## 근거
 | 주장 | 근거 | 위치 | 확신도 |
 |---|---|---|---|
-{% for row in answer.evidence_table %}
+{% for row in answer.evidence_table[:max_evidence] %}
 | {{ row.claim }} | {{ row.evidence }} | {{ row.location or "-" }} | {{ row.confidence.value }} |
 {% endfor %}
+{% if answer.evidence_table|length > max_evidence %}
+
+외 근거 {{ answer.evidence_table|length - max_evidence }}건
+{% endif %}
 {% if answer.check_queries %}
 
 ## 확인 쿼리
