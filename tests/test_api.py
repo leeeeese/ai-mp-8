@@ -144,6 +144,13 @@ def test_session_log_is_structured_in_blocks(tmp_path, gt_dir):
     assert ("결과 → Explorer", "복잡도") in rows and ("결과 → Retriever", "요약") in rows
     assert ("받은 입력 ← Planner", "항목 1") in rows and ("받은 입력 ← Explorer", "경로") in rows      # 무엇을 받았는지
     assert ("받은 입력 ← Explorer · Retriever", "근거") in rows and any(s == "근거" for s, _ in rows)  # 무엇을 근거로
+
+
+    simple = client(tmp_path / "s", gt_dir, Complexity.SIMPLE)                             # 단순: 권장 여부와 참고 신호까지
+    sid2 = create(simple, text="일반 운영 문의", input_type="ops_inquiry")
+    answer = simple.get(f"/api/sessions/{sid2}").json()["messages"][1]["answer"]
+    labels = [x["label"] for x in simple.get(f"/api/sessions/{sid2}/logs").json() if x["section"] == "결과 → 사용자"]
+    assert "상세 분석" in labels and labels.count("  참고 신호") == len(answer["detail_analysis_notes"])
     assert {("입력 접수", "요청 문장"), ("권한 확인", "결과"), ("공유 상태 구성", "탐색 영역"), ("공유 상태 구성", "정답셋")} <= rows
     intake = [x["text"] for x in logs if x["label"] == "탐색 영역"]
     assert intake == ["SM dbm → marketing → tos"]

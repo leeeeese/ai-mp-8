@@ -215,8 +215,9 @@ def _composer(out: Any) -> list[Row]:
         rows.append((sec, "유형", f"단순 응답 · 근거 {len(s.evidence_table)} · 조회 쿼리 {len(s.check_queries)} · 분석 한계 {len(s.analysis_limits)}"))
         rows += [(sec, f"결론 {i}", x) for i, x in enumerate(s.conclusion_lines, start=1)]
         rows += [(sec, "분석 한계", x) for x in s.analysis_limits]
-        rows.append((sec, "상세 분석", "권장" if s.detail_analysis_recommended else "권장 안 함"))
+        rows.append((sec, "상세 분석", "권장 (강한 신호)" if s.detail_analysis_recommended else "권장 안 함"))
         rows += [(sec, "  사유", x) for x in s.detail_analysis_reasons]
+        rows += [(sec, "  참고 신호", x) for x in s.detail_analysis_notes]  # 약한 신호: 권장 안 함, 상세 분석 요청 시 함께 전달
         return rows
     if c:
         rows = [(EVIDENCE, r.area.value, f"{r.feasibility.value} · {r.difficulty.value} · {r.confidence.value} | {clip(r.impact_path_summary, 160)} | "
