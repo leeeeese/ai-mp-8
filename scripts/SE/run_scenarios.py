@@ -13,10 +13,12 @@ KPI 는 새로 계산하지 않는다 (KPI 설계서 그대로).
     PYTHONPATH=src python3 scripts/SE/run_scenarios.py SC-001 SC-002 SC-003 SC-004 SC-005 SC-006 --run-id v1/tos   (.env 의 Neo4j·LLM 사용)
 
 출력 (outputs/runs/SE/<run_id>/)
-    <case>.md          흐름 · Simulator · Verifier · Composer · KPI(1차/2차) · 실행 로그
+    <case>.md          흐름 · Simulator · Verifier · Composer · KPI(1차/2차) · 타임라인 · 실행 로그
     <case>.state.json  최종 AgentState (원문 포함, 커밋하지 않음)
     summary.md / summary.json  케이스별 지표
     --rebuild          실행 없이 저장된 state.json·summary 로 md·summary 만 다시 만든다
+
+타임라인: UI 진행 패널과 같은 이벤트(api/runner.py 의 Runner)를 받아 에이전트 시작·완료를 터미널에 바로 찍고 md 에도 남긴다.
 """
 
 import argparse
@@ -36,6 +38,7 @@ load_dotenv(ROOT / ".env")
 from impact_agent.agents import Supervisor  # noqa: E402
 from impact_agent.agents.kpi import load_answer_key  # noqa: E402
 from impact_agent.agents.simulator import requirement_difficulty  # noqa: E402
+from impact_agent.api.runner import ProgressAgent, Runner  # noqa: E402
 from impact_agent.schemas import Complexity, FollowupInput, FollowupType, SmPart, UserInput  # noqa: E402
 from impact_agent.state import AgentState  # noqa: E402
 
@@ -59,7 +62,18 @@ def run_case(case: str) -> tuple[AgentState, float, dict]:
     user_input = UserInput(request_text=gt["request_text"], sm_part=SmPart(gt["sm_part"]))
     t0 = time.perf_counter()
     sup = Supervisor()
-    state = sup.analyze(user_input, answer_key=load_answer_key(GT_DIR / f"{case}.json"))
+    runner = Runner(sup)  # UI 진행 패널과 같은 이벤트. KPI 는 패널에 없어 여기서만 감싼다
+    sup.kpi = ProgressAgent("kpi", sup.kpi, runner)
+    timeline: list[dict] = []
+
+    def sink(round_no: int):
+        def push(event: dict) -> None:
+            entry = {"t": round(time.perf_counter() - t0, 1), "round": round_no, **event}
+            timeline.append(entry)
+            print(f"  {fmt_event(entry)}", flush=True)
+        return push
+
+    state = runner.run(sink(1), lambda: sup.analyze(user_input, answer_key=load_answer_key(GT_DIR / f"{case}.json")))
     first = state.planner.complexity
     simple = state.composer.simple_answer if state.composer else None
     reasons = list(simple.detail_analysis_reasons) if simple else []
@@ -69,12 +83,22 @@ def run_case(case: str) -> tuple[AgentState, float, dict]:
     if first is Complexity.SIMPLE and gt.get("complexity") == "complex":
         content = "\n".join(reasons) or "상세 분석 요청"
         flow["reanalysis"] = content
-        state = sup.followup(sup.last_session_id, FollowupInput(type=FollowupType.REANALYSIS, content=content))
+        print("  --- 사용자 확인 가정 → reanalysis 후속 입력 → 2차", flush=True)
+        state = runner.run(sink(2), lambda: sup.followup(
+            sup.last_session_id, FollowupInput(type=FollowupType.REANALYSIS, content=content)))
+    flow["timeline"] = timeline
     flow["final"] = state.planner.complexity.value
     flow["detail_flow"] = detail_flow(first, gt.get("complexity"), recommended)
     flow["path"] = ("simple → 재분석 → " + flow["final"] if flow["reanalysis"] is not None
                     else f"{first.value} → 끝까지")
     return state, time.perf_counter() - t0, flow
+
+
+def fmt_event(e: dict) -> str:
+    """타임라인 한 줄: [+경과s] 에이전트 상태 (소요s) · 내용."""
+    took = f" ({e['elapsedMs'] / 1000:.1f}s)" if e.get("elapsedMs") is not None else ""
+    detail = f" · {e['detail']}" if e.get("detail") else ""
+    return f"[+{e['t']:6.1f}s] {e['node']:<10} {e['status']:<7}{took}{detail}"
 
 
 def detail_flow(first: Complexity, expected: str | None, recommended: bool) -> str:
@@ -234,6 +258,13 @@ def md_case(case: str, gt: dict, state: AgentState, pf: dict, flow: dict) -> str
     else:
         L += md_kpi(state.kpi.model_dump(mode="json") if state.kpi else None, "결과")
 
+    timeline = flow.get("timeline") or []
+    if timeline:
+        L += ["## 타임라인", "", "| 경과(s) | 차수 | 에이전트 | 상태 | 소요(s) | 내용 |", "|---|---|---|---|---|---|"]
+        L += [f"| {e['t']} | {e['round']}차 | {e['node']} | {e['status']} | "
+              f"{fmt(e['elapsedMs'] / 1000) if e.get('elapsedMs') is not None else '-'} | {e.get('detail') or ''} |"
+              for e in timeline]
+        L.append("")
     L += ["## 실행 로그 (Supervisor)", "", "| 순서 | 에이전트 | 지연(s) | tool | 입력 토큰 | 출력 토큰 |", "|---|---|---|---|---|---|"]
     L += [f"| {i} | {a.agent} | {a.latency_ms / 1000:.1f} | {a.tool_calls} | {a.input_tokens or '-'} | {a.output_tokens or '-'} |"
           for i, a in enumerate(state.agent_runs, 1)]
