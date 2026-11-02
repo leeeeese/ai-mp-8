@@ -1,13 +1,15 @@
 """Simulator 테스트 (가짜 LLM / LLM 없음). 설계: docs/SE_agent_design.md 1장."""
 
 import pytest
+from pydantic import BaseModel
 
 from impact_agent.agents import KpiAgent, SimulatorAgent, Supervisor
 from impact_agent.agents.simulator import (
+    REFERENCE_IMPACT,
     DraftAlternative,
     DraftArea,
     DraftDrop,
-    DraftHop,
+    DraftNode,
     SimulatorDraft,
     reanalysis_nodes,
     requirement_difficulty,
@@ -125,9 +127,18 @@ def area(a, impact=ImpactType.MODIFY, feas=Feasibility.FEASIBLE, diff=Difficulty
                         "schedule_factors": [], "infeasible_reason": None, "alternatives": [], **kw})
 
 
+class DraftHop(BaseModel):
+    """테스트용 hop 표기 (path_id, node, "[변경]/[참조] 문장"). draft() 가 LLM 출력 형식(노드당 한 번 DraftNode)으로 바꾼다."""
+
+    path_id: str
+    node: str
+    impact: str
+
+
 def draft(areas=None, hops=None, drops=None, rva=None):
     areas = areas or [area(Area.SCREEN), area(Area.DB), area(Area.INTERFACE, diff=Difficulty.MAJOR), area(Area.BATCH)]
-    return SimulatorDraft(hops=hops or [], areas=areas, requested_vs_alternative=rva, drop_paths=drops or [])
+    nodes = [DraftNode(node=h.node, change=h.impact.startswith("[변경]"), impact=h.impact) for h in hops or []]
+    return SimulatorDraft(nodes=nodes, areas=areas, requested_vs_alternative=rva, drop_paths=drops or [])
 
 
 def by_area(out):
@@ -368,13 +379,12 @@ def test_tag_mismatch_both_directions():
     assert a[Area.DB].impact_type is ImpactType.MODIFY and a[Area.BATCH].impact_type is ImpactType.REFERENCE_ONLY  # 경고만
 
 
-def test_tag_mismatch_untagged_or_empty_hops():
-    untagged = [DraftHop(path_id="P1-1", node="MOD:PntSvc.checkLimit", impact="한도 상수 변경")]
-    out = SimulatorAgent(llm=ScriptLLM(draft(hops=untagged))).run(make_swing_state(SHARED_PATHS))
-    assert mismatch_warnings(out) == ["LLM hop 설명에 [변경]/[참조] 표시가 없어 영역 판정과 대조하지 못함"]
-    out = SimulatorAgent(llm=ScriptLLM(draft(hops=[]))).run(make_swing_state(SHARED_PATHS))    # hop 설명 자체가 없음
-    assert mismatch_warnings(out) == []
-    out = SimulatorAgent(use_llm=False).run(make_swing_state(SHARED_PATHS))                   # LLM 없음
+def test_unlisted_nodes_filled_reference_and_mismatch_checked():
+    # LLM 이 바뀌는 노드를 하나도 쓰지 않음 → 모든 hop 이 [참조] 기본 문장, modify 영역은 판정 확인 경고
+    out = SimulatorAgent(llm=ScriptLLM(draft(hops=[]))).run(make_swing_state(SHARED_PATHS))
+    assert {h.impact for a in out.area_impacts for p in a.paths for h in p.hops} == {f"[참조] {REFERENCE_IMPACT}"}
+    assert mismatch_warnings(out) and all("[변경] hop 이 없음" in w for w in mismatch_warnings(out))
+    out = SimulatorAgent(use_llm=False).run(make_swing_state(SHARED_PATHS))                   # LLM 없음 → 표시 없음, 대조 안 함
     assert mismatch_warnings(out) == []
 
 
@@ -382,6 +392,12 @@ def llm_input(state):
     llm = ScriptLLM(draft())
     SimulatorAgent(llm=llm).run(state)
     return llm.users[0]
+
+
+def test_llm_input_lists_unique_path_nodes():
+    user = llm_input(make_swing_state(SHARED_PATHS))                # 화면·배치 경로가 savePnt·checkLimit 공유
+    nodes = user.split("[경로 노드]")[1].splitlines()[1].split(", ")
+    assert nodes.count("TP:PntSvc.savePnt") == 1 and nodes.count("MOD:PntSvc.checkLimit") == 1
 
 
 def test_llm_input_node_meta_swing():
@@ -631,7 +647,7 @@ def test_empty_explorer():
 
 def test_llm_judgement_applied_and_ghost_nodes_ignored():
     llm = ScriptLLM(draft(
-        hops=[DraftHop(path_id="P1-1", node="SCR:CMP01", impact="비광고 여부 체크박스 추가"),
+        hops=[DraftHop(path_id="P1-1", node="SCR:CMP01", impact="[변경] 비광고 여부 체크박스 추가"),
               DraftHop(path_id="P1-1", node="SCR:GHOST", impact="없는 노드")],
         areas=[area(Area.SCREEN, diff=Difficulty.MEDIUM), area(Area.DB, impact=ImpactType.REFERENCE_ONLY),
                area(Area.INTERFACE, diff=Difficulty.MAJOR, schedule_factors=["수신 시스템 협의"]), area(Area.BATCH)],
@@ -640,7 +656,8 @@ def test_llm_judgement_applied_and_ghost_nodes_ignored():
     out = agent.run(make_state())
     a = by_area(out)
     hops = a[Area.SCREEN].paths[0].hops
-    assert hops[0].impact == "비광고 여부 체크박스 추가" and all(h.node != "SCR:GHOST" for h in hops)
+    assert hops[0].impact == "[변경] 비광고 여부 체크박스 추가" and all(h.node != "SCR:GHOST" for h in hops)
+    assert hops[1].impact == f"[참조] {REFERENCE_IMPACT}"                      # 쓰지 않은 노드는 코드가 [참조]
     assert a[Area.DB].impact_type is ImpactType.REFERENCE_ONLY and a[Area.SCREEN].difficulty is Difficulty.MEDIUM
     assert a[Area.INTERFACE].schedule_factors == ["수신 시스템 협의"] and a[Area.INTERFACE].feasibility is Feasibility.FEASIBLE
     assert out.requested_vs_alternative.startswith("요청안") and agent.last_usage.input_tokens == 100
@@ -649,7 +666,7 @@ def test_llm_judgement_applied_and_ghost_nodes_ignored():
 
 
 def test_hop_impact_shared_node_filled_by_node():
-    # 화면 경로(P1-1)와 배치 경로(P2-1)가 같은 SQL 을 지남. LLM 은 P1-1 에만 설명 → P2-1 에도 반영
+    # 화면 경로(P1-1)와 배치 경로(P2-1)가 같은 SQL·테이블을 지남. LLM 은 노드당 한 번 → 모든 경로에 같은 판정
     shared = ["BAT:TCMP100", "SQL:CmpMapper.insert", "TBL:TCP_CMP"]
     state = make_state(paths=[(1, P_SCREEN, StopReason.TARGET_REACHED), (2, shared, StopReason.TARGET_REACHED)],
                        edges=TOS_EDGES + [("BAT:TCMP100", "SQL:CmpMapper.insert", "EXECUTES")])
@@ -659,10 +676,9 @@ def test_hop_impact_shared_node_filled_by_node():
         DraftHop(path_id="P1-1", node="TBL:TCP_CMP", impact="[변경] 컬럼 추가 대상 테이블"),
     ]))).run(state)
     hops = {(p.path_id, h.node): h.impact for a in out.area_impacts for p in a.paths for h in p.hops}
-    assert hops[("P2-1", "SQL:CmpMapper.insert")] == "[변경] 컬럼 추가"           # 노드 기준으로 채움
-    assert hops[("P2-1", "TBL:TCP_CMP")] == "[참조] 구조 변경 없음"               # 경로별 설명이 있으면 그대로
-    assert hops[("P1-1", "TBL:TCP_CMP")] == "[변경] 컬럼 추가 대상 테이블"
-    assert hops[("P2-1", "BAT:TCMP100")] == "영향 검토 필요"                      # 설명이 없는 노드는 기본값
+    assert hops[("P1-1", "SQL:CmpMapper.insert")] == hops[("P2-1", "SQL:CmpMapper.insert")] == "[변경] 컬럼 추가"
+    assert hops[("P1-1", "TBL:TCP_CMP")] == hops[("P2-1", "TBL:TCP_CMP")] == "[변경] 컬럼 추가 대상 테이블"  # 두 번 오면 [변경] 우선
+    assert hops[("P2-1", "BAT:TCMP100")] == f"[참조] {REFERENCE_IMPACT}"           # 쓰지 않은 노드는 [참조] 기본 문장
 
 
 def test_hop_impact_prefers_change_for_same_node():

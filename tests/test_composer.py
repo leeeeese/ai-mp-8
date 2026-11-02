@@ -15,7 +15,7 @@ from impact_agent.agents.composer import (
     FollowupDraft,
     SimpleDraft,
 )
-from impact_agent.agents.simulator import DraftDrop, DraftHop, SimulatorDraft, reanalysis_nodes
+from impact_agent.agents.simulator import DraftDrop, SimulatorDraft, reanalysis_nodes
 from impact_agent.agents.verifier import decide
 from impact_agent.llm import LLMError, Usage
 from impact_agent.schemas import (
@@ -45,6 +45,7 @@ from test_simulator import (
     SHARED_PATHS,
     SW_SCREEN,
     TOS,
+    DraftHop,
     Fixed,
     make_state,
     make_swing_state,
@@ -184,7 +185,7 @@ def test_complex_rule_only_report():
 def test_complex_limits_from_verifier_and_dropped_paths():
     extra = ["SCR:CMP01", "CTL:CmpCtl.save"]
     sim_llm = type("L", (), {"parse": lambda self, s, u, schema: (SimulatorDraft(
-        hops=[], areas=[], requested_vs_alternative=None, drop_paths=[DraftDrop(path_id="P1-2", reason="조회 진입만")]), Usage())})()
+        nodes=[], areas=[], requested_vs_alternative=None, drop_paths=[DraftDrop(path_id="P1-2", reason="조회 진입만")]), Usage())})()
     state = make_state(paths=[(1, P_SCREEN, StopReason.TARGET_REACHED), (1, extra, StopReason.DEAD_END),
                               (2, P_BATCH, StopReason.TARGET_REACHED)], nodes=NO_IFACE)
     state.simulation = SimulatorAgent(llm=sim_llm).run(state)
@@ -308,7 +309,7 @@ def test_supervisor_end_to_end_and_followup():
 
 def test_schedule_factors_capped():
     state = complex_state()
-    llm = type("L", (), {"parse": lambda self, s, u, schema: (SimulatorDraft(hops=[], areas=[
+    llm = type("L", (), {"parse": lambda self, s, u, schema: (SimulatorDraft(nodes=[], areas=[
         sim_area(a, schedule_factors=[f"{a.value} 요인 {i}" for i in range(5)])
         for a in (Area.SCREEN, Area.DB, Area.INTERFACE, Area.BATCH)], requested_vs_alternative=None, drop_paths=[]), Usage())})()
     state.simulation = SimulatorAgent(llm=llm).run(state)

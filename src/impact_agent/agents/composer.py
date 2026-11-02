@@ -63,6 +63,7 @@ from ..tools import save_report
 from .base import BaseAgent
 from .simulator import (
     CHANGE_TAG,
+    REFERENCE_IMPACT,
     REFERENCE_TAG,
     reanalysis_request,
     requirement_difficulty,
@@ -82,7 +83,6 @@ MAX_CONTEXT_EVIDENCE = 40
 MAX_DETAIL_REASONS = 5  # 상세 분석 권장 사유 수
 LLM_DETAIL_REASON = "원문에서 변경 요소가 보이나 탐색 신호가 없어 상세 분석은 권장하지 않음 (Agent 판단)"
 NO_TAG_NOTE = "LLM 응답이 없어 노드별 [변경] 표시를 하지 못함 - 공통 모듈·여러 진입점 신호로는 권장 여부를 판단하지 못함"
-REFERENCE_IMPACT = "경로상 호출·조회 (이 요건으로 바뀌지 않음)"  # LLM 이 [변경] 으로 고르지 않은 hop
 MAX_CLAIMS = 10  # 단순 응답 LLM 이 쓰는 근거 문장 수
 
 
