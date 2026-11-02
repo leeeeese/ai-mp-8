@@ -90,7 +90,7 @@ def test_simple_session_detail_fields_and_skipped_events(tmp_path, gt_dir):
     sid = create(c, text="일반 운영 문의", input_type="ops_inquiry")
     a = c.get(f"/api/sessions/{sid}").json()["messages"][1]["answer"]
     assert a["complexity"] == "simple" and "evidence" in a and "checkQueries" in a
-    assert {"detail_analysis_recommended", "detail_analysis_reasons"} <= set(a)          # 백엔드와 같은 이름
+    assert {"detail_analysis_recommended", "detail_analysis_reasons", "detail_analysis_notes"} <= set(a)  # 백엔드와 같은 이름
     nodes = [(json.loads(x[6:])["node"], json.loads(x[6:])["status"])
              for x in c.get(f"/api/sessions/{sid}/stream", params={"user": ADMIN}).text.split("\n\n") if x.startswith("data: ")]
     assert ("simulator", "skipped") in nodes and ("verifier", "skipped") in nodes

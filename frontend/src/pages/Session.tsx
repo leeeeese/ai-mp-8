@@ -69,9 +69,12 @@ export function Session() {
     send.mutate({ kind, text: text.trim() });
     setText('');
   };
-  /** 단순 응답의 "상세 분석 요청": 권장 사유를 그대로 reanalysis 후속 입력으로 보낸다 (Simulator 가 사유의 노드 ID 를 확인 대상으로 쓴다) */
-  const requestDetail = (reasons: string[]) =>
-    send.mutate({ kind: 'reanalysis', text: reasons.length ? reasons.join(' / ') : '상세 분석 요청' });
+  /** 단순 응답의 "상세 분석 요청": 권장 사유와 참고 신호("참고: " 줄)를 한 줄에 하나씩 reanalysis 후속 입력으로 보낸다.
+   *  Simulator·Verifier 가 사유의 노드 ID 를 확인 대상으로 쓰고, "참고:" 줄의 노드는 경로에 없어도 경고만 한다 (줄바꿈 구분 필수) */
+  const requestDetail = (reasons: string[], notes: string[]) => {
+    const lines = [...reasons, ...notes.map((n) => `참고: ${n}`)];
+    send.mutate({ kind: 'reanalysis', text: lines.length ? lines.join('\n') : '상세 분석 요청' });
+  };
   const detailRequested = running || send.isPending || !!session?.messages.some((m) => m.kind === 'reanalysis');
 
   const badges = useMemo(
@@ -110,7 +113,7 @@ export function Session() {
         <div className="flex min-w-0 flex-col gap-4">
           {session.messages.map((m) =>
             m.role === 'user' ? (
-              <div key={m.id} className="ml-auto max-w-[85%] rounded-card border border-border bg-[color:var(--accent-soft)] px-4 py-3 text-sm leading-relaxed">
+              <div key={m.id} className="ml-auto max-w-[85%] whitespace-pre-line rounded-card border border-border bg-[color:var(--accent-soft)] px-4 py-3 text-sm leading-relaxed">
                 {m.kind && m.kind !== 'chat' && <div className="mb-1 text-[11px] font-medium text-accent">{MESSAGE_KIND_LABEL[m.kind]}</div>}
                 {m.text}
               </div>

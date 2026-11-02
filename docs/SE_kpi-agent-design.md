@@ -206,7 +206,7 @@ load_inputs → validate → extract → normalize → match → classify → ag
 | `difficulty_match` | 복잡 | `requirement_difficulty(area_impacts)` = 정답 | `difficulty` |
 | `feasibility_match` | 복잡 | 변경 영역의 종합 가능 여부(가장 나쁜 값, Composer 요약과 같은 규칙) = 정답. 변경 영역이 없으면 생략 | `expected.feasibility` |
 | `area_impact_match` | 복잡 | 4개 영역 `impact_type` 이 정답과 같은 비율 | `expected.areas` |
-| `change_tag_accuracy` | 복잡 | 정답 변경 노드(`impacted` 중 modify·add)는 `[변경]`, 참조 노드(`reference_only`, `impacted` 중 reference_only)는 `[참조]` 로 판정한 비율. Simulator 가 표시를 하나도 안 했으면 생략. 두 목록에 겹치면 변경 우선 | `expected.impacted`·`reference_only` |
+| `change_tag_accuracy` | 복잡·단순 | 정답 변경 노드(`impacted` 중 modify·add)는 `[변경]`, 참조 노드(`reference_only`, `impacted` 중 reference_only)는 `[참조]` 로 판정한 비율. 복잡은 Simulator 영향 경로, 단순은 Composer 단순 응답 경로의 표시 (2026-11-02 추가: 단순 응답의 상세 분석 권장 신호가 이 표시를 쓴다). 표시를 하나도 안 했으면 생략. 두 목록에 겹치면 변경 우선 | `expected.impacted`·`reference_only` |
 | `wrong_path_adopted` | 복잡 | 오답 경로의 고유 노드(정답 경로·영향 노드와 겹치지 않는 노드)를 `[변경]` 으로 판정한 오답 경로 수 | `wrong_paths` |
 | `detail_recommended` | 단순 | Composer 가 상세 분석을 권장했는지 | (배치 집계에서 정답 `complexity` 와 함께 해석) |
 | `complex_minor` | 복잡 | 변경이 있는데 요건 전체 난이도 Minor (Composer 요약 표시 신호) | - |

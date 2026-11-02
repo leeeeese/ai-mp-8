@@ -2,7 +2,8 @@
 
 1. 경로 골격 (규칙): Explorer 경로 → ImpactPath (엣지 유형·근거 위치·확신도), rules.build_impact_paths
 2. 영역 배정 (규칙): 역할 기준 screen / db / interface / batch (rules.path_areas)
-3. 영향 판정 (LLM, 있을 때): hop 별 영향, 영역별 영향 유형·가능성·난이도·대안, 요청안/대안 비교, 무관 경로 제외 제안
+3. 영향 판정 (LLM, 있을 때): 노드별 영향(노드당 한 번, [변경] 은 모두 · [참조] 는 필요한 노드만, 나머지는 코드가 [참조]),
+   영역별 영향 유형·가능성·난이도·대안, 요청안/대안 비교, 무관 경로 제외 제안
 4. 판정 보정 (규칙): 골격 밖 노드 무시, 근거 없는 영역은 review, 사유·대안 없는 hard 는 review, 경로 제외 가드,
    공유 노드(진입점 2개 이상·공통)를 [변경] 하는 영역은 최소 Medium (설계서 1-3 (c))
 5. 분석 한계: unresolved · 목표 미도달 · hop 상한 · 매칭 실패 · 근거 없음 · 공통 제외 → unverified_segments
@@ -49,21 +50,23 @@ MAX_SCHEDULE_FACTORS = 3  # 영역당 일정 영향 요인 수
 DIFFICULTY_RANK = [Difficulty.MINOR, Difficulty.MEDIUM, Difficulty.MAJOR]
 CHANGE_TAG = "[변경]"  # hop 영향 설명의 변경 / 참조 표시 (prompts/simulator.md)
 REFERENCE_TAG = "[참조]"
+REFERENCE_IMPACT = "경로상 호출·조회 (이 요건으로 바뀌지 않음)"  # LLM 이 쓰지 않은 노드의 [참조] 문장 (Composer 단순 응답도 같음)
 # [노드 메타] 에 넣을 노드 속성 (설계서 1-3 (a) "LLM 에 넘길 속성"). code·search_text 같은 큰 값은 넣지 않는다
 META_KEYS = ["images", "events", "cycle", "cron", "program", "steps", "interfaces", "url", "http_method", "stmt_type",
              "dbio_type", "data_type", "nullable", "pk", "code_grp", "code_values"]
 MAX_META_VALUE = 120  # 속성 값 하나의 글자 수 상한
 # 재분석 사유 문장 안의 그래프 노드 ID (<접두어>:<키>, docs/mock_data.md 노드 ID 규칙)
 NODE_ID_IN_TEXT = re.compile(r"\b(?:SCR|CTL|TP|BAT|SVC|MOD|DBIO|SQL|TBL|COL):[A-Za-z0-9_.#$]+")
+NOTE_PREFIX = "참고:"  # 재분석 입력에서 참고 신호(Composer detail_analysis_notes, 약한 신호) 줄의 머리
 
 
 # --- LLM 응답 형식 (Structured Outputs 호환: 기본값 없이 모든 필드 명시) ---------------------
 
 
-class DraftHop(BaseModel):
-    path_id: str
-    node: str = Field(description="경로에 있는 노드 ID 그대로")
-    impact: str = Field(description="이 노드에서 바뀌는 것 / 확인만 필요한 것 (한 문장)")
+class DraftNode(BaseModel):
+    node: str = Field(description="[경로 노드] 에 있는 노드 ID 그대로")
+    change: bool = Field(description="이 요건으로 코드·데이터·구조를 고치면 true ([변경]), 확인만 하면 false ([참조])")
+    impact: str = Field(description="무엇을 어떻게 고치는지 / 왜 확인만 하면 되는지 한 문장 + 원문 근거 ([변경]·[참조] 표시 없이)")
 
 
 class DraftAlternative(BaseModel):
@@ -90,7 +93,7 @@ class DraftDrop(BaseModel):
 
 
 class SimulatorDraft(BaseModel):
-    hops: list[DraftHop]
+    nodes: list[DraftNode] = Field(description="노드당 한 번. 바뀌는 노드는 빠짐없이, 확인만 하는 노드는 재분석 요청 노드·판단 근거가 필요한 노드만")
     areas: list[DraftArea] = Field(description="screen / db / interface / batch 4개 모두")
     requested_vs_alternative: str | None = Field(description="요청안과 대안이 갈리면 비교 요약. 아니면 null")
     drop_paths: list[DraftDrop] = Field(description="요건과 무관한 경로만. 없으면 []")
@@ -131,7 +134,11 @@ class SimulatorAgent(BaseAgent[SimulationOutput]):
         limits = unverified_segments(state, [p for p, _ in built])
         on_paths = {h.node for p, _ in built for h in p.hops}
         if missing := [n for n in reanalysis_nodes(state) if n not in on_paths]:
-            limits.append(f"재분석 요청 노드 미탐색: {', '.join(missing)} (이번 탐색 경로에 없어 판정하지 못함)")
+            asked = set(reanalysis_nodes(state, notes=False))
+            if req := [n for n in missing if n in asked]:
+                limits.append(f"재분석 요청 노드 미탐색: {', '.join(req)} (이번 탐색 경로에 없어 판정하지 못함)")
+            if ref := [n for n in missing if n not in asked]:
+                limits.append(f"재분석 참고 노드 미탐색: {', '.join(ref)} (참고 신호, 이번 탐색 경로에 없어 판정하지 못함)")
 
         draft = None
         if built and self.llm is not None:
@@ -141,8 +148,8 @@ class SimulatorAgent(BaseAgent[SimulationOutput]):
             except LLM_FAILURES as exc:  # LLM 실패는 규칙 판정으로 대체 (분석 흐름을 끊지 않음)
                 limits.append(f"LLM 판정 실패로 규칙 판정 사용: {exc}")
 
-        if draft is not None:
-            apply_hop_impacts(draft, [p for p, _ in built])
+        if draft is not None:  # LLM 에 보여 준 경로(MAX_CONTEXT_PATHS)의 노드만 판정된 것으로 본다
+            apply_node_impacts(draft, [p for p, _ in built], {h.node for p, _ in built[:MAX_CONTEXT_PATHS] for h in p.hops})
         kept, dropped = apply_drops(draft, built, state, shared)
         return SimulationOutput(
             area_impacts=judge_areas(draft, kept, areas_of, state, limits, (shared, hop_areas)),
@@ -155,20 +162,23 @@ class SimulatorAgent(BaseAgent[SimulationOutput]):
 # --- 판정 보정 (규칙) ----------------------------------------------------------------------------
 
 
-def apply_hop_impacts(draft: SimulatorDraft, paths: list[ImpactPath]) -> None:
-    """LLM 의 hop 영향 설명을 골격 hop 에만 반영한다 (골격 밖 노드·경로는 무시).
+def apply_node_impacts(draft: SimulatorDraft, paths: list[ImpactPath], seen: set[str]) -> None:
+    """LLM 의 노드별 영향을 골격 hop 에 반영한다 (노드당 한 문장을 그 노드가 지나는 모든 경로에 같이 씀).
 
-    경로별 설명이 없으면 같은 노드의 설명을 쓴다 (공유 노드를 한 경로에만 적어도 다른 경로에 반영).
-    같은 노드에 설명이 여러 개면 [변경] 설명을 우선한다.
+    LLM 이 쓰지 않은 노드는 [참조] + REFERENCE_IMPACT. 단 LLM 에 보여 주지 않은 노드(seen 밖, 경로 수 상한으로 잘림)는
+    판정하지 않았으므로 기본값(DEFAULT_IMPACT, 표시 없음)으로 둔다. 골격 밖 노드는 무시. 같은 노드가 여러 번 오면
+    [변경] 을 우선한다. LLM 이 문장 앞에 표시를 붙여 와도 한 번만 붙게 뗀다.
     """
-    impacts = {(h.path_id, h.node): h.impact for h in draft.hops if h.impact.strip()}
-    by_node: dict[str, str] = {}
-    for h in draft.hops:
-        if h.impact.strip() and (h.node not in by_node or (h.impact.startswith("[변경]") and not by_node[h.node].startswith("[변경]"))):
-            by_node[h.node] = h.impact
+    by_node: dict[str, tuple[bool, str]] = {}
+    for d in draft.nodes:
+        text = d.impact.strip().removeprefix(CHANGE_TAG).removeprefix(REFERENCE_TAG).strip()
+        if text and (d.node not in by_node or (d.change and not by_node[d.node][0])):
+            by_node[d.node] = (d.change, text)
     for p in paths:
         for h in p.hops:
-            h.impact = impacts.get((p.path_id, h.node)) or by_node.get(h.node, h.impact)
+            if h.node in by_node or h.node in seen:
+                change, text = by_node.get(h.node, (False, REFERENCE_IMPACT))
+                h.impact = f"{CHANGE_TAG if change else REFERENCE_TAG} {text}"
 
 
 def apply_drops(
@@ -289,10 +299,7 @@ def judge_areas(
     shared = (공유 노드 → 사유, (path_id, hop 순번) → 그 hop 의 영역). 공유 노드 보정에 쓴다.
     """
     shared_by_node, hop_areas = shared or ({}, {})
-    # LLM 이 hop 에 [변경]/[참조] 표시를 하나도 안 했으면 영역별 점검 대신 한 번만 알린다
-    tagged = any(h.impact.startswith((CHANGE_TAG, REFERENCE_TAG)) for p in paths for h in p.hops)
-    if draft is not None and draft.hops and not tagged:
-        limits.append("LLM hop 설명에 [변경]/[참조] 표시가 없어 영역 판정과 대조하지 못함")
+    tagged = any(h.impact.startswith((CHANGE_TAG, REFERENCE_TAG)) for p in paths for h in p.hops)  # LLM 판정이 있었음
     by_area = {a: [p for p in paths if a in areas_of[p.path_id]] for a in AREA_ORDER}
     drafts = {d.area: d for d in draft.areas} if draft else {}
     out = []
@@ -391,12 +398,17 @@ def reanalysis_request(state: AgentState) -> str | None:
     return last.content.strip() or None
 
 
-def reanalysis_nodes(state: AgentState) -> list[str]:
-    """재분석 사유에 나온 노드 ID (문장 끝 마침표는 뗀다, 순서 유지·중복 제거)."""
+def reanalysis_nodes(state: AgentState, notes: bool = True) -> list[str]:
+    """재분석 사유에 나온 노드 ID (문장 끝 마침표는 뗀다, 순서 유지·중복 제거).
+
+    재분석 입력은 권장 사유 줄과 "참고:" 로 시작하는 참고 신호 줄로 온다 (줄바꿈으로 구분).
+    notes=False 면 참고 신호 줄에만 나온 노드는 뺀다 (권장 사유 노드만 = Verifier 가 막는 대상).
+    """
     reason = reanalysis_request(state)
     if reason is None:
         return []
-    return list(dict.fromkeys(m.rstrip(".") for m in NODE_ID_IN_TEXT.findall(reason)))
+    lines = [x for x in reason.splitlines() if notes or not x.strip().startswith(NOTE_PREFIX)]
+    return list(dict.fromkeys(m.rstrip(".") for x in lines for m in NODE_ID_IN_TEXT.findall(x)))
 
 
 def user_message(
@@ -407,7 +419,8 @@ def user_message(
     if state.planner:
         lines += [f"- 항목 {it.item_id} ({it.change_type.value}) {it.text}" for it in state.planner.items]
     if reason := reanalysis_request(state):
-        lines += ["", "[재분석 요청] 사용자가 단순 응답을 보고 상세 분석을 요청했다. 아래 사유에 나온 노드·확인 사항마다 판정 결과를 쓴다.",
+        lines += ["", "[재분석 요청] 사용자가 단순 응답을 보고 상세 분석을 요청했다. 아래 사유에 나온 노드·확인 사항마다 판정 결과를 쓴다. "
+                  f"'{NOTE_PREFIX}' 로 시작하는 줄은 참고 신호다 (경로에 있으면 같은 방식으로 판정을 쓴다).",
                   reason]
 
     lines += ["", "[영역별 경로] path_id: 노드 -관계-> 노드 … (진입 → DB 순서, 근거 없는 노드는 *)"]
@@ -426,6 +439,8 @@ def user_message(
         lines.append(f"- … 외 {len(paths) - MAX_CONTEXT_PATHS}개 (판정은 보이는 경로 기준)")
 
     path_nodes = {h.node for p in shown for h in p.hops}
+    lines += ["", f"[경로 노드] {len(path_nodes)}개 (중복 없음, nodes 는 이 중에서 노드당 한 번)",
+              ", ".join(dict.fromkeys(h.node for p in shown for h in p.hops)) or "-"]
     lines += ["", "[노드 메타] 노드 (시스템·역할) 판단용 속성 / 데이터 접근 엣지의 접근 컬럼"]
     lines += node_meta_lines(shown, nodes, state.explorer.edges if state.explorer else [])
     shown_shared = [n for n in dict.fromkeys(h.node for p in shown for h in p.hops) if n in (shared or {})]

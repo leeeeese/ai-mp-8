@@ -96,10 +96,9 @@ export const SC006_ANSWER: AgentAnswer = {
   detail_analysis_recommended: false,
 };
 
-/** 단순 응답의 상세 분석 권장 사유 예 (백엔드 Composer 가 탐색 신호로 만드는 문장, 노드 ID 포함) */
-export const SC006_DETAIL_REASONS = [
-  '공통 모듈 CTL:CmmCdController.selectCdList 이 경로에 있어 다른 화면·처리 영향 확인 필요',
-  '적재 범위 밖 연계(BAT:TBCH1020 결과 반영 프로그램) 확인 필요',
+/** 단순 응답의 참고 신호 예 (백엔드 Composer detail_analysis_notes 형식, 노드 ID 포함). 운영 문의라 그래프 밖 항목도 약한 신호 → 권장 안 함 */
+export const SC006_DETAIL_NOTES = [
+  '적재 범위 밖 연계 확인 필요: [항목 1] 그래프 밖: BAT:TBCH1020 결과 반영 프로그램',
 ];
 
 // --- 상품(swing) 단순 요건: L-1 구비서류 자동처리 배치 주기 단축 → 상세 분석 권장 → 재분석 ------------------------
@@ -138,10 +137,11 @@ export const L1_ANSWER: AgentAnswer = {
  WHERE JOB_ID IN ('ZDOCBB0100010', 'ZDOCBB0100020', 'ZDOCBB0100030', 'ZDOCBB0100040', 'ZDOCBB0100050')`,
     },
   ],
-  detail_analysis_recommended: true,
-  detail_analysis_reasons: [
-    '공통 모듈 MOD:BatchLauncher.runJob 이 탐색에서 제외되어 다른 배치·처리 영향 확인 필요',
-    'DBIO:BatJobSql.updateLastRun 을 Job 5개(BAT:ZDOCBB0100010 외 4)가 함께 호출',
+  // 설정 데이터만 바뀌는 단순 요건: 강한 신호 없음 → 권장 안 함. 참고 신호를 보고 사용자가 직접 상세 분석을 요청하는 흐름 (mock 시연)
+  detail_analysis_recommended: false,
+  detail_analysis_reasons: [],
+  detail_analysis_notes: [
+    '공통 모듈 MOD:BatchLauncher.runJob 은 탐색에서 제외됨 - 이 요건으로 바뀌는지 확인',
   ],
 };
 

@@ -1,7 +1,8 @@
 """Composer: 분석 결과를 사용자 결과물로 만든다. 설계: docs/SE_agent_design.md 3장
 
 - 단순 (Retriever → Composer): SimpleAnswer = 요약 결론 · 영향 경로 · 근거 (+ 확인 쿼리, 분석 한계)
-  + 상세 분석 권장과 사유 (탐색 신호, 노드 ID 포함 → 사용자가 요청하면 reanalysis 후속 입력, 설계서 3-1·1-4)
+  + 상세 분석 권장과 사유 (강한 탐색 신호만) · 참고 신호 (약한 신호, 권장 안 함). 둘 다 노드 ID 포함 →
+  사용자가 요청하면 함께 reanalysis 후속 입력이 된다 (설계서 3-1·1-4)
 - 복잡 (Verifier → Composer): ComplexReport = 요약 · 영역별 판정 · 일정 요인 · 경로 상세 · 분석 한계 · 검토 제외 경로 · 체크리스트
 - 후속 답변 (Supervisor 가 Composer 로 바로 보냄): 체크리스트 답변 반영·stage 갱신, 조회 결과 요약,
   답변 때문에 경로가 바뀌어야 하면 reanalysis_request (사용자가 확인 후 reanalysis 후속 입력으로 보냄)
@@ -17,7 +18,15 @@ from pydantic import BaseModel, Field
 
 from .. import config
 from ..llm import LLM_FAILURES, LLMClient, Usage, analysis_llm
-from ..rules import build_impact_paths, evidence_ref, node_role, shared_nodes
+from ..rules import (
+    AREA_ORDER,
+    build_impact_paths,
+    evidence_ref,
+    interface_node_ids,
+    node_areas,
+    node_role,
+    shared_nodes,
+)
 from ..schemas import (
     Area,
     AreaImpact,
@@ -54,8 +63,8 @@ from ..tools import save_report
 from .base import BaseAgent
 from .simulator import (
     CHANGE_TAG,
-    DraftHop,
-    apply_hop_impacts,
+    REFERENCE_IMPACT,
+    REFERENCE_TAG,
     reanalysis_request,
     requirement_difficulty,
     unverified_segments,
@@ -72,7 +81,9 @@ MAX_PATH_SUMMARY = 3  # 판정표 한 칸에 보여 줄 경로 수
 MAX_EVIDENCE_NAMES = 5
 MAX_CONTEXT_EVIDENCE = 40
 MAX_DETAIL_REASONS = 5  # 상세 분석 권장 사유 수
-LLM_DETAIL_REASON = "원문에서 변경 요소가 보여 상세 분석을 권장 (Agent 판단)"
+LLM_DETAIL_REASON = "원문에서 변경 요소가 보이나 탐색 신호가 없어 상세 분석은 권장하지 않음 (Agent 판단)"
+NO_TAG_NOTE = "LLM 응답이 없어 노드별 [변경] 표시를 하지 못함 - 공통 모듈·여러 진입점 신호로는 권장 여부를 판단하지 못함"
+MAX_CLAIMS = 10  # 단순 응답 LLM 이 쓰는 근거 문장 수
 
 
 # --- LLM 응답 형식 (Structured Outputs 호환: 기본값 없이 모든 필드 명시) ---------------------
@@ -99,13 +110,18 @@ class DraftMail(BaseModel):
     body: str
 
 
+class DraftChange(BaseModel):
+    node: str = Field(description="[경로 노드] 에 있는 노드 ID 그대로")
+    impact: str = Field(description="이 요건으로 이 노드에서 바뀌는 것 한 문장")
+
+
 class SimpleDraft(BaseModel):
     conclusion_lines: list[str] = Field(description="3~5줄. 결론 먼저, 노드명·테이블명을 붙여 쓴다")
-    hops: list[DraftHop] = Field(description="경로 노드별 영향 한 문장")
-    claims: list[DraftClaim]
+    changes: list[DraftChange] = Field(description="이 요건으로 코드·데이터를 고쳐야 하는 노드 빠짐없이, 노드당 한 번. 나머지는 [참조]")
+    claims: list[DraftClaim] = Field(description="[변경] 노드와 결론에 쓴 노드의 근거만, 10개 이내")
     check_queries: list[DraftQuery] = Field(description="운영 문의일 때 확인용 SQL. 아니면 []")
     inquiry_contacts: list[str] = Field(description="문의가 필요한 담당·부서. 없으면 []")
-    detail_analysis_recommended: bool = Field(description="변경 요소가 보이면 true")
+    detail_analysis_recommended: bool = Field(description="원문에서 변경 요소가 보이면 true (참고 신호로만 쓰임)")
     mail: DraftMail | None = Field(description="[출력 요청] 에 mail_draft 가 있을 때만. 아니면 null")
 
 
@@ -184,20 +200,24 @@ class ComposerAgent(BaseAgent[ComposerOutput]):
         paths = [p for p, _ in build_impact_paths(exp.paths if exp else [], exp.edges if exp else [], evidence)]
         draft: SimpleDraft | None = self._draft(SimpleDraft, simple_message(state, paths))
         if draft is not None:
-            apply_hop_impacts(draft, paths)
-        claims = {c.node_id: c.claim for c in draft.claims} if draft else {}
-        reasons = detail_reasons(state, paths)
-        if not reasons and draft is not None and draft.detail_analysis_recommended:
-            reasons = [LLM_DETAIL_REASON]
+            apply_changes(draft.changes, paths)
+            paths = changed_first(paths)
+        claims = {c.node_id: c.claim for c in draft.claims[:MAX_CLAIMS]} if draft else {}
+        reasons, notes = detail_reasons(state, paths)
+        if draft is None:  # [변경] 표시가 없으면 노드 신호가 조용히 빠지므로 알린다
+            notes.append(NO_TAG_NOTE)
+        elif not reasons and draft.detail_analysis_recommended:  # LLM 판단만으로는 권장하지 않음
+            notes.append(LLM_DETAIL_REASON)
         answer = SimpleAnswer(
             conclusion_lines=fit_lines(draft.conclusion_lines if draft else [], rule_conclusion(state, paths, evidence)),
             impact_paths=paths,
-            evidence_table=evidence_rows(evidence, claims),
+            evidence_table=evidence_rows(ordered_evidence(evidence, paths), claims),
             check_queries=safe_queries(draft.check_queries) if draft else [],
             inquiry_contacts=draft.inquiry_contacts if draft else [],
             analysis_limits=unverified_segments(state, paths) + self.notes,
             detail_analysis_recommended=bool(reasons),
             detail_analysis_reasons=reasons,
+            detail_analysis_notes=notes,
         )
         return ComposerOutput(
             complexity=state.planner.complexity if state.planner else Complexity.SIMPLE,
@@ -307,6 +327,29 @@ def rule_conclusion(state: AgentState, paths: list[ImpactPath], evidence: list[E
     return lines
 
 
+def apply_changes(changes: list[DraftChange], paths: list[ImpactPath]) -> None:
+    """LLM 이 고른 노드는 [변경] + 영향 문장, 나머지 hop 은 [참조] 로 채운다 (노드당 한 문장을 모든 경로에 같이 씀).
+
+    경로 밖 노드는 무시한다. LLM 이 문장 앞에 표시를 붙여 와도 한 번만 붙게 뗀다.
+    """
+    by_node = {c.node: c.impact.strip().removeprefix(CHANGE_TAG).strip() for c in changes if c.impact.strip()}
+    for p in paths:
+        for h in p.hops:
+            h.impact = f"{CHANGE_TAG} {by_node[h.node]}" if h.node in by_node else f"{REFERENCE_TAG} {REFERENCE_IMPACT}"
+
+
+def changed_first(paths: list[ImpactPath]) -> list[ImpactPath]:
+    """[변경] 노드를 지나는 경로를 앞으로 (원래 순서 유지). 결과물은 앞쪽 경로만 펼쳐 보여 준다."""
+    return sorted(paths, key=lambda p: not any(h.impact.startswith(CHANGE_TAG) for h in p.hops))
+
+
+def ordered_evidence(evidence: list[Evidence], paths: list[ImpactPath]) -> list[Evidence]:
+    """[변경] 노드 근거 → [변경] 경로 위 노드 근거 → 나머지 (원래 순서 유지)."""
+    changed = {h.node for p in paths for h in p.hops if h.impact.startswith(CHANGE_TAG)}
+    on_changed = {h.node for p in paths if any(h.node in changed for h in p.hops) for h in p.hops}
+    return sorted(evidence, key=lambda e: 0 if e.node_id in changed else 1 if e.node_id in on_changed else 2)
+
+
 def evidence_rows(evidence: list[Evidence], claims: dict[str, str]) -> list[SimpleEvidenceRow]:
     rows, seen = [], set()
     for e in evidence:
@@ -329,30 +372,54 @@ def safe_queries(queries: list[DraftQuery]) -> list[GuidanceQuery]:
     return out
 
 
-def detail_reasons(state: AgentState, paths: list[ImpactPath]) -> list[str]:
-    """단순 응답의 상세 분석 권장 사유 (설계서 3-1, planner_detail_analysis_to-be.md). 신호마다 노드 ID 를 그대로 넣는다.
+def detail_reasons(state: AgentState, paths: list[ImpactPath]) -> tuple[list[str], list[str]]:
+    """단순 응답의 상세 분석 권장 사유(강한 신호)와 참고 사항(약한 신호) (설계서 3-1, planner_detail_analysis_to-be.md).
 
-    사용자가 "상세 분석 요청"을 누르면 이 문장이 reanalysis 후속 입력이 되고, Simulator·Verifier 가 문장 속 노드 ID 를
-    확인 대상으로 쓴다 (simulator.reanalysis_nodes). 놓치지 않는 쪽으로 넓게 잡는다 (사용자가 거른다).
+    강한 신호가 있을 때만 권장하고, 약한 신호는 참고 신호(detail_analysis_notes)로 남긴다. 공통 모듈·여러 진입점 신호는
+    [변경] 노드에서만 센다 ([참조] 노드는 거쳐 가기만 하므로 신호가 아님). 신호마다 노드 ID 를 그대로 넣는다: 사용자가
+    "상세 분석 요청"을 누르면 사유와 참고 신호가 함께 reanalysis 후속 입력이 되고, Simulator·Verifier 가 문장 속 노드 ID 를
+    확인 대상으로 쓴다 (simulator.reanalysis_nodes).
+
+    강한 신호: [변경] 노드가 공통 모듈이거나 여러 진입점에서 호출됨 · 요건 항목 2개 이상이 2개 영역 이상을 변경 ·
+              구조 변경 요건(DETAIL_CHANGE_TYPES)의 신규 후보·그래프 밖 연계
+    약한 신호: 구조 변경 유형만 있음 · 탐색에서 제외된 공통 모듈 · 구조 변경이 아닌 요건의 신규 후보·그래프 밖 항목
     """
     exp = state.explorer
     nodes = {n.node_id: n for n in exp.nodes} if exp else {}
-    on_paths = list(dict.fromkeys(h.node for p in paths for h in p.hops))
-    reasons = [f"[항목 {it.item_id}] 저장·조회·연계 항목이 바뀌는 요건 ({it.change_type.value})"
-               for it in (state.planner.items if state.planner else []) if it.change_type in DETAIL_CHANGE_TYPES]
-    common = [n for n in on_paths if n in nodes and nodes[n].properties.get("is_common")]
-    reasons += [f"공통 모듈 {n} 이 경로에 있어 다른 화면·처리 영향 확인 필요" for n in common]
-    reasons += [f"공통 모듈 {n} 이 탐색에서 제외되어 다른 화면·처리 영향 확인 필요"
-                for n in (exp.excluded_common if exp else []) if n not in common]
+    items = state.planner.items if state.planner else []
+    structural = [it for it in items if it.change_type in DETAIL_CHANGE_TYPES]
+    changed = list(dict.fromkeys(h.node for p in paths for h in p.hops if h.impact.startswith(CHANGE_TAG)))
     shared = shared_nodes(exp.paths if exp else [], nodes)
-    reasons += [f"{n} 을 여러 진입점에서 호출 ({shared[n]})" for n in on_paths
-                if n in shared and n not in common and shared[n].startswith("진입점")]
+    strong: list[str] = []
+    weak = [f"[항목 {it.item_id}] 저장·조회·연계 항목이 바뀌는 요건 ({it.change_type.value})" for it in structural]
+    for n in changed:
+        if n in nodes and nodes[n].properties.get("is_common"):
+            strong.append(f"공통 모듈 {n} 이 변경 대상이라 다른 화면·처리 영향 확인 필요")
+        elif n in shared and shared[n].startswith("진입점"):
+            strong.append(f"변경 대상 {n} 을 여러 진입점에서 호출 ({shared[n]})")
+    areas = changed_areas(state, paths)
+    if len(items) >= 2 and len(areas) >= 2:
+        strong.append(f"요건 항목 {len(items)}개가 {'·'.join(a.value for a in areas)} 영역을 함께 변경 "
+                      f"({', '.join(changed[:MAX_EVIDENCE_NAMES])})")
+    weak += [f"공통 모듈 {n} 은 탐색에서 제외됨 - 이 요건으로 바뀌는지 확인" for n in (exp.excluded_common if exp else [])]
     for u in exp.unresolved if exp else []:
         if "신규 후보" in u:
-            reasons.append(f"그래프에 없는 항목이 있어 신규 개발 여부 확인 필요: {u}")
+            (strong if structural else weak).append(f"그래프에 없는 항목이 있어 신규 개발 여부 확인 필요: {u}")
         elif "그래프 밖" in u:
-            reasons.append(f"적재 범위 밖 연계 확인 필요: {u}")
-    return list(dict.fromkeys(reasons))[:MAX_DETAIL_REASONS]
+            (strong if structural else weak).append(f"적재 범위 밖 연계 확인 필요: {u}")
+    return list(dict.fromkeys(strong))[:MAX_DETAIL_REASONS], list(dict.fromkeys(weak))[:MAX_DETAIL_REASONS]
+
+
+def changed_areas(state: AgentState, paths: list[ImpactPath]) -> list[Area]:
+    """[변경] 노드가 걸친 영역 (AREA_ORDER 순, Simulator 와 같은 rules.node_areas 기준)."""
+    nodes = {n.node_id: n for n in state.explorer.nodes} if state.explorer else {}
+    iface = interface_node_ids(nodes, state.retriever.evidence if state.retriever else [])
+    found: set[Area] = set()
+    for p in paths:
+        for h, ar in zip(p.hops, node_areas([h.node for h in p.hops], nodes, iface)):
+            if h.impact.startswith(CHANGE_TAG):
+                found |= ar
+    return [a for a in AREA_ORDER if a in found]
 
 
 def with_flow_note(state: AgentState, summary: str) -> str:
@@ -506,6 +573,8 @@ def simple_message(state: AgentState, paths: list[ImpactPath]) -> str:
     lines = _request_lines(state) + ["", "[영향 경로] path_id: 노드 → … (근거 없는 노드는 *)"]
     lines += [f"- {p.path_id}: " + " → ".join(h.node + ("" if h.confidence is Confidence.CONFIRMED else "*") for h in p.hops)
               for p in paths] or ["- 없음"]
+    nodes = list(dict.fromkeys(h.node for p in paths for h in p.hops))
+    lines += ["", f"[경로 노드] {len(nodes)}개 (중복 없음, changes 는 이 중에서 고른다)", ", ".join(nodes) or "-"]
     lines += _evidence_lines(state)
     limits = unverified_segments(state, paths)
     if limits:

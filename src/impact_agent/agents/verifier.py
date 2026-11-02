@@ -35,7 +35,7 @@ from ..schemas import (
 from ..schemas.verifier import CheckKind
 from ..state import AgentState
 from .base import BaseAgent
-from .simulator import CHANGE_TAG, REFERENCE_TAG, reanalysis_nodes
+from .simulator import CHANGE_TAG, REFERENCE_IMPACT, REFERENCE_TAG, reanalysis_nodes
 
 # 변경 유형 → 그 항목의 경로(또는 그래프 밖 표시)가 반드시 있어야 할 영역 (설계서 2장, rules.CHANGE_TYPE_RULES 목표 역할 기준)
 REQUIRED_AREAS: dict[ChangeType, list[Area]] = {
@@ -230,23 +230,33 @@ def reanalysis_coverage(state: AgentState) -> list[Issue]:
 
     - 영향 경로에 없음 → 보완 필요. additional_scope 에 node:<ID>. 공통 모듈이라 탐색에서 제외된 노드는 사유에 함께 적는다
       (Planner 가 공통 제외를 끌 근거). 다음 라운드에도 같으면 decide 의 반복 규칙으로 pass.
-    - 경로에 있지만 그 노드의 hop 에 [변경]/[참조] 판정 문장이 없음 → 경고. Simulator 가 표시를 하나도 안 쓴 경우(LLM 없음 등)는
+      "참고:" 줄(참고 신호)에만 나온 노드는 경로에 없어도 경고만 (권장 근거가 아니므로 재계획 사유가 아님).
+    - 경로에 있지만 그 노드의 판정 문장이 없음 → 경고. Simulator LLM 이 쓰지 않아 코드가 채운 기본 [참조] 문장
+      (REFERENCE_IMPACT) 도 답이 없는 것으로 본다. Simulator 가 표시를 하나도 안 쓴 경우(LLM 없음 등)는
       Simulator 분석 한계에 이미 남으므로 점검하지 않는다.
     """
     requested = reanalysis_nodes(state)
     if not requested:
         return []
+    asked = set(reanalysis_nodes(state, notes=False))
     paths = unique_paths(state)
     on_paths = {h.node for p in paths for h in p.hops}
     excluded = set(state.explorer.excluded_common) if state.explorer else set()
+
+    def names(ns: list[str]) -> str:
+        return ", ".join(f"{n} (공통 모듈이라 탐색에서 제외됨)" if n in excluded else n for n in ns)
+
     issues = []
-    if missing := [n for n in requested if n not in on_paths]:
-        names = ", ".join(f"{n} (공통 모듈이라 탐색에서 제외됨)" if n in excluded else n for n in missing)
-        issues.append(Issue("reanalysis_coverage", f"재분석 요청 노드가 영향 경로에 없음: {names}",
-                            scope=[f"node:{n}" for n in missing[:MAX_SCOPE]]))
+    missing = [n for n in requested if n not in on_paths]
+    if req := [n for n in missing if n in asked]:
+        issues.append(Issue("reanalysis_coverage", f"재분석 요청 노드가 영향 경로에 없음: {names(req)}",
+                            scope=[f"node:{n}" for n in req[:MAX_SCOPE]]))
+    if ref := [n for n in missing if n not in asked]:
+        issues.append(Issue("reanalysis_coverage", f"재분석 참고 노드가 영향 경로에 없음: {names(ref)}", blocking=False))
     tags = (CHANGE_TAG, REFERENCE_TAG)
     if any(h.impact.startswith(tags) for p in paths for h in p.hops):
-        answered = {h.node for p in paths for h in p.hops if h.impact.startswith(tags)}
+        default = f"{REFERENCE_TAG} {REFERENCE_IMPACT}"
+        answered = {h.node for p in paths for h in p.hops if h.impact.startswith(tags) and h.impact != default}
         if unanswered := [n for n in requested if n in on_paths and n not in answered]:
             issues.append(Issue("reanalysis_coverage", f"재분석 요청 노드의 판정 문장([변경]/[참조])이 없음: {', '.join(unanswered)}",
                                 blocking=False))

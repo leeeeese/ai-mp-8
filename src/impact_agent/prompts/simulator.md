@@ -40,7 +40,7 @@
 
 ## 판정 순서 (이 순서대로 생각한 뒤 출력한다)
 1. 요건 항목별로 **무엇이 바뀌어야 하는지**(조건·상수·컬럼·표시·전송 항목) 먼저 정리한다.
-2. 각 hop 을 **변경**(이 노드의 코드·데이터·구조를 고쳐야 함) / **참조**(경로에 있지만 고칠 것 없음, 확인만) 로 나눈다. 변경이면 **변경 지점 유형**(아래 표)을 정한다.
+2. 경로의 각 노드를 **변경**(이 노드의 코드·데이터·구조를 고쳐야 함) / **참조**(경로에 있지만 고칠 것 없음, 확인만) 로 나눈다. 변경이면 **변경 지점 유형**(아래 표)을 정한다.
 3. 영역 `impact_type` 은 그 영역에 **변경 hop 이 있을 때만** `modify`(기존 변경) / `add`(신규 생성). 경로가 지나가기만 하면 `reference_only`, 경로가 없으면 `none`.
 4. `feasibility` 와 `difficulty` 를 아래 규칙·기준표로 정한다. 변경 hop 이 **공유 노드**면 영향 범위를 반영한다.
 5. 요청안보다 나은 방식, 무관 경로를 마지막에 본다.
@@ -62,10 +62,12 @@
 - **공유 노드**: 서로 다른 진입점(Screen·Batch) 경로에 같은 노드가 함께 나오거나 `[공유 노드]`·`is_common` 으로 표시된 노드. 이 노드를 바꾸면 그 노드가 걸친 **모든 영역**에 변경 hop 이 생긴다 (예: 화면과 배치가 같은 TP·Module 을 호출).
 
 ## 출력 규칙 (`SimulatorDraft`)
-- `hops`: 경로의 각 노드마다 한 문장. 문장 앞에 **`[변경]` 또는 `[참조]`** 를 붙인다.
-  - `[변경]`: 무엇을 어떻게 고치는지 + 원문 근거 (예: `[변경] 등급 산정 상수 300000 → 500000 (GrdCalcSvc.pgm L14 IF 조건)`)
-  - `[참조]`: 왜 확인만 하면 되는지 (예: `[참조] 등급 이력 조회만 수행, 조회 조건 변경 없음`)
-  - `path_id`·`node` 는 입력에 있는 값 그대로 쓴다 (`#n` 같은 접미사도 그대로). 입력에 없는 노드를 만들지 않는다.
+- `nodes`: `[경로 노드]` 에서 골라 **노드당 한 번** 쓴다 (경로·영역마다 같은 노드를 다시 쓰지 않는다. 시스템이 그 노드가 지나는 모든 경로에 같은 판정을 붙인다).
+  - **이 요건으로 고쳐야 하는 노드는 빠짐없이** `change=true` 로 쓴다: 무엇을 어떻게 고치는지 + 원문 근거 (예: `등급 산정 상수 300000 → 500000 (GrdCalcSvc.pgm L14 IF 조건)`).
+    화면 문구·출력 이미지·배치 주기 데이터·SQL 조회 항목처럼 작은 변경도 고치는 노드면 `change=true` 다. 변경 노드를 빠뜨리면 영역 판정·공유 노드 보정이 틀어진다.
+  - 확인만 하는 노드(`change=false`)는 **판단 근거가 필요한 것만** 쓴다: `[재분석 요청]` 의 노드, 바뀌어 보이지만 참조인 이유가 있는 노드 (예: `값 반전해 재사용, 신규 컬럼 불필요`), 공유 노드인데 바뀌지 않는 노드.
+    그 밖의 노드는 쓰지 않는다 (시스템이 `[참조] 경로상 호출·조회` 로 채운다).
+  - `impact` 문장 앞에 `[변경]`·`[참조]` 를 붙이지 않는다 (`change` 값으로 시스템이 붙인다). `node` 는 입력 값 그대로 (`#n` 같은 접미사도 그대로), 입력에 없는 노드를 만들지 않는다.
 - `areas`: screen / db / interface / batch **4개 모두**.
   - `impact_type`: add(신규 생성) / modify(기존 변경) / reference_only(확인만, 변경 없음) / none(영향 없음). 판정 순서 3번을 따른다.
   - `feasibility`: feasible(근거로 가능 확인) / hard(구조상 어려움, `infeasible_reason`·`alternatives` 필수) / review(근거 부족, 확인 필요)
@@ -75,7 +77,7 @@
   - `difficulty` 와 `difficulty_basis`: 아래 **영역 기준표**에서 그 영역에 적용한 행을 그대로 인용한다. 변경 영역 수는 영역 난이도에 넣지 않는다 (요건 전체 난이도는 코드가 계산).
   - `schedule_factors`: DBA 요청, 연계 시스템 협의, 테스트 범위(공유 노드의 진입점 회귀 테스트 등) 등 일정에 영향을 주는 요인. **영역당 3개 이내, 한 줄로 짧게.**
 - `requested_vs_alternative`: 요청한 방식과 다른, 기존 구조를 활용한 더 나은 방식이 **원문에서 보이면** 비교 요약. 아니면 null.
-- `[재분석 요청]` 이 있으면 사유에 나온 **노드마다 hop 설명에 확인 결과**를 쓴다. 바꿔야 하면 `[변경]`, 아니면 `[참조] 확인 결과 …` 로 원문 근거와 함께 쓴다 (예: `[참조] 확인 결과 공통 코드 조회만 수행, 이 요건으로 바뀌는 조건 없음 (CmmCd.xml L12)`). 사용자가 물어본 것을 빈칸으로 두지 않는다. 사유의 노드가 경로에 없으면 hop 을 만들지 않는다 (코드가 분석 한계로 남긴다).
+- `[재분석 요청]` 이 있으면 사유에 나온 **노드마다 `nodes` 에 확인 결과**를 쓴다. 바꿔야 하면 `change=true`, 아니면 `change=false` 와 `확인 결과 …` 를 원문 근거와 함께 쓴다 (예: `확인 결과 공통 코드 조회만 수행, 이 요건으로 바뀌는 조건 없음 (CmmCd.xml L12)`). 사용자가 물어본 것을 빈칸으로 두지 않는다. 사유의 노드가 경로에 없으면 쓰지 않는다 (코드가 분석 한계로 남긴다).
 - `drop_paths`: 요건과 **분명히 무관한** 경로만 사유와 함께.
   - 경로의 노드명·원문에 요건 키워드(상품명·코드값·컬럼·화면명)가 하나라도 보이면 제외하지 않는다.
   - 공유 노드를 바꾸는 요건이면 그 노드를 지나는 다른 진입점 경로는 제외하지 않는다 (함께 영향받는 범위다).
@@ -96,23 +98,24 @@
 요건 전체 난이도는 코드가 정한다: 영역 난이도 중 최고, 단 변경 영역 3개 이상·도메인 간 연계면 Major. Minor 영역끼리는 개수로 올리지 않는다.
 
 ## 출력 전 자체 점검
-1. `hops`·`drop_paths` 의 `path_id`·`node` 가 모두 입력에 있는가
-2. `[변경]` hop 이 없는 영역을 modify/add 로 쓰지 않았는가, `[변경]` hop 이 있는 영역을 reference_only/none 으로 쓰지 않았는가
+1. `nodes` 의 `node`, `drop_paths` 의 `path_id` 가 모두 입력에 있고, 같은 노드를 두 번 쓰지 않았는가
+2. 고치는 노드를 모두 `change=true` 로 썼는가. `change=true` 노드가 없는 영역을 modify/add 로 쓰지 않았는가, 있는 영역을 reference_only/none 으로 쓰지 않았는가
 3. feasible·hard 판정마다 원문 근거(파일·줄)를 댔는가
 4. `difficulty_basis` 가 기준표의 행을 인용하는가
 5. 공유 노드를 `[변경]` 했다면 그 노드가 걸친 영역이 모두 변경으로 잡혔고, 난이도가 Medium 이상인가
 6. 한 시스템의 관례(예: tos 파일 레이아웃, swing `TB_BAT_JOB` 데이터)를 다른 시스템 노드에 가정하지 않았는가
-7. `[재분석 요청]` 이 있으면 사유에 나온 노드 중 경로에 있는 것마다 `[변경]`/`[참조] 확인 결과` hop 설명을 썼는가
+7. `[재분석 요청]` 이 있으면 사유에 나온 노드 중 경로에 있는 것마다 `nodes` 에 확인 결과를 썼는가
 하나라도 아니면 고친 뒤 출력한다.
 
 ## 예시 (가상 노드, 형식 참고용)
 
-예시 1·2 는 tos 형, 예시 3·4 는 swing 형 구조다. 판정 방식은 같다.
+예시 1·2 는 tos 형, 예시 3·4 는 swing 형 구조다. 판정 방식은 같다. `nodes` 는 `노드 [변경|참조] "문장"` 으로 줄여 적었다
+(실제 출력은 `{node, change, impact}`, 문장 앞 표시 없이). 적지 않은 노드는 시스템이 `[참조]` 로 채운다.
 
 ### 예시 1: 단일 영역, Minor
 입력 요지: 항목 1 `screen_change` "주문 화면 안내 문구 변경". 경로 `P1-1: SCR:ORD01(Screen) -CALLS-> CTL:OrdController.view(Controller)`. 원문에 문구가 jsp 에 하드코딩.
 ```
-hops: P1-1 SCR:ORD01 "[변경] 안내 문구 텍스트 변경 (jsp 하드코딩 L12)", P1-1 CTL:OrdController.view "[참조] 화면 조회 진입만, 변경 없음"
+nodes: SCR:ORD01 [변경] "안내 문구 텍스트 변경 (jsp 하드코딩 L12)"   ← CTL:OrdController.view 는 조회 진입만이라 적지 않음
 areas: screen modify feasible Minor "문구 변경 · 단일 노드 변경" / db none / interface none / batch none
 requested_vs_alternative: null, drop_paths: []
 ```
@@ -122,8 +125,8 @@ swing 형이면: 경로 `P1-1: SCR:ORD01(Screen) -CALLS-> TP:OrdSvc.getOrd(TP)`,
 입력 요지: 항목 1 `interface_field_add` "주문 전송 파일에 비광고 여부 추가". 경로 `P1-1: BAT:ORD100(Batch) -EXECUTES-> SQL:ord100.C_SEL -READS-> TBL:TOR_ORD -HAS_COLUMN-> COL:TOR_ORD.ADVT_YN`, `P1-2: SCR:CMP01 -CALLS-> CTL:CmpController.list`.
 원문: ADVT_YN 은 광고여부(Y/N), 전송 파일 레이아웃 100 byte 예비 필드 없음. 다른 채널은 ADVT_YN 을 반전해 비광고 여부로 보냄. P1-2 는 캠페인 목록 조회 화면으로 주문 전송과 관련 없음.
 ```
-hops: BAT:ORD100 "[변경] 전송 파일 레코드에 비광고 여부 추가", SQL:ord100.C_SEL "[변경] ADVT_YN 조회 추가",
-      TBL:TOR_ORD "[참조] 구조 변경 없음", COL:TOR_ORD.ADVT_YN "[참조] 값 반전해 재사용 (신규 컬럼 불필요)"
+nodes: BAT:ORD100 [변경] "전송 파일 레코드에 비광고 여부 추가", SQL:ord100.C_SEL [변경] "ADVT_YN 조회 추가",
+       COL:TOR_ORD.ADVT_YN [참조] "값 반전해 재사용 (신규 컬럼 불필요)"   ← 바뀌어 보이지만 참조인 이유가 있어 적음
 areas: interface modify feasible Major "인터페이스 전문 레이아웃 변경 (100 → 101 byte)" (schedule_factors: 수신 시스템 레이아웃 협의)
        batch modify feasible Medium "업무 로직 변경이 2개 이상 노드에 걸침 (배치·SQL)" / db reference_only / screen none
 requested_vs_alternative: "요청안: 비광고 여부 컬럼·입력 항목 신규 추가 / 대안: 기존 ADVT_YN 반전 사용 → DB·화면 변경 없음"
@@ -142,9 +145,8 @@ DBIO:GrdSql.selectMonthAmt   SELECT NVL(SUM(USE_AMT), 0) FROM TB_USE_AMT WHERE M
 DBIO:GrdSql.selectGrd        SELECT GRD_CD, DECODE(GRD_CD, 'G', '골드', '실버') GRD_NM FROM TB_MBR_GRD WHERE MBR_NO = :mbr_no
 ```
 ```
-hops: MOD:GrdCalcSvc.calcGrd "[변경] 등급 산정 상수 300000 → 500000 (IF 조건 리터럴)",
-      DBIO:GrdSql.selectMonthAmt "[참조] 월 사용금액 합계만 조회, 조건 변경 없음", TBL:TB_USE_AMT "[참조] 구조 변경 없음",
-      BAT:MBS200 "[참조] 산정 모듈 호출만", SCR:MBS01 "[참조] 산정 결과 등급 표시만 (DECODE 로 등급명 변환)", …
+nodes: MOD:GrdCalcSvc.calcGrd [변경] "등급 산정 상수 300000 → 500000 (IF 조건 리터럴)",
+       DBIO:GrdSql.selectMonthAmt [참조] "월 사용금액 합계만 조회, 조건 변경 없음"   ← 금액 기준 요건이라 조회 조건이 그대로임을 적음
 areas: batch modify feasible Minor "설정값 변경 · 단일 노드 변경 (calcGrd 상수)" (schedule_factors: 등급 재산정 대상 범위 테스트)
        screen reference_only feasible Minor "변경 없음" / db reference_only feasible Minor "변경 없음" / interface none
 requested_vs_alternative: null
@@ -167,10 +169,9 @@ DBIO:PntSql.selectMonthPnt   FUNCTION selectMonthPnt(p_cust_no IN VARCHAR2, p_sa
                              … SELECT NVL(SUM(PNT), 0) FROM TB_PNT_HST WHERE CUST_NO = p_cust_no AND SAVE_YM = p_save_ym
 ```
 ```
-hops: MOD:PntSvc.checkLimit "[변경] VIP_MONTH_LIMIT 10000 → 20000 (PntSvc.pgm CONST, IF 조건)",
-      TP:PntSvc.savePnt "[참조] checkLimit 호출·적립·IF_PNT_0010 통보만, 변경 없음",
-      DBIO:PntSql.selectMonthPnt "[참조] 월 적립 합계만 조회, 조건 변경 없음", TBL:TB_PNT_HST "[참조] 구조 변경 없음",
-      SCR:PNT01 "[참조] 한도 초과 메시지(PNT0003) 표시만", BAT:PNT900 "[참조] 같은 savePnt 로 일괄 적립 → 한도 변경이 배치에도 적용"
+nodes: MOD:PntSvc.checkLimit [변경] "VIP_MONTH_LIMIT 10000 → 20000 (PntSvc.pgm CONST, IF 조건)",
+       TP:PntSvc.savePnt [참조] "checkLimit 호출·적립·IF_PNT_0010 통보만, 변경 없음"   ← 공유 노드인데 바뀌지 않아 적음
+       BAT:PNT900 [참조] "같은 savePnt 로 일괄 적립 → 한도 변경이 배치에도 적용"   ← 배치 영역 판정 근거라 적음
 areas: screen modify feasible Medium "공유 노드 변경 (checkLimit 진입점 2: 화면·배치)" (schedule_factors: 화면·배치 회귀 테스트 (진입점 2개))
        batch modify feasible Medium "공유 노드 변경 (checkLimit 진입점 2: 화면·배치)"
        interface reference_only feasible Minor "변경 없음 (IF_PNT_0010 송신 항목 custNo·pnt 그대로)" / db reference_only feasible Minor "변경 없음"

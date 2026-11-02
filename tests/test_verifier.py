@@ -252,6 +252,31 @@ def test_reanalysis_missing_common_node_says_excluded():
     assert c.note == "재분석 요청 노드가 영향 경로에 없음: MOD:BatchLauncher.runJob (공통 모듈이라 탐색에서 제외됨)"
 
 
+NOTE_REASON = ("변경 대상 MOD:PntSvc.checkLimit 을 여러 진입점에서 호출 (진입점 2개)\n"
+               "참고: 공통 모듈 MOD:BatchLauncher.runJob 은 탐색에서 제외됨 - 이 요건으로 바뀌는지 확인")
+
+
+def test_reanalysis_note_node_missing_is_warning_only():
+    # 참고 신호(약한 신호) 줄에만 나온 노드는 경로에 없어도 재계획 사유가 아니다
+    state = reanalysis_state(NOTE_REASON)
+    state.explorer.excluded_common = ["MOD:BatchLauncher.runJob"]
+    out, _ = verify(state)
+    (c,) = coverage(out)
+    assert c.result is VerifyResult.PASS
+    assert c.note == "(경고) 재분석 참고 노드가 영향 경로에 없음: MOD:BatchLauncher.runJob (공통 모듈이라 탐색에서 제외됨)"
+    assert "node:MOD:BatchLauncher.runJob" not in out.additional_scope
+
+
+def test_reanalysis_requested_missing_blocks_note_missing_warns():
+    state = reanalysis_state("공통 모듈 CTL:CmmCdController.selectCdList 영향 확인\n참고: MOD:BatchLauncher.runJob 확인")
+    out, _ = verify(state)
+    assert out.result is VerifyResult.NEEDS_SUPPLEMENT
+    assert out.additional_scope == ["node:CTL:CmmCdController.selectCdList"]                 # 요청 노드만 재계획 범위
+    notes = " / ".join(c.note for c in coverage(out))
+    assert "재분석 요청 노드가 영향 경로에 없음: CTL:CmmCdController.selectCdList" in notes
+    assert "재분석 참고 노드가 영향 경로에 없음: MOD:BatchLauncher.runJob" in notes
+
+
 def test_reanalysis_nodes_answered_pass():
     sim_llm = SimLLM(sim_draft(hops=CHANGE_HOPS))     # checkLimit [변경], savePnt·selectMonthPnt [참조]
     out, _ = verify(reanalysis_state("MOD:PntSvc.checkLimit 와 TP:PntSvc.savePnt 를 화면·배치 2곳에서 호출", sim_llm))

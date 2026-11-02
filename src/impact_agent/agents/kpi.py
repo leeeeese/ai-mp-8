@@ -239,16 +239,35 @@ def overall_feasibility(state: AgentState) -> Feasibility | None:
 
 
 def hop_tags(state: AgentState) -> dict[str, str]:
-    """Simulator 경로 노드별 판정: [변경] 이 한 번이라도 있으면 change, 아니면 [참조] 면 reference (표시 없으면 빠짐)."""
+    """경로 노드별 판정: [변경] 이 한 번이라도 있으면 change, 아니면 [참조] 면 reference (표시 없으면 빠짐).
+
+    복잡 flow 는 Simulator 영향 경로, 단순 flow 는 Composer 단순 응답 경로 (상세 분석 권장 신호가 이 표시를 쓴다).
+    """
+    if state.simulation is not None:
+        paths = [p for a in state.simulation.area_impacts for p in a.paths]
+    elif state.composer is not None and state.composer.simple_answer is not None:
+        paths = state.composer.simple_answer.impact_paths
+    else:
+        return {}
     tags: dict[str, str] = {}
-    for a in state.simulation.area_impacts:
-        for p in a.paths:
-            for h in p.hops:
-                if h.impact.startswith(CHANGE_TAG):
-                    tags[h.node] = "change"
-                elif h.impact.startswith(REFERENCE_TAG):
-                    tags.setdefault(h.node, "reference")
+    for p in paths:
+        for h in p.hops:
+            if h.impact.startswith(CHANGE_TAG):
+                tags[h.node] = "change"
+            elif h.impact.startswith(REFERENCE_TAG):
+                tags.setdefault(h.node, "reference")
     return tags
+
+
+def tag_accuracy(tags: dict[str, str], key: AnswerKey, j: KpiCategory) -> tuple[list[KpiMetric], list[str]]:
+    """[변경]/[참조] 판정 정확도 (정답 변경·참조 노드 중 표시된 것만 비교). 표시가 없거나 비교할 노드가 없으면 생략."""
+    expected = {n: "change" for n in key.change_nodes} | {n: "reference" for n in key.reference_nodes}
+    judged = {n: t for n, t in expected.items() if n in tags}
+    if not judged:
+        return [], []
+    off = [f"{n}(정답 {'변경' if t == 'change' else '참조'})" for n, t in judged.items() if tags[n] != t]
+    metric = _metric(KpiMetricName.CHANGE_TAG_ACCURACY, j, (len(judged) - len(off)) / len(judged), "ratio")
+    return [metric], [f"[변경]/[참조] 판정 불일치: {', '.join(off)}"] if off else []
 
 
 def judgement_metrics(state: AgentState, key: AnswerKey, complexity: Complexity) -> tuple[list[KpiMetric], list[str]]:
@@ -274,6 +293,8 @@ def judgement_metrics(state: AgentState, key: AnswerKey, complexity: Complexity)
                 notes.append("정답 complex 인데 단순 처리됐고 상세 분석 권장도 없음 (놓친 복잡 요건)")
             if key.complexity is Complexity.SIMPLE and recommended:
                 notes.append(f"정답 simple 인데 상세 분석 권장 ({'; '.join(answer.detail_analysis_reasons)})")
+            m, n = tag_accuracy(hop_tags(state), key, j)  # Composer [변경]/[참조] (권장 신호의 입력)
+            metrics, notes = metrics + m, notes + n
         return metrics, notes
 
     sim = state.simulation
@@ -298,13 +319,8 @@ def judgement_metrics(state: AgentState, key: AnswerKey, complexity: Complexity)
             notes.append(f"영역 영향 유형 불일치: {', '.join(wrong)}")
     tags = hop_tags(state)
     if tags:  # Simulator 가 [변경]/[참조] 표시를 했을 때만
-        expected = {n: "change" for n in key.change_nodes} | {n: "reference" for n in key.reference_nodes}
-        judged = {n: t for n, t in expected.items() if n in tags}
-        if judged:
-            off = [f"{n}(정답 {'변경' if t == 'change' else '참조'})" for n, t in judged.items() if tags[n] != t]
-            metrics.append(_metric(KpiMetricName.CHANGE_TAG_ACCURACY, j, (len(judged) - len(off)) / len(judged), "ratio"))
-            if off:
-                notes.append(f"[변경]/[참조] 판정 불일치: {', '.join(off)}")
+        m, n = tag_accuracy(tags, key, j)
+        metrics, notes = metrics + m, notes + n
         if key.wrong_paths:
             adopted = [w for w in key.wrong_paths if any(tags.get(n) == "change" for n in w)]
             metrics.append(_metric(KpiMetricName.WRONG_PATH_ADOPTED, j, len(adopted), "count"))
