@@ -18,7 +18,7 @@ import {
   L1_REQUEST,
   SC001_ANSWER,
   SC006_ANSWER,
-  SC006_DETAIL_REASONS,
+  SC006_DETAIL_NOTES,
   reportFor,
 } from './fixtures/scenarios';
 
@@ -103,15 +103,15 @@ export const kpiRecords: KpiRecord[] = [
     req_id: 'SC-006', complexity: 'simple',
     counts: { tp: 2, fn: 1, fp: 24, critical_missed: 1, critical_total: 3 },
     metrics: { node_recall: 2 / 3, node_miss_rate: 1 / 3, critical_miss_rate: 1 / 3, node_precision: 2 / 26, complexity_match: 1,
-      detail_recommended: 1, ...perf('simple') },
+      detail_recommended: 0, ...perf('simple') },
     missed_nodes: ['COL:TCP_CMM_CD.CD_NM'],
-    judgement_notes: ['정답 simple 인데 상세 분석 권장 (공통 모듈 CTL:CmmCdController.selectCdList 이 경로에 있어 다른 화면·처리 영향 확인 필요)'],
+    judgement_notes: [],
   }),
   seedRecord('s-l1', {
     req_id: 'L-1', complexity: 'simple',
     counts: { tp: 7, fn: 0, fp: 16, critical_missed: 0, critical_total: 0 },
-    metrics: { node_recall: 1, node_miss_rate: 0, node_precision: 7 / 23, complexity_match: 1, detail_recommended: 1, ...perf('simple') },
-    judgement_notes: ['정답 simple 인데 상세 분석 권장 (공통 모듈 MOD:BatchLauncher.runJob 이 탐색에서 제외되어 다른 배치·처리 영향 확인 필요)'],
+    metrics: { node_recall: 1, node_miss_rate: 0, node_precision: 7 / 23, complexity_match: 1, detail_recommended: 0, ...perf('simple') },
+    judgement_notes: [],
   }),
   seedRecord('s-h1', {
     req_id: 'H-1', complexity: 'complex',
@@ -195,7 +195,7 @@ export function completeSession(id: string) {
     : isL1(s)
       ? L1_ANSWER
       : s.inputType === 'ops_inquiry'
-        ? { ...SC006_ANSWER, detail_analysis_recommended: true, detail_analysis_reasons: SC006_DETAIL_REASONS }
+        ? { ...SC006_ANSWER, detail_analysis_notes: SC006_DETAIL_NOTES }
         : complexAnswer;
   s.complexity = answer.complexity;
   s.status = 'done';

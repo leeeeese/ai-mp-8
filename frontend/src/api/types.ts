@@ -81,7 +81,8 @@ export interface AgentAnswer {
   checkQueries?: { title: string; sql: string }[];
   // 상세 분석 권장: 백엔드 SimpleAnswer 와 같은 필드명을 그대로 쓴다 (snake_case, 매핑 누락 방지)
   detail_analysis_recommended?: boolean;
-  detail_analysis_reasons?: string[]; // 권장 사유, 노드 ID 포함 → "상세 분석 요청" 시 reanalysis 후속 입력 내용
+  detail_analysis_reasons?: string[]; // 권장 사유(강한 신호), 노드 ID 포함 → "상세 분석 요청" 시 reanalysis 후속 입력 내용
+  detail_analysis_notes?: string[]; // 참고 신호(약한 신호, 권장 안 함), 노드 ID 포함 → 상세 분석 요청 시 "참고: " 줄로 함께 보냄
 }
 
 export interface Message {

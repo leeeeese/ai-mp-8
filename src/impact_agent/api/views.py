@@ -26,11 +26,13 @@ def overall_feasibility(areas: list[AreaImpact]) -> Feasibility:
 def area_view(a: AreaImpact) -> dict:
     hops = [h for p in a.paths for h in p.hops]
     changed = next((h.impact for h in hops if h.impact.startswith(CHANGE_TAG)), None)
+    # 대표 경로: [변경] hop 을 지나는 경로 먼저 (없으면 첫 경로)
+    shown = next((p for p in a.paths if any(h.impact.startswith(CHANGE_TAG) for h in p.hops)), a.paths[0] if a.paths else None)
     alt = a.alternatives[0] if a.alternatives else None
     return {
         "area": a.area.value,
         "impact": f"{IMPACT_LABEL[a.impact_type]} — {changed or a.difficulty_basis}",
-        "path": [h.node for h in a.paths[0].hops] if a.paths else [],
+        "path": [h.node for h in shown.hops] if shown else [],
         "requested": {"feasibility": a.feasibility.value, "difficulty": a.difficulty.value},
         "alternative": {"feasibility": alt.feasibility.value, "difficulty": alt.difficulty.value} if alt else None,
         "confidence": a.confidence.value,
@@ -61,6 +63,7 @@ def answer_view(state: AgentState) -> dict:
             "checkQueries": [{"title": q.purpose, "sql": q.sql} for q in simple.check_queries],
             "detail_analysis_recommended": simple.detail_analysis_recommended,
             "detail_analysis_reasons": simple.detail_analysis_reasons,
+            "detail_analysis_notes": simple.detail_analysis_notes,
         }
     return answer
 
