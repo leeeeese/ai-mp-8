@@ -322,6 +322,23 @@ def test_orphan_paths_without_graph_and_untouched_paths(monkeypatch):
     assert not any(s.startswith("영역 추정") for s in out.unverified_segments) and graph.calls == 0  # 영역이 있으면 조회 안 함
 
 
+def test_target_nodes_in_llm_input_and_skipped_limit():
+    # 요건 언급과 매칭된 시작 노드를 LLM 입력에 알리고, LLM 이 판정을 쓰지 않으면 분석 한계로 남긴다
+    state = make_swing_state(SHARED_PATHS)
+    state.explorer.item_results = [ItemExploreResult(
+        item_id=1, start_node_ids=["MOD:PntSvc.checkLimit", "SCR:ZPNTSS01", "TBL:NOT_ON_PATH"], target_role=R.LOGIC,
+        direction=Direction.FORWARD, reached=True)]
+    hops = [DraftHop(path_id="P1-1", node="MOD:PntSvc.checkLimit", impact="[변경] 한도 상수 변경")]   # SCR 은 쓰지 않음
+    llm = ScriptLLM(draft(hops=hops))
+    out = SimulatorAgent(llm=llm).run(state)
+    assert "[요건 대상 노드]" in llm.users[0]
+    assert "- 항목 1 (언급: 적립 한도): MOD:PntSvc.checkLimit, SCR:ZPNTSS01" in llm.users[0]   # 경로 밖 노드는 뺌
+    assert "요건 대상 노드 판정 누락: SCR:ZPNTSS01 ([참조] 기본값으로 둠, 변경 여부 확인 필요)" in out.unverified_segments
+    hops.append(DraftHop(path_id="P1-1", node="SCR:ZPNTSS01", impact="[참조] 확인 결과 표시 변경 없음 (scr L3)"))
+    out = SimulatorAgent(llm=ScriptLLM(draft(hops=hops))).run(state)
+    assert not any(s.startswith("요건 대상 노드 판정 누락") for s in out.unverified_segments)
+
+
 def test_swing_evidence_confidence_and_llm_input():
     no_ev = ["MOD:PntSvc.checkLimit", "BAT:ZPNTBB09"]
     state = make_swing_state([(1, SW_SCREEN, StopReason.TARGET_REACHED), (1, SW_BATCH, StopReason.TARGET_REACHED),

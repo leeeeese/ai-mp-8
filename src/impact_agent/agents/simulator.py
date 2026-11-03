@@ -183,7 +183,11 @@ class SimulatorAgent(BaseAgent[SimulationOutput]):
                 limits.append(f"LLM 판정 실패로 규칙 판정 사용: {exc}")
 
         if draft is not None:  # LLM 에 보여 준 경로(MAX_CONTEXT_PATHS)의 노드만 판정된 것으로 본다
-            apply_node_impacts(draft, [p for p, _ in built], {h.node for p, _ in built[:MAX_CONTEXT_PATHS] for h in p.hops})
+            shown = {h.node for p, _ in built[:MAX_CONTEXT_PATHS] for h in p.hops}
+            apply_node_impacts(draft, [p for p, _ in built], shown)
+            written = {d.node for d in draft.nodes}
+            if skipped := [n for _, ns in target_nodes(state, shown) for n in ns if n not in written]:
+                limits.append(f"요건 대상 노드 판정 누락: {', '.join(dict.fromkeys(skipped))} ([참조] 기본값으로 둠, 변경 여부 확인 필요)")
         kept, dropped = apply_drops(draft, built, state, shared)
         return SimulationOutput(
             area_impacts=judge_areas(draft, kept, areas_of, state, limits, (shared, hop_areas)),
@@ -520,6 +524,24 @@ def reanalysis_nodes(state: AgentState, notes: bool = True) -> list[str]:
     return list(dict.fromkeys(m.rstrip(".") for x in lines for m in NODE_ID_IN_TEXT.findall(x)))
 
 
+def target_nodes(state: AgentState, path_nodes: set[str]) -> list[tuple[str, list[str]]]:
+    """요건 항목별 대상 노드 = Explorer 가 요건 언급 표현에서 찾은 탐색 시작 노드 중 경로에 있는 것. [(항목 머리, 노드)].
+
+    LLM 이 이 노드를 쓰지 않으면 [참조] 기본값이 붙는데, 요건이 직접 가리킨 노드라 판정을 빠뜨리면 [변경] 이 조용히 빠진다.
+    """
+    exp = state.explorer
+    items = {it.item_id: it for it in (state.planner.items if state.planner else [])}
+    out = []
+    for r in exp.item_results if exp else []:
+        ns = [n for n in dict.fromkeys(r.start_node_ids) if n in path_nodes]
+        if not ns:
+            continue
+        it = items.get(r.item_id)
+        phrases = ", ".join(dict.fromkeys(m.phrase for m in it.mentions)) if it else ""
+        out.append((f"항목 {r.item_id}" + (f" (언급: {phrases})" if phrases else ""), ns))
+    return out
+
+
 def user_message(
     state: AgentState, paths: list[ImpactPath], areas_of: dict[str, list[Area]], nodes: dict[str, GraphNode],
     shared: dict[str, str] | None = None,
@@ -550,6 +572,9 @@ def user_message(
     path_nodes = {h.node for p in shown for h in p.hops}
     lines += ["", f"[경로 노드] {len(path_nodes)}개 (중복 없음, nodes 는 이 중에서 노드당 한 번)",
               ", ".join(dict.fromkeys(h.node for p in shown for h in p.hops)) or "-"]
+    if targets := target_nodes(state, path_nodes):
+        lines += ["", "[요건 대상 노드] 요건 언급 표현과 매칭된 탐색 시작 노드. 노드마다 nodes 에 판정(change true/false + 근거)을 쓴다"]
+        lines += [f"- {head}: {', '.join(ns)}" for head, ns in targets]
     lines += ["", "[노드 메타] 노드 (시스템·역할) 판단용 속성 / 데이터 접근 엣지의 접근 컬럼"]
     lines += node_meta_lines(shown, nodes, state.explorer.edges if state.explorer else [])
     shown_shared = [n for n in dict.fromkeys(h.node for p in shown for h in p.hops) if n in (shared or {})]

@@ -41,6 +41,7 @@ from ..schemas import (
     Confidence,
     Difficulty,
     Evidence,
+    ExplorerOutput,
     Feasibility,
     FollowupInput,
     FollowupType,
@@ -402,12 +403,26 @@ def detail_reasons(state: AgentState, paths: list[ImpactPath]) -> tuple[list[str
         strong.append(f"요건 항목 {len(items)}개가 {'·'.join(a.value for a in areas)} 영역을 함께 변경 "
                       f"({', '.join(changed[:MAX_EVIDENCE_NAMES])})")
     weak += [f"공통 모듈 {n} 은 탐색에서 제외됨 - 이 요건으로 바뀌는지 확인" for n in (exp.excluded_common if exp else [])]
-    for u in exp.unresolved if exp else []:
-        if "신규 후보" in u:
-            (strong if structural else weak).append(f"그래프에 없는 항목이 있어 신규 개발 여부 확인 필요: {u}")
-        elif "그래프 밖" in u:
-            (strong if structural else weak).append(f"적재 범위 밖 연계 확인 필요: {u}")
+    for kind, text in unresolved_signals(exp):
+        if kind == "new_candidate":
+            (strong if structural else weak).append(f"그래프에 없는 항목이 있어 신규 개발 여부 확인 필요: {text}")
+        else:
+            (strong if structural else weak).append(f"적재 범위 밖 연계 확인 필요: {text}")
     return list(dict.fromkeys(strong))[:MAX_DETAIL_REASONS], list(dict.fromkeys(weak))[:MAX_DETAIL_REASONS]
+
+
+def unresolved_signals(exp: ExplorerOutput | None) -> list[tuple[str, str]]:
+    """상세 분석 권장 신호가 되는 미해결 (종류, 문장): 신규 후보(new_candidate) · 그래프 밖(out_of_graph).
+
+    Explorer 의 unresolved_items 종류로 가른다 (문구가 바뀌어도 신호가 사라지지 않게). 종류가 없는 이전 결과
+    (unresolved 문장만 있는 저장 상태)는 문구("신규 후보"·"그래프 밖")로 가른다.
+    """
+    if exp is None:
+        return []
+    if exp.unresolved_items:
+        return [(u.kind, u.text) for u in exp.unresolved_items if u.kind in ("new_candidate", "out_of_graph")]
+    return [("new_candidate" if "신규 후보" in u else "out_of_graph", u) for u in exp.unresolved
+            if "신규 후보" in u or "그래프 밖" in u]
 
 
 def changed_areas(state: AgentState, paths: list[ImpactPath]) -> list[Area]:

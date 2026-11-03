@@ -11,7 +11,7 @@
 | 2026-10-29 | (SE) 최초 작성. Planner 복잡도 기준, reanalysis 시 complex, Composer 상세 분석 권장·사유, UI 재분석 요청 |
 | 2026-11-02 | (SE) Composer 권장 신호 강/약에 맞춘 YJ 추가 수정 사항 1~9 |
 | 2026-11-03 | (YJ) 이 판으로 덮어씀: 1~9 반영 결과, E2E 16건 테스트(v6-1 · v6-2 · v6-3), SE 반영 요청 |
-| 2026-11-03 | (SE) 4장 #2·#3 처리 현황, 6장 YJ 반영 요청 추가 (Logic 시작 노드 경로의 진입점 역추적) |
+| 2026-11-03 | (SE) 4장 #2·#3 처리 현황, 6장 YJ 반영 요청 추가 (6-1 Logic 시작 노드 경로의 진입점 역추적, 6-2 무관 경로 줄이기) |
 
 ## 1. 결정 사항 (유지)
 
@@ -69,7 +69,11 @@ UI 와 같은 전체 흐름(Planner → … → Composer → KPI). 1차 simple �
 | 6 | 〃 | 공통코드 경로(`CTL:CmmCdController.selectCdList` → `SQL:CmmCdMapper.selectCdList` → `TBL:TCP_CMM_CD`)가 이제 입력에 들어감 → 공통코드 데이터 등록을 TBL [변경](add/modify)으로 판정하는지 확인 | SC-003 [변경] 재현율 0.50 (정답 변경 노드 2개 중 1개) |
 | 7 | 스키마 공유 | `ExplorerOutput.unresolved_items` 추가, `MatchSource` 에서 `glossary` 제거 | 머지 후 `tests/test_schema_sync.py` 로 확인 |
 
-SE 처리 현황 (2026-11-03, SE): #2 `change_node_precision` 추가 (측정만), #3 정답 노드 1개면 노드 정밀도 하한 미적용 (기록만) — [SE_kpi-agent-design.md](SE_kpi-agent-design.md) v0.4. 나머지는 미처리.
+SE 처리 현황 (2026-11-03, SE):
+- #1 반영: `composer.unresolved_signals` 가 `unresolved_items[].kind`(`new_candidate`·`out_of_graph`)로 가름. 종류가 없는 이전 저장 상태만 문구로
+- #2 `change_node_precision` 추가 (측정만), #3 정답 노드 1개면 노드 정밀도 하한 미적용 (기록만) — [SE_kpi-agent-design.md](SE_kpi-agent-design.md) v0.4
+- #4·#5·#6 반영 (효과 확인 전): SE v3 에서 정답 변경 노드 44개 중 22개를 [변경] 으로 놓쳤고, 18개는 LLM 이 [참조] 로 판정 (입력 상한 탓 0개), 4개는 경로에 없음(상류). Simulator 입력에 `[요건 대상 노드]`(요건 언급과 매칭된 시작 노드, 판정 필수)를 추가하고, 프롬프트에 참조로 잘못 두기 쉬운 경우(데이터 등록·보정 — SC-002 `TCM_USER_AUTH`·SC-003 `TCP_CMM_CD`·M-2 `TB_PROD_RELN`, 처리 분기·검증 추가 — H-1 `joinComb`·M-2 `termProd`, 화면 전달·표시 — SC-004 화면)를 변경 기준으로 명시 ([SE_agent_design.md](SE_agent_design.md) 1장 입력 구성). 확인은 상류 고정 재실행 `scripts/SE/replay_run.py --from 20261103-v3`
+- #7 반영된 상태 (`schemas.json` 에 `UnresolvedItem`, `tests/test_schema_sync.py` 통과)
 
 ## 5. 확인 방법
 
@@ -104,3 +108,27 @@ report.html 5장 "개선 후보" 아래쪽 `[SE]` 항목이 이 문서 4장과 �
 **요청**: 진입점(Entry) 없이 끝난 경로(시작 노드가 Logic·DataAccess 등이고 목표 역할에 바로 닿은 경우)는 진입점까지 역방향으로 이어 경로에 넣는다 (예: `BAT:ZCMBBB0100010 → MOD:CombDcBatch.calcDcAmt`). hop 상한·tool 한도 안에서, 진입점이 여러 개면 진입점별 경로로. 반영되면 Simulator 의 "영역 추정" 분석 한계가 0건이 되고 `assign_orphan_areas` 는 안전장치로만 남는다.
 
 **확인**: SE `scripts/SE/run_scenarios.py` 로 H-1·H-2 실행 → `<case>.md` 분석 한계에 "영역 추정" 이 없는지, `summary.json` 의 KPI 탐지율 유지.
+
+### 6-2. 정답 노드를 지나지 않는 경로 줄이기 (`agents/explorer.py`)
+
+**현상**: KPI 노드 정밀도가 낮은 가장 큰 원인이 결과 경로 수다. SE v3 (20261103-v3) 기준 결과 경로 중 정답 노드를 하나도 지나지 않는 경로(무관 경로)가 많고, KPI 오탐 339개 중 143개(42%)가 이런 경로에만 있다. 경로 수는 Explorer 결과에서 정해지고, Simulator·Composer 는 경로를 그대로 쓴다 (Simulator 경로 제외는 v3 에서 0건, 아래).
+
+| 케이스 | 결과 경로 | 무관 경로 | 무관 경로만의 오탐 / 오탐 |
+|---|---|---|---|
+| M-1 | 34 | 29 (85%) | 26 / 29 |
+| M-4 | 23 | 19 (83%) | 17 / 22 |
+| SC-006 | 10 | 8 (80%) | 10 / 12 |
+| M-2 | 67 | 50 (75%) | 15 / 26 |
+| H-2 | 26 | 18 (69%) | 16 / 21 |
+| L-4 | 10 | 6 (60%) | 7 / 11 |
+| M-3 | 45 | 18 (40%) | 20 / 34 |
+| SC-003 · SC-004 · SC-001 · SC-002 · H-1 | 5 · 21 · 22 · 15 · 44 | 30~40% | 2/2 · 6/27 · 8/26 · 5/14 · 5/32 |
+| L-1 · L-2 · L-3 · SC-005 | 52 · 3 · 3 · 27 | 4~33% | 5/41 · 0/1 · 0/3 · 1/38 |
+
+결과 경로 = 복잡은 Simulator 영향 경로, 단순은 Composer 단순 응답 경로 (KPI `final_nodes` 와 같음). 무관 경로를 모두 빼면 16건 합산 노드 정밀도 0.135 → 0.213 (상한). 나머지 오탐은 정답 노드를 지나는 경로 위 곁가지 노드(DBIO·SQL·TP·Service)라 경로 수를 줄여도 남는다.
+
+**SE 쪽 상황 (참고)**: Simulator 는 LLM 제외 제안을 가드로 거르는데, 무관 경로 170개 중 138개(81%)가 "목표 역할 도달 + 마지막 노드 근거 있음" 가드에 걸려 제안이 있어도 남는다. 이 가드는 탐지율(Critical 미탐 0) 보호용이라 SE 에서 먼저 완화하지 않는다. "[변경] 노드가 없는 경로 제외" 를 저장 결과에 적용해 보면 복잡 요건 정밀도 0.147 → 0.247 이지만 탐지율 1.00 → 0.90 (정답 4개 손실: `MOD:CombDcBatch.calcDcAmt`, `SQL:tbch1010.make_snd_tgt#2`, SC-003 `TBL:TCP_CMM_CD` · `SQL:CmmCdMapper.selectCdList`) 이라 Simulator 단에서 줄이는 것은 위험하다.
+
+**요청**: 경로를 만드는 단계에서 요건과 무관한 분기를 줄인다. 예: 요건 언급 노드를 지나지 않는 경로의 상한을 단순 요건(2장 #6, 출발 노드당 2개)뿐 아니라 복잡 요건에도 적용할지, 화면의 모든 호출로 퍼지는 분기(M-1·M-4·M-2)를 언급 노드 기준으로 자를지 검토. 정답 경로 재현율(must_find)은 유지해야 한다.
+
+**확인**: 위 표의 무관 경로 비율과 KPI 노드 정밀도, 탐지율 (같은 16건, `scripts/YJ/run_all.sh` 또는 SE `run_scenarios.py`). SE 구간 효과와 섞이지 않게 비교할 때는 `scripts/SE/replay_run.py --from <실행>` 으로 SE 구간만 다시 돌릴 수 있다.

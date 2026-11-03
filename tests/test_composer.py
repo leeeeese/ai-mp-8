@@ -36,6 +36,7 @@ from impact_agent.schemas import (
     PlanStep,
     SaveReportOutput,
     StopReason,
+    UnresolvedItem,
 )
 from impact_agent.templates import render_simple
 from test_simulator import (
@@ -388,6 +389,20 @@ def test_detail_reasons_unresolved_strong_only_with_structural_change():
     state.explorer.unresolved = ["[항목 1] 신규 후보: 비광고 여부 (Term)"]
     a = composer().run(state).simple_answer
     assert a.detail_analysis_reasons == ["그래프에 없는 항목이 있어 신규 개발 여부 확인 필요: [항목 1] 신규 후보: 비광고 여부 (Term)"]
+
+
+def test_detail_reasons_unresolved_by_kind_not_wording():
+    # unresolved_items 가 있으면 문구가 아니라 종류로 가른다 (문구가 바뀌어도 신호 유지, 매칭 실패·tool 한도는 신호 아님)
+    state = simple_state()                                   # data_add · interface_field_add (구조 변경)
+    state.explorer.unresolved = ["[항목 1] 후보: 비광고 여부", "[항목 2] 연계: 외부 수신", "[항목 1] 매칭 실패: 고객요구사항"]
+    state.explorer.unresolved_items = [
+        UnresolvedItem(item_id=1, kind="new_candidate", text="[항목 1] 후보: 비광고 여부"),
+        UnresolvedItem(item_id=2, kind="out_of_graph", text="[항목 2] 연계: 외부 수신"),
+        UnresolvedItem(item_id=1, kind="unmatched", text="[항목 1] 매칭 실패: 고객요구사항"),
+    ]
+    a = composer().run(state).simple_answer
+    assert a.detail_analysis_reasons == ["그래프에 없는 항목이 있어 신규 개발 여부 확인 필요: [항목 1] 후보: 비광고 여부",
+                                         "적재 범위 밖 연계 확인 필요: [항목 2] 연계: 외부 수신"]
 
 
 def test_detail_not_recommended_by_llm_alone():
