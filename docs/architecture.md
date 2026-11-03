@@ -11,7 +11,7 @@
 | MAX_HOPS_BIDIRECTIONAL | 10 | forward_then_reverse 탐색 hop 상한 |
 | MEMORY_WINDOW_N | 5 | 후속 대화에서 유지하는 최근 턴 수 |
 | KPI_MIN_RECALL | 0.8 | KPI: 재현율 하한 (잠정) |
-| KPI_MIN_PRECISION | 0.5 | KPI: 정밀도 하한 (잠정) |
+| KPI_MIN_PRECISION | 0.5 | KPI: [변경] 노드 정밀도 하한 (잠정. 노드 정밀도는 측정만) |
 
 ## 단계별 데이터 흐름
 

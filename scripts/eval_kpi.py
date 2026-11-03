@@ -250,8 +250,8 @@ def main() -> int:
     print(f"평가 {len(cases)}건 · 제외 {len(skipped)}건 → {out_dir}")
     if o:
         print(f"탐지율 {pct(o['node_recall'])} · 미탐률 {pct(o['node_miss_rate'])} · "
-              f"Critical 미탐률 {pct(o['critical_miss_rate'])} · 정밀도 {pct(o['node_precision'])} · "
-              f"[변경] 정밀도 {pct(o['change_node_precision'])}")
+              f"Critical 미탐률 {pct(o['critical_miss_rate'])} · [변경] 정밀도 {pct(o['change_node_precision'])} · "
+              f"노드 정밀도(참고) {pct(o['node_precision'])}")
     jd = summary["judgement"]
     print(f"복잡도 일치 {pct(jd['complexity_match_rate'])} · 난이도 일치 {pct(jd['difficulty_match_rate'])} · "
           f"영역 일치 {pct(jd['area_impact_match_avg'])} · 상세 분석 권장 catch {pct(jd['detail_catch_rate'])}")

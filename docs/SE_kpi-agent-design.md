@@ -11,6 +11,7 @@
 | v0.2 | 최신 Agent Workflow·Neo4j 노드 정의 반영. KPI Agent 를 Composer 이후 평가 분기(점선)로, 입력을 "정답 + 실행 로그"로. 평가 범위를 `eval_max_stage` → `eval_target_labels` 로 (DBIO 단계가 맥락에 따라 달라서). 집계 축에 SM 파트·노드 유형·flow 추가. 확장 KPI 후보 정리 |
 | v0.3 | 형식을 YJ 설계서와 통일 (에이전트 단위 역할·입력·처리·출력). 입력·출력을 구현 모델(`AnswerKey`, `AgentRunRecord`, `KpiOutput`)과 그래프 노드 ID(`<접두어>:<키>`)로 표기. 배치 평가(`scripts/eval_kpi.py`) 추가 |
 | v0.4 (2026-11-03) | [변경] 노드 정밀도 `change_node_precision` 추가 (측정만). 정답 노드가 1개인 요건은 노드 정밀도 하한 미적용. 근거: [planner_detail_analysis_to-be.md](planner_detail_analysis_to-be.md) 4장 #2·#3. 에이전트 출력과 정합: 단순 `final_nodes` 를 Composer 단순 응답 경로로, `tool_calls` 를 라운드별 최댓값으로 (`tool_calls_total` 추가), `explore_loops` 를 Retriever 실행 수 합계로 |
+| v0.5 (2026-11-03) | 정밀도 주 지표를 [변경] 노드 정밀도로: `KPI_MIN_PRECISION` 하한을 `change_node_precision` 에 적용하고 `node_precision` 은 측정만 (정답 노드 1개 예외 규칙은 필요 없어져 삭제). 근거: 노드 정밀도는 결과 경로 수가 정해 SE 판정으로 움직이지 않음 (SE v3 기준 무관 경로를 모두 빼도 0.21 상한), [변경] 정밀도는 판정 정확도를 직접 보여 줌 (v1~v3 0.89~0.97) |
 
 ## 0. 한눈에 보기
 
@@ -178,13 +179,13 @@ load_inputs → validate → extract → normalize → match → classify → ag
 | 노드 탐지율 `node_recall` (= 재현율) | TP ÷ (TP + FN) | 핵심 KPI. `KPI_MIN_RECALL` 이상 |
 | 노드 미탐률 `node_miss_rate` | FN ÷ (TP + FN) | 1 − 탐지율 |
 | Critical 미탐률 `critical_miss_rate` | Critical 중 FN ÷ Critical 전체 | 권장 목표 0건 |
-| 노드 정밀도 `node_precision` | TP ÷ (TP + FP) | 불필요한 검토 부담. `KPI_MIN_PRECISION` 이상 (정답 노드가 1개면 미적용, 아래) |
-| [변경] 노드 정밀도 `change_node_precision` | [변경] 으로 표시한 노드 중 TP ÷ (TP + FP) | 측정만 (threshold 없음). [변경] 표시가 없으면 생략 |
+| [변경] 노드 정밀도 `change_node_precision` (정밀도 주 지표) | [변경] 으로 표시한 노드 중 TP ÷ (TP + FP) | `KPI_MIN_PRECISION` 이상. [변경] 표시가 없으면 생략 |
+| 노드 정밀도 `node_precision` (참고) | TP ÷ (TP + FP) | 불필요한 검토 부담 참고. 측정만 (threshold 없음, 2026-11-03 v0.5) |
 | 평가 제외 수 `excluded_nodes`, 범위 밖 수 `out_of_scope_nodes` | 건수 | 항상 함께 공개 |
 
 - 비율은 0~1 로 저장하고 리포트에서 % 로 표시한다. 분모가 0 이면 "해당 없음"(지표 생략).
-- **노드 정밀도와 [변경] 노드 정밀도:** 노드 정밀도의 분모는 결과 경로 위 노드 전체(`final_nodes`)라 지나가기만 하는 [참조] 노드도 오탐으로 센다. YJ v6 실행에서 KPI 오탐의 96~99% 가 [참조]·표시 없음 노드였다 (v6-3: 노드 정밀도 0.15, [변경] 정밀도 1.00). 그래서 에이전트가 고친다고 한 노드의 정확도는 [변경] 노드 정밀도로 따로 본다. [변경] 표시는 `change_tag_accuracy` 와 같은 출처를 쓴다 (복잡 = Simulator 영향 경로, 단순 = Composer 단순 응답 경로). 판정 규칙은 노드 정밀도와 같다: 평가 제외·범위 밖 노드는 세지 않는다 (정답 경로 위 노드를 [변경] 으로 표시해도 분모에 넣지 않는다. 그 표시가 맞는지는 `change_tag_accuracy` 가 본다).
-- **정답 노드가 1개인 요건:** 경로 위 나머지 노드가 모두 오탐이 되어 노드 정밀도가 구조적으로 낮다 (SC-005: 탐지율 1.00, 정밀도 0.02, [변경] 정밀도 1.00). 이 경우 노드 정밀도는 값만 기록하고 하한을 적용하지 않는다 (`threshold` 없음 → `warnings`·`all_passed` 에 영향 없음). 해석은 탐지율과 [변경] 노드 정밀도로 한다. 정답 노드 수는 평가 범위 안 정답 노드(TP + FN)로 센다.
+- **노드 정밀도와 [변경] 노드 정밀도:** 노드 정밀도의 분모는 결과 경로 위 노드 전체(`final_nodes`)라 지나가기만 하는 [참조] 노드도 오탐으로 센다. YJ v6 실행에서 KPI 오탐의 96~99% 가 [참조]·표시 없음 노드였다 (v6-3: 노드 정밀도 0.15, [변경] 정밀도 1.00). 그래서 에이전트가 고친다고 한 노드의 정확도인 [변경] 노드 정밀도를 정밀도 주 지표로 쓰고(하한 적용), 노드 정밀도는 검토 부담 참고로 측정만 한다 (v0.5). [변경] 표시는 `change_tag_accuracy` 와 같은 출처를 쓴다 (복잡 = Simulator 영향 경로, 단순 = Composer 단순 응답 경로). 판정 규칙은 노드 정밀도와 같다: 평가 제외·범위 밖 노드는 세지 않는다 (정답 경로 위 노드를 [변경] 으로 표시해도 분모에 넣지 않는다. 그 표시가 맞는지는 `change_tag_accuracy` 가 본다).
+- **정답 노드가 1개인 요건 (v0.4 → v0.5 삭제):** v0.4 에서는 노드 정밀도 하한의 예외로 두었으나 (SC-005: 탐지율 1.00, 노드 정밀도 0.02, [변경] 정밀도 1.00), v0.5 에서 노드 정밀도를 측정만 하게 되어 예외가 필요 없다.
 - **집계 축:** 사례 / 시스템(swing, tos) / SM 파트 / flow(단순·복잡) / 노드 유형 / 단계 / Agent 버전.
 - 노드 유형별 탐지율은 "어떤 종류의 노드를 잘 놓치는가", 단계별 탐지율은 "어디까지 따라갔는가"를 보여준다.
 
@@ -318,6 +319,19 @@ python scripts/eval_kpi.py a/SC-001.state.json b/H-1.state.json --agent-version 
 python scripts/eval_kpi.py outputs/runs/v0.4 --agent-version v0.4 --compare outputs/kpi/v0.3/summary.json   # 버전 비교
 pytest tests/test_kpi.py tests/test_kpi_judgement.py                        # 판정·집계·판정 품질·리포트 (LLM·Neo4j 불필요)
 ```
+
+**SE 변경 효과 실험 (상류 고정 · 반복)**: 한 번 실행으로는 SE 변경 효과가 상류 변동·LLM 응답 편차에 묻힌다. 상류(Planner·Explorer·Retriever)를 한 run 으로 고정하고 SE 구간만 3~5회 반복해 회차 평균·범위로 비교한다.
+
+```bash
+PYTHONPATH=src python3 scripts/SE/run_scenarios.py <16건> --run-id <run>                       # 상류 기준 run (전체 흐름 1회)
+PYTHONPATH=src python3 scripts/SE/run_experiment.py --from <run> --repeat 3 --exp-id <기준 실험> --label "기준"
+PYTHONPATH=src python3 scripts/SE/run_experiment.py --from <run> --repeat 3 --exp-id <새 실험> --label "<변경>" --compare <기준 실험>
+```
+
+- 출력: `outputs/runs/SE/experiments/<exp_id>/r1…rN/`(회차별, `run_scenarios.py` 형식), `experiment.md`·`experiment.json`
+- 지표: [변경] 노드 정밀도(주 지표)·[변경] 재현율·탐지율·태그 정확도·난이도·영역 일치·불필요한 권장·노드 정밀도(참고)·SE 시간·토큰의 회차 평균·범위, 케이스별 회차 값, 놓친 [변경] 노드 분류(경로에 없음 / LLM 입력 밖 / 판정 누락 / LLM 이 [참조] 판정 / 표시 없음), [변경] 오탐 빈도
+- 비교 판정: 평균 차이가 두 실험의 회차 범위 중 큰 값보다 크면 개선·악화, 아니면 편차 안. 비교할 실험은 같은 `--from` 이어야 한다 (다르면 경고)
+- 재계획은 실행하지 않는다 (`scripts/SE/replay_run.py` 와 같음)
 
 | 확인 | 내용 |
 |---|---|

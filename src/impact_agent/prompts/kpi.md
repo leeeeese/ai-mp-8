@@ -32,13 +32,12 @@ PoC 평가용 에이전트. **Composer 이후** 실행하며, 결과는 Composer
 | node_recall (노드 탐지율) | TP / (TP + FN) | ≥ KPI_MIN_RECALL |
 | node_miss_rate (노드 미탐률) | FN / (TP + FN) | - |
 | critical_miss_rate (Critical 미탐률) | Critical 정답 중 FN / Critical 정답 | 권장 0 (측정만) |
-| node_precision (노드 정밀도) | TP / (TP + FP) | ≥ KPI_MIN_PRECISION (정답 노드 1개면 미적용) |
-| change_node_precision ([변경] 노드 정밀도) | [변경] 으로 표시한 노드 중 TP / (TP + FP) | - (측정만) |
+| change_node_precision ([변경] 노드 정밀도, 정밀도 주 지표) | [변경] 으로 표시한 노드 중 TP / (TP + FP) | ≥ KPI_MIN_PRECISION |
+| node_precision (노드 정밀도, 참고) | TP / (TP + FP) | - (측정만, 검토 부담 참고) |
 | excluded_nodes / out_of_scope_nodes | 판정별 건수 | - |
 
 분모가 0 이면 해당 지표를 생략한다 (해당 없음). 비율은 0~1 로 저장한다.
-노드 정밀도는 결과 경로 위 노드 전체가 분모라 지나가기만 하는 [참조] 노드도 오탐이 된다. 에이전트가 고친다고 한 노드의 정확도는 [변경] 노드 정밀도로 본다.
-정답 노드가 1개면 경로 위 나머지 노드가 모두 오탐이 되어 노드 정밀도가 구조적으로 낮다 → 하한을 적용하지 않고 기록만 한다.
+노드 정밀도는 결과 경로 위 노드 전체가 분모라 지나가기만 하는 [참조] 노드도 오탐이 되고, 값은 경로 수(상류)가 정한다. 그래서 정밀도 하한은 에이전트가 고친다고 한 노드의 정확도인 [변경] 노드 정밀도에 적용하고, 노드 정밀도는 측정만 한다.
 
 ## 판정 품질 (judgement, 측정만)
 정답셋의 복잡도·난이도·가능 여부·영역 영향 유형·변경/참조 노드·오답 경로와 실행 결과의 판정을 비교한다. 기준값(threshold)이 없어 `all_passed` 에 영향을 주지 않는다.

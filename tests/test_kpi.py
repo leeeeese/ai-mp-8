@@ -125,8 +125,8 @@ def test_thresholds_and_warnings():
     v = metrics(out)
     assert v[KpiMetricName.NODE_RECALL] == 0 and v[KpiMetricName.CRITICAL_MISS_RATE] == 1
     failed = {x.name for x in out.metrics if x.passed is False}
-    assert failed == {KpiMetricName.NODE_RECALL, KpiMetricName.NODE_PRECISION, KpiMetricName.TOOL_CALLS}
-    assert not out.all_passed and len(out.warnings) == 3
+    assert failed == {KpiMetricName.NODE_RECALL, KpiMetricName.TOOL_CALLS}   # 노드 정밀도(0)는 측정만
+    assert not out.all_passed and len(out.warnings) == 2
 
 
 def tag_hops(state, changed):
@@ -142,7 +142,7 @@ def test_change_node_precision():
     assert v[KpiMetricName.NODE_PRECISION] == pytest.approx(5 / 7)         # [참조] 노드 T9 도 오탐
     assert v[KpiMetricName.CHANGE_NODE_PRECISION] == pytest.approx(2 / 3)  # [변경] 3개 중 M9 만 오탐
     m = next(x for x in KpiAgent().run(state).metrics if x.name is KpiMetricName.CHANGE_NODE_PRECISION)
-    assert m.threshold is None and m.passed is None                       # 측정만
+    assert m.threshold == config.KPI_MIN_PRECISION and m.passed is (2 / 3 >= config.KPI_MIN_PRECISION)   # 정밀도 주 지표
 
     key = KEY.model_copy(update={"excluded_nodes": [ExcludedNode(node_id="MOD:M9", reason="reference_only")]})
     state.answer_key = key                                                # 평가 제외 노드는 노드 정밀도와 같이 세지 않음
@@ -151,12 +151,17 @@ def test_change_node_precision():
     assert KpiMetricName.CHANGE_NODE_PRECISION not in metrics(KpiAgent().run(make_state(OUTPUT)))   # 표시 없음 → 생략
 
 
-def test_single_answer_precision_threshold_not_applied():
+def test_precision_threshold_on_change_nodes_not_path_nodes():
+    # 노드 정밀도는 경로 위 노드 전체가 분모라 측정만, 하한은 [변경] 노드 정밀도에 적용
     key = AnswerKey(req_id="T-1", answer_nodes=[answer("TBL:T1", 4)])
-    out = KpiAgent().run(make_state(["SCR:S1", "TP:TP1", "TBL:T1"], answer_key=key))
-    m = next(x for x in out.metrics if x.name is KpiMetricName.NODE_PRECISION)
-    assert m.value == pytest.approx(1 / 3) and m.threshold is None and m.passed is None   # 기록만, 미달 아님
-    assert out.all_passed and out.warnings == []
+    state = tag_hops(make_state(["SCR:S1", "TP:TP1", "TBL:T1"], answer_key=key), {"TBL:T1"})
+    out = KpiAgent().run(state)
+    node = next(x for x in out.metrics if x.name is KpiMetricName.NODE_PRECISION)
+    assert node.value == pytest.approx(1 / 3) and node.threshold is None and node.passed is None
+    assert out.all_passed and out.warnings == []                          # [변경] 정밀도 1.0 충족
+    out = KpiAgent().run(tag_hops(state, {"SCR:S1", "TP:TP1", "TBL:T1"}))  # [변경] 3개 중 정답 1개
+    assert {x.name for x in out.metrics if x.passed is False} == {KpiMetricName.CHANGE_NODE_PRECISION}
+    assert out.warnings == [f"change_node_precision=0.333333 (기준 {config.KPI_MIN_PRECISION:g}) 미달"]
 
 
 def test_zero_denominator_is_not_applicable():

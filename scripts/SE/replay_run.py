@@ -87,23 +87,15 @@ def replay_case(state: AgentState, source_flow: dict) -> tuple[AgentState, float
     return state, seconds, flow
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("cases", nargs="*", help="생략하면 이전 run 의 전체 케이스")
-    ap.add_argument("--from", dest="source", required=True, help="상류를 가져올 run id (예: 20261103-v2)")
-    ap.add_argument("--run-id", required=True)
-    ap.add_argument("--no-llm", action="store_true", help="ANALYSIS_LLM=0 (규칙만)")
-    ap.add_argument("--fresh", action="store_true", help="이미 끝난 케이스도 다시 실행 (기본은 이어서 실행)")
-    args = ap.parse_args()
-    if args.no_llm:
-        os.environ["ANALYSIS_LLM"] = "0"
-    src_dir, out_dir = RUNS / args.source, RUNS / args.run_id
+def replay_all(source_run: str, out_dir: Path, cases: list[str] | None = None, fresh: bool = False) -> list[dict]:
+    """source_run 의 상류로 cases 의 SE 구간을 다시 실행해 out_dir 에 기록한다 (끝난 케이스는 건너뜀). summary 를 돌려준다."""
+    src_dir = RUNS / source_run
     out_dir.mkdir(parents=True, exist_ok=True)
     source = {s["case"]: s for s in json.loads((src_dir / "summary.json").read_text(encoding="utf-8")) if "error" not in s}
-    cases = args.cases or list(source)
+    cases = cases or list(source)
 
     path = out_dir / "summary.json"
-    summary = [] if args.fresh or not path.exists() else json.loads(path.read_text(encoding="utf-8"))
+    summary = [] if fresh or not path.exists() else json.loads(path.read_text(encoding="utf-8"))
     done = {s["case"] for s in summary if "error" not in s}
     summary = [s for s in summary if s["case"] in done]
 
@@ -118,27 +110,41 @@ def main() -> None:
             print(f"[{case}] 이미 완료 — 건너뜀", flush=True)
             continue
         if case not in source:
-            print(f"[{case}] {args.source} 에 결과 없음 — 건너뜀", flush=True)
+            print(f"[{case}] {source_run} 에 결과 없음 — 건너뜀", flush=True)
             continue
         gt = json.loads((GT_DIR / f"{case}.json").read_text(encoding="utf-8"))
-        print(f"[{case}] 재실행 중 (상류 고정: {args.source})...", flush=True)
+        print(f"[{case}] 재실행 중 (상류 고정: {source_run})...", flush=True)
         try:
-            flow_in = {**source[case]["flow"], "replay": {"from": args.source}}
+            flow_in = {**source[case]["flow"], "replay": {"from": source_run}}
             state, seconds, flow = replay_case(upstream_state(src_dir / f"{case}.state.json", case), flow_in)
         except Exception as e:  # 한 케이스 실패가 전체를 막지 않게 기록만 (다음 실행 때 다시 시도)
             print(f"[{case}] 실패: {type(e).__name__}: {e}", flush=True)
             summary.append({"case": case, "error": f"{type(e).__name__}: {e}"})
             save()
             continue
-        flow["path"] = f"{source[case]['flow']['path']} (상류 고정 {args.source}, 재계획 미실행)"
+        flow["path"] = f"{source[case]['flow']['path']} (상류 고정 {source_run}, 재계획 미실행)"
         (out_dir / f"{case}.state.json").write_text(state.model_dump_json(indent=2), encoding="utf-8")
         summary.append(record(case, gt, state, seconds, flow, out_dir))
         save()
         k = summary[-1]["result"]["kpi"]
         print(f"[{case}] 완료 SE {flow['replay']['se_seconds']:.0f}s  권장 {flow['detail_flow']}  "
-              f"탐지율 {fmt(k.get('node_recall'))}  정밀도 {fmt(k.get('node_precision'))}", flush=True)
+              f"탐지율 {fmt(k.get('node_recall'))}  [변경] 정밀도 {fmt(k.get('change_node_precision'))}  노드 정밀도 {fmt(k.get('node_precision'))}", flush=True)
     save()
     print(f"기록: {out_dir}")
+    return summary
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("cases", nargs="*", help="생략하면 이전 run 의 전체 케이스")
+    ap.add_argument("--from", dest="source", required=True, help="상류를 가져올 run id (예: 20261103-v2)")
+    ap.add_argument("--run-id", required=True)
+    ap.add_argument("--no-llm", action="store_true", help="ANALYSIS_LLM=0 (규칙만)")
+    ap.add_argument("--fresh", action="store_true", help="이미 끝난 케이스도 다시 실행 (기본은 이어서 실행)")
+    args = ap.parse_args()
+    if args.no_llm:
+        os.environ["ANALYSIS_LLM"] = "0"
+    replay_all(args.source, RUNS / args.run_id, args.cases, args.fresh)
 
 
 if __name__ == "__main__":

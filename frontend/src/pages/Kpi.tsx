@@ -122,7 +122,8 @@ export function Kpi() {
               <ThresholdMeter label="노드 탐지율" value={ratio(tp, tp + fn)} target={KPI_MIN.recall} better="higher" sub={`TP ${tp} · FN ${fn} 합산`} />
               <ThresholdMeter label="Critical 미탐률" value={ratio(sum('critical_missed'), critTotal)} target={0} better="lower"
                               sub={`Critical 정답 ${critTotal}개`} />
-              <ThresholdMeter label="노드 정밀도" value={ratio(tp, tp + fp)} target={KPI_MIN.precision} better="higher" sub={`TP ${tp} · FP ${fp} 합산`} />
+              <ThresholdMeter label="[변경] 노드 정밀도" value={mean(evaluated, 'change_node_precision')} target={KPI_MIN.precision} better="higher"
+                              sub={`[변경] 표시 중 정답 · 사례 평균 · 노드 정밀도(참고) ${pct(ratio(tp, tp + fp))}`} />
             </div>
           )}
         </section>
