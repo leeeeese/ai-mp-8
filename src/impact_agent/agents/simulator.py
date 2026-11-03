@@ -1,7 +1,9 @@
 """Simulator: (복잡) 영역별 영향 경로를 구성하고 구현 가능성·난이도·대안을 판정한다. 설계: docs/SE_agent_design.md 1장
 
 1. 경로 골격 (규칙): Explorer 경로 → ImpactPath (엣지 유형·근거 위치·확신도), rules.build_impact_paths
-2. 영역 배정 (규칙): 역할 기준 screen / db / interface / batch (rules.path_areas)
+2. 영역 배정 (규칙): 역할 기준 screen / db / interface / batch (rules.path_areas). 영역이 없는 경로(진입 노드 없이
+   Logic 만 있는 경로)는 결과에서 빠지지 않게 Explorer 엣지의 호출 노드 영역 → 그래프 역방향의 호출 진입점(Screen·Batch) 영역
+   → 둘 다 없으면 screen 순으로 정하고 분석 한계에 남긴다 (assign_orphan_areas)
 3. 영향 판정 (LLM, 있을 때): 노드별 영향(노드당 한 번, [변경] 은 모두 · [참조] 는 필요한 노드만, 나머지는 코드가 [참조]),
    영역별 영향 유형·가능성·난이도·대안, 요청안/대안 비교, 무관 경로 제외 제안
 4. 판정 보정 (규칙): 골격 밖 노드 무시, 근거 없는 영역은 review, 사유·대안 없는 hard 는 review, 경로 제외 가드,
@@ -11,11 +13,21 @@ LLM 이 없거나 실패하면 3단계를 건너뛰고 규칙 판정(review, 난
 """
 
 import re
+from collections.abc import Callable
 
 from pydantic import BaseModel, Field
 
 from ..llm import LLM_FAILURES, LLMClient, Usage, analysis_llm
-from ..rules import AREA_ORDER, build_impact_paths, interface_node_ids, node_areas, node_role, path_areas, shared_nodes
+from ..rules import (
+    AREA_ORDER,
+    ENTRY_AREAS,
+    build_impact_paths,
+    interface_node_ids,
+    node_areas,
+    node_role,
+    path_areas,
+    shared_nodes,
+)
 from ..schemas import (
     Alternative,
     Area,
@@ -31,10 +43,12 @@ from ..schemas import (
     GraphNode,
     ImpactPath,
     ImpactType,
+    NodeRole,
     SimulationOutput,
     StopReason,
 )
 from ..state import AgentState
+from ..tools import GraphStore, get_graph_store
 from .base import BaseAgent
 
 DEFAULT_IMPACT = "영향 검토 필요"
@@ -55,6 +69,11 @@ REFERENCE_IMPACT = "경로상 호출·조회 (이 요건으로 바뀌지 않음)
 META_KEYS = ["images", "events", "cycle", "cron", "program", "steps", "interfaces", "url", "http_method", "stmt_type",
              "dbio_type", "data_type", "nullable", "pk", "code_grp", "code_values"]
 MAX_META_VALUE = 120  # 속성 값 하나의 글자 수 상한
+# 영역 없는 경로의 호출 진입점 찾기 (그래프 역방향): 호출 엣지만 따라가고, hop·방문 노드 수 상한을 둔다
+CALLER_EDGES = {"CALLS", "INVOKES", "EXECUTES", "OPENS"}
+MAX_ENTRY_HOPS = 4
+MAX_ENTRY_VISITS = 50
+MAX_ENTRY_NAMES = 3  # 분석 한계 문장에 적을 진입점 수
 # 재분석 사유 문장 안의 그래프 노드 ID (<접두어>:<키>, docs/mock_data.md 노드 ID 규칙)
 NODE_ID_IN_TEXT = re.compile(r"\b(?:SCR|CTL|TP|BAT|SVC|MOD|DBIO|SQL|TBL|COL):[A-Za-z0-9_.#$]+")
 NOTE_PREFIX = "참고:"  # 재분석 입력에서 참고 신호(Composer detail_analysis_notes, 약한 신호) 줄의 머리
@@ -106,10 +125,23 @@ class SimulatorAgent(BaseAgent[SimulationOutput]):
     name = "simulator"
     output_model = SimulationOutput
 
-    def __init__(self, llm: LLMClient | None = None, use_llm: bool = True) -> None:
+    def __init__(self, llm: LLMClient | None = None, use_llm: bool = True, store: GraphStore | None = None) -> None:
         self._llm = llm
         self._llm_checked = llm is not None or not use_llm
+        self._store = store
+        self._store_checked = store is not None
         self.last_usage: Usage | None = None
+
+    @property
+    def store(self) -> GraphStore | None:
+        """영역 없는 경로의 호출 진입점을 찾을 그래프 (Explorer 와 같은 저장소). 연결할 수 없으면 None (screen 기본값)."""
+        if not self._store_checked:
+            try:
+                self._store = get_graph_store()
+            except Exception:  # noqa: BLE001  설정·연결 실패는 분석을 막지 않는다
+                self._store = None
+            self._store_checked = True
+        return self._store
 
     @property
     def llm(self) -> LLMClient | None:
@@ -132,6 +164,8 @@ class SimulatorAgent(BaseAgent[SimulationOutput]):
         hop_areas = {(p.path_id, i): a for p, _ in built for i, a in enumerate(node_areas([h.node for h in p.hops], nodes, iface))}
         shared = shared_nodes(exp.paths if exp else [], nodes)
         limits = unverified_segments(state, [p for p, _ in built])
+        limits += assign_orphan_areas([p for p, _ in built], areas_of, hop_areas, exp.edges if exp else [],
+                                      lambda: self.store)
         on_paths = {h.node for p, _ in built for h in p.hops}
         if missing := [n for n in reanalysis_nodes(state) if n not in on_paths]:
             asked = set(reanalysis_nodes(state, notes=False))
@@ -157,6 +191,81 @@ class SimulatorAgent(BaseAgent[SimulationOutput]):
             unverified_segments=limits,
             dropped_paths=dropped,
         )
+
+
+def assign_orphan_areas(
+    paths: list[ImpactPath], areas_of: dict[str, list[Area]], hop_areas: dict[tuple[str, int], set[Area]],
+    edges: list[GraphEdge], store: Callable[[], GraphStore | None] = lambda: None,
+) -> list[str]:
+    """영역이 없는 경로(예: 시작 노드가 곧 목표 역할인 Module 하나짜리 경로)에 영역을 정한다. 분석 한계 문장을 돌려준다.
+
+    영역이 없으면 어느 영역 경로에도 들어가지 않아 결과·레포트·KPI 에서 기록 없이 빠진다. 아래 순서로 정한다.
+    1. 경로 첫 노드를 호출하는 노드(Explorer 엣지)가 다른 경로에서 가진 영역
+    2. 그래프 역방향으로 찾은 호출 진입점(Screen·Batch)의 영역 (entry_areas_in_graph). Explorer 가 시작 노드에서 바로
+       목표 역할에 닿으면 호출 쪽 엣지를 남기지 않아서 1 로는 못 찾는 경우가 대부분이다
+    3. 둘 다 없으면 screen (rules.node_areas 의 "진입 노드 없이 EntryHandler 에서 시작한 경로는 screen" 과 같은 기준)
+    store 는 그래프 저장소를 돌려주는 함수 (영역 없는 경로가 있을 때만 부른다). areas_of · hop_areas 를 그 자리에서 고친다.
+    """
+    known: dict[str, set[Area]] = {}
+    for p in paths:
+        for i, h in enumerate(p.hops):
+            known.setdefault(h.node, set()).update(hop_areas[(p.path_id, i)])
+    limits = []
+    for p in paths:
+        if areas_of[p.path_id] or not p.hops:
+            continue
+        first = p.hops[0].node
+        callers = [e.from_id for e in edges if e.to_id == first]
+        inherited = set().union(*(known.get(c, set()) for c in callers))
+        found = None if inherited else entry_areas_in_graph(first, store())  # None = 그래프 조회 못함
+        areas = inherited or set((found or {}).values()) or {Area.SCREEN}
+        areas_of[p.path_id] = [a for a in AREA_ORDER if a in areas]
+        for i in range(len(p.hops)):
+            hop_areas[(p.path_id, i)] = hop_areas[(p.path_id, i)] | areas
+        names = ", ".join(a.value for a in areas_of[p.path_id])
+        if inherited:
+            how = f"호출 노드의 영역({names})을 따름"
+        elif found:
+            entries = list(found)
+            more = f" 외 {len(entries) - MAX_ENTRY_NAMES}개" if len(entries) > MAX_ENTRY_NAMES else ""
+            how = f"그래프의 호출 진입점({', '.join(entries[:MAX_ENTRY_NAMES])}{more}) 기준 {names}"
+        elif found is None:
+            how = "screen 으로 둠 (그래프를 조회하지 못함, 진입 영역 확인 필요)"
+        else:
+            how = f"screen 으로 둠 (그래프 {MAX_ENTRY_HOPS} hop 안에 호출 진입점 없음, 진입 영역 확인 필요)"
+        limits.append(f"영역 추정: {p.path_id} ({' → '.join(h.node for h in p.hops)}) 진입점이 없어 {how}")
+    return limits
+
+
+def entry_areas_in_graph(node_id: str, store: GraphStore | None) -> dict[str, Area] | None:
+    """node_id 를 호출하는 진입점(Screen·Batch) → 영역. 호출 엣지(CALLER_EDGES)를 역방향으로 MAX_ENTRY_HOPS 까지 따라간다.
+
+    진입점까지 가지 못하고 EntryHandler(TP·Controller)에서 끊기면 그 노드를 screen 진입으로 본다 (rules.node_areas 와 같은 기준).
+    그래프가 없거나 조회에 실패하면 None.
+    """
+    if store is None:
+        return None
+    found: dict[str, Area] = {}
+    seen, frontier = {node_id}, [node_id]
+    try:
+        for _ in range(MAX_ENTRY_HOPS):
+            nxt = []
+            for nid in frontier:
+                for e in store.in_edges(nid):
+                    if e.type not in CALLER_EDGES or e.from_id in seen or len(seen) >= MAX_ENTRY_VISITS:
+                        continue
+                    seen.add(e.from_id)
+                    caller = store.node(e.from_id)
+                    if node_role(caller) is NodeRole.ENTRY:
+                        found.setdefault(e.from_id, ENTRY_AREAS.get(caller.label, Area.SCREEN))
+                    else:
+                        nxt.append(e.from_id)
+                        if node_role(caller) is NodeRole.ENTRY_HANDLER and not store.in_edges(e.from_id):
+                            found.setdefault(e.from_id, Area.SCREEN)
+            frontier = nxt
+    except Exception:  # noqa: BLE001  그래프 조회 실패는 screen 기본값으로 (분석을 막지 않는다)
+        return None
+    return found
 
 
 # --- 판정 보정 (규칙) ----------------------------------------------------------------------------

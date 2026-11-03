@@ -6,6 +6,8 @@
   - 오탐(FP)  출력 노드가 정답·제외 목록에 없고 유형이 eval_target_labels 안
   - 평가 제외 excluded_nodes (출력돼도 오탐 아님, 분모·분자 제외) / 범위 밖: 유형이 eval_target_labels 밖
 핵심 KPI (6.1): 노드 탐지율 = TP/(TP+FN), 미탐률 = FN/(TP+FN), Critical 미탐률, 노드 정밀도 = TP/(TP+FP). 분모 0 이면 해당 없음(생략).
+  노드 정밀도는 결과 경로 위 노드 전체가 분모라 [참조] 노드도 오탐이 된다 → [변경] 노드 정밀도(측정만)를 함께 낸다.
+  정답 노드가 1개면 경로 위 나머지 노드가 모두 오탐이라 노드 정밀도 하한을 적용하지 않는다 (기록만).
 판정 품질 (judgement, 측정만): 복잡도·난이도·가능 여부·영역 영향 유형 일치, [변경]/[참조] 판정 정확도, 오답 경로 채택,
   (단순) 상세 분석 권장, (복잡) complex 인데 Minor·Verifier 미해결. 비교값이 없거나 해당 flow 가 아니면 생략.
 """
@@ -206,7 +208,8 @@ def _metric(
     return KpiMetric(name=name, category=category, value=value, unit=unit, threshold=threshold, passed=passed)
 
 
-def quality_metrics(rows: list[NodeJudgement]) -> list[KpiMetric]:
+def quality_metrics(rows: list[NodeJudgement], changed: list[NodeJudgement] = ()) -> list[KpiMetric]:
+    """핵심 KPI. changed 는 [변경] 으로 표시한 노드의 판정 (change_judgements, 없으면 [변경] 노드 정밀도 생략)."""
     q = KpiCategory.QUALITY
     count = {v: sum(r.verdict is v for r in rows) for v in NodeVerdict}
     tp, fn, fp = count[NodeVerdict.DETECTED], count[NodeVerdict.MISSED], count[NodeVerdict.FALSE_POSITIVE]
@@ -221,7 +224,10 @@ def quality_metrics(rows: list[NodeJudgement]) -> list[KpiMetric]:
         missed = sum(r.verdict is NodeVerdict.MISSED for r in critical)
         metrics.append(_metric(KpiMetricName.CRITICAL_MISS_RATE, q, missed / len(critical), "ratio"))
     if tp + fp:
-        metrics.append(_metric(KpiMetricName.NODE_PRECISION, q, tp / (tp + fp), "ratio", config.KPI_MIN_PRECISION))
+        threshold = None if tp + fn == 1 else config.KPI_MIN_PRECISION  # 정답 1개: 나머지 경로 노드가 모두 오탐 → 기록만
+        metrics.append(_metric(KpiMetricName.NODE_PRECISION, q, tp / (tp + fp), "ratio", threshold))
+    if (g := group_kpis(changed, lambda r: "all").get("all")) and g.precision is not None:
+        metrics.append(_metric(KpiMetricName.CHANGE_NODE_PRECISION, q, g.precision, "ratio"))
     metrics += [
         _metric(KpiMetricName.EXCLUDED_NODES, q, count[NodeVerdict.EXCLUDED], "count"),
         _metric(KpiMetricName.OUT_OF_SCOPE_NODES, q, count[NodeVerdict.OUT_OF_SCOPE], "count"),
@@ -257,6 +263,11 @@ def hop_tags(state: AgentState) -> dict[str, str]:
             elif h.impact.startswith(REFERENCE_TAG):
                 tags.setdefault(h.node, "reference")
     return tags
+
+
+def change_judgements(state: AgentState, key: AnswerKey) -> list[NodeJudgement]:
+    """[변경] 으로 표시한 노드의 판정 ([변경] 노드 정밀도용). 평가 제외·범위 밖은 노드 정밀도와 같이 세지 않는다."""
+    return judge(key, [n for n, t in hop_tags(state).items() if t == "change"])
 
 
 def tag_accuracy(tags: dict[str, str], key: AnswerKey, j: KpiCategory) -> tuple[list[KpiMetric], list[str]]:
@@ -353,7 +364,7 @@ class KpiAgent(BaseAgent[KpiOutput]):
 
         rows = judge(key, nodes)
         judged, notes = judgement_metrics(state, key, complexity)
-        metrics = quality_metrics(rows) + judged + metrics
+        metrics = quality_metrics(rows, change_judgements(state, key)) + judged + metrics
         failed = [m for m in metrics if m.passed is False]
         return KpiOutput(
             **base,
@@ -376,25 +387,33 @@ class KpiAgent(BaseAgent[KpiOutput]):
         """평가할 Agent 출력 노드 (설계서 2장, 중복 제거). 결과가 없으면 None (평가 불가).
 
         - 복잡 (Retriever → Simulator → Verifier → Composer): Simulator 영향 경로의 노드 (재계획이 있었으면 마지막 라운드 = 현재 상태)
-        - 단순 (Retriever → Composer): Retriever 최종 결과 = 근거 노드 + 근거 없음 노드 (재탐색이 있었으면 마지막 라운드)
+        - 단순 (Retriever → Composer): Composer 단순 응답 경로의 노드 (사용자에게 보이는 경로, [변경]/[참조] 표시와 같은 출처)
         """
         if state.planner is not None and state.planner.complexity is Complexity.COMPLEX:
             if state.simulation is None:
                 return None
             nodes = [h.node for a in state.simulation.area_impacts for p in a.paths for h in p.hops]
         else:
-            if state.retriever is None:
+            if state.composer is None or state.composer.simple_answer is None:
                 return None
-            nodes = [e.node_id for e in state.retriever.evidence if e.node_id] + state.retriever.nodes_without_evidence
+            nodes = [h.node for p in state.composer.simple_answer.impact_paths for h in p.hops]
         return list(dict.fromkeys(nodes))
 
     def _performance(self, state: AgentState) -> list[KpiMetric]:
+        """실행 로그 지표. tool 한도는 Planner 실행(분석 라운드)마다 새로 주므로 라운드별 최댓값을 한도와 비교하고,
+        합계는 tool_calls_total 로 따로 낸다. 재탐색은 라운드마다 초기화되는 explore_loop_count 대신 Retriever 실행 수 합계."""
         p = KpiCategory.PERFORMANCE
         runs = state.agent_runs
+        rounds = [0]
+        for r in runs:
+            if r.agent == "planner" and rounds[-1]:
+                rounds.append(0)
+            rounds[-1] += r.tool_calls
         metrics = [
             _metric(KpiMetricName.LATENCY_MS, p, sum(r.latency_ms for r in runs), "ms"),
-            _metric(KpiMetricName.TOOL_CALLS, p, sum(r.tool_calls for r in runs), "count", config.MAX_TOOL_CALLS),
-            _metric(KpiMetricName.EXPLORE_LOOPS, p, state.explore_loop_count, "count"),
+            _metric(KpiMetricName.TOOL_CALLS, p, max(rounds), "count", config.MAX_TOOL_CALLS),
+            _metric(KpiMetricName.TOOL_CALLS_TOTAL, p, sum(rounds), "count"),
+            _metric(KpiMetricName.EXPLORE_LOOPS, p, sum(r.agent == "retriever" for r in runs), "count"),
             _metric(KpiMetricName.REPLANS, p, state.replan_count, "count"),
         ]
         tokens = [(r.input_tokens or 0) + (r.output_tokens or 0) for r in runs if r.input_tokens or r.output_tokens]

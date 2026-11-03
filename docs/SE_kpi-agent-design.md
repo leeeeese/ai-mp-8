@@ -10,6 +10,7 @@
 | v0.1 | 최초 초안. 노드 목록 기반 탐지율·미탐률·정밀도 정의 |
 | v0.2 | 최신 Agent Workflow·Neo4j 노드 정의 반영. KPI Agent 를 Composer 이후 평가 분기(점선)로, 입력을 "정답 + 실행 로그"로. 평가 범위를 `eval_max_stage` → `eval_target_labels` 로 (DBIO 단계가 맥락에 따라 달라서). 집계 축에 SM 파트·노드 유형·flow 추가. 확장 KPI 후보 정리 |
 | v0.3 | 형식을 YJ 설계서와 통일 (에이전트 단위 역할·입력·처리·출력). 입력·출력을 구현 모델(`AnswerKey`, `AgentRunRecord`, `KpiOutput`)과 그래프 노드 ID(`<접두어>:<키>`)로 표기. 배치 평가(`scripts/eval_kpi.py`) 추가 |
+| v0.4 (2026-11-03) | [변경] 노드 정밀도 `change_node_precision` 추가 (측정만). 정답 노드가 1개인 요건은 노드 정밀도 하한 미적용. 근거: [planner_detail_analysis_to-be.md](planner_detail_analysis_to-be.md) 4장 #2·#3. 에이전트 출력과 정합: 단순 `final_nodes` 를 Composer 단순 응답 경로로, `tool_calls` 를 라운드별 최댓값으로 (`tool_calls_total` 추가), `explore_loops` 를 Retriever 실행 수 합계로 |
 
 ## 0. 한눈에 보기
 
@@ -27,7 +28,7 @@
 
 | 에이전트 | LLM | 입력 (AgentState) | 출력 | 구현 |
 |---|---|---|---|---|
-| KPI Agent | - (리포트 요약만 선택) | `answer_key`, `planner`, `retriever`(단순) / `simulation`(복잡), `agent_runs`, `explore_loop_count`, `replan_count` | `KpiOutput` | `agents/kpi.py`, `schemas/kpi.py` |
+| KPI Agent | - (리포트 요약만 선택) | `answer_key`, `planner`, `composer.simple_answer`(단순) / `simulation`(복잡), `agent_runs`, `replan_count` | `KpiOutput` | `agents/kpi.py`, `schemas/kpi.py` |
 | 배치 평가 | - | 저장된 `<case>.state.json` + `eval/ground_truth/<case>.json` | `judgements.csv`, `cases.csv`, `summary.json` | `scripts/eval_kpi.py` |
 
 ### 설계 원칙
@@ -81,7 +82,7 @@ load_inputs → validate → extract → normalize → match → classify → ag
 | report | 리포트·시트 생성 | 코드 + (선택) LLM 요약 |
 
 - `final_nodes` 추출 위치는 flow 별로 다르다.
-  - 단순 (Retriever → Composer): Retriever 최종 결과 = 근거 노드 + 근거 없음 노드 (재탐색이 있었으면 마지막 라운드)
+  - 단순 (Retriever → Composer): Composer 단순 응답 경로(`composer.simple_answer.impact_paths`)의 노드. 사용자에게 보이는 경로이고 [변경]/[참조] 표시(`change_tag_accuracy`·`change_node_precision`)와 같은 출처다 (2026-11-03 변경: 이전에는 Retriever 근거 노드 + 근거 없음 노드라 경로 밖 근거 노드가 화면에 없는데도 오탐으로 셌다. v2 L-4·SC-005 2개, SC-006 1개)
   - 복잡 (Simulator → Verifier → Composer): Simulator 영향 경로의 노드 (재계획이 있었으면 마지막 라운드)
 - 단순/복잡은 검증 단계(Verifier) 유무가 달라 결과 특성이 다르므로 **flow 별로 나눠 집계**한다.
 - 오탐·미탐 원인 추정(그래프 상 인접 노드, 엣지 유형 등)은 LLM 으로 보조할 수 있으나 KPI 값에는 반영하지 않는다.
@@ -177,10 +178,13 @@ load_inputs → validate → extract → normalize → match → classify → ag
 | 노드 탐지율 `node_recall` (= 재현율) | TP ÷ (TP + FN) | 핵심 KPI. `KPI_MIN_RECALL` 이상 |
 | 노드 미탐률 `node_miss_rate` | FN ÷ (TP + FN) | 1 − 탐지율 |
 | Critical 미탐률 `critical_miss_rate` | Critical 중 FN ÷ Critical 전체 | 권장 목표 0건 |
-| 노드 정밀도 `node_precision` | TP ÷ (TP + FP) | 불필요한 검토 부담. `KPI_MIN_PRECISION` 이상 |
+| 노드 정밀도 `node_precision` | TP ÷ (TP + FP) | 불필요한 검토 부담. `KPI_MIN_PRECISION` 이상 (정답 노드가 1개면 미적용, 아래) |
+| [변경] 노드 정밀도 `change_node_precision` | [변경] 으로 표시한 노드 중 TP ÷ (TP + FP) | 측정만 (threshold 없음). [변경] 표시가 없으면 생략 |
 | 평가 제외 수 `excluded_nodes`, 범위 밖 수 `out_of_scope_nodes` | 건수 | 항상 함께 공개 |
 
 - 비율은 0~1 로 저장하고 리포트에서 % 로 표시한다. 분모가 0 이면 "해당 없음"(지표 생략).
+- **노드 정밀도와 [변경] 노드 정밀도:** 노드 정밀도의 분모는 결과 경로 위 노드 전체(`final_nodes`)라 지나가기만 하는 [참조] 노드도 오탐으로 센다. YJ v6 실행에서 KPI 오탐의 96~99% 가 [참조]·표시 없음 노드였다 (v6-3: 노드 정밀도 0.15, [변경] 정밀도 1.00). 그래서 에이전트가 고친다고 한 노드의 정확도는 [변경] 노드 정밀도로 따로 본다. [변경] 표시는 `change_tag_accuracy` 와 같은 출처를 쓴다 (복잡 = Simulator 영향 경로, 단순 = Composer 단순 응답 경로). 판정 규칙은 노드 정밀도와 같다: 평가 제외·범위 밖 노드는 세지 않는다 (정답 경로 위 노드를 [변경] 으로 표시해도 분모에 넣지 않는다. 그 표시가 맞는지는 `change_tag_accuracy` 가 본다).
+- **정답 노드가 1개인 요건:** 경로 위 나머지 노드가 모두 오탐이 되어 노드 정밀도가 구조적으로 낮다 (SC-005: 탐지율 1.00, 정밀도 0.02, [변경] 정밀도 1.00). 이 경우 노드 정밀도는 값만 기록하고 하한을 적용하지 않는다 (`threshold` 없음 → `warnings`·`all_passed` 에 영향 없음). 해석은 탐지율과 [변경] 노드 정밀도로 한다. 정답 노드 수는 평가 범위 안 정답 노드(TP + FN)로 센다.
 - **집계 축:** 사례 / 시스템(swing, tos) / SM 파트 / flow(단순·복잡) / 노드 유형 / 단계 / Agent 버전.
 - 노드 유형별 탐지율은 "어떤 종류의 노드를 잘 놓치는가", 단계별 탐지율은 "어디까지 따라갔는가"를 보여준다.
 
@@ -189,8 +193,9 @@ load_inputs → validate → extract → normalize → match → classify → ag
 | 지표 | 산출 | 출처 |
 |---|---|---|
 | Agent 실행 시간 `latency_ms` | 단계별(Planner~Composer) 소요 시간 합 | 실행 로그 |
-| tool 호출 `tool_calls` | 합계 (`MAX_TOOL_CALLS` 이하) | 실행 로그 |
-| 재탐색 `explore_loops` · 재계획 `replans` | Explorer ⇄ Retriever 루프 수, Verifier → Supervisor 재계획 수 | 실행 로그 |
+| tool 호출 `tool_calls` | 분석 라운드(Planner 실행)별 합의 최댓값 (`MAX_TOOL_CALLS` 이하). Supervisor 가 라운드마다 한도를 새로 주므로 라운드 기준으로 비교한다 | 실행 로그 |
+| tool 호출 합계 `tool_calls_total` | 재계획 라운드 포함 합계 (측정만) | 실행 로그 |
+| 재탐색 `explore_loops` · 재계획 `replans` | Explorer ⇄ Retriever 왕복 수 = Retriever 실행 수 합계 (재계획 라운드 포함. `explore_loop_count` 는 라운드마다 초기화되어 쓰지 않음), Verifier → Supervisor 재계획 수 | 실행 로그 |
 | 토큰 `total_tokens` | 입력 + 출력 토큰 합 | 실행 로그 |
 | 분석·검토시간 절감률 | (수작업 총시간 − Agent 활용 총시간) ÷ 수작업 총시간 × 100 | 수동 입력 + 로그 |
 | 불필요·중복 제시율 | 불필요·중복 검토 항목 ÷ 전체 검토 항목 × 100 | 수동 입력 |
@@ -262,9 +267,9 @@ load_inputs → validate → extract → normalize → match → classify → ag
 |---|---|
 | `judgements.csv` | 사례별 노드 판정표: case_id, agent_version, node_id, 유형, 단계, 중요도, 판정, 출력 여부 |
 | `cases.csv` | 사례별 KPI (시스템 · SM 파트 · flow · 정답 복잡도 · Agent 버전) + 판정 품질 지표 · 재분석 여부 · 불일치 설명 |
-| `summary.json` | 합산 · 시스템 · SM 파트 · flow · 노드 유형 · 단계별 KPI + `judgement`(판정 품질 집계) |
+| `summary.json` | 합산 · 시스템 · SM 파트 · flow · 노드 유형 · 단계별 KPI + `judgement`(판정 품질 집계). 합산·시스템·SM 파트·flow 에는 `change_node_precision`([변경] 노드 TP/FP 를 합산해 계산)도 |
 | `report.md` | 노드 탐지 수치, 판정 품질, 미탐 노드(Critical 우선), 오탐 노드, 판정 불일치(사례별), 평가 제외. 건수는 숫자, 비율은 % |
-| 버전 비교 (`--compare <이전 summary.json>`) | `report.md` 끝에 지표별 이전 · 현재 · 차이 표 (탐지율·Critical 미탐률·정밀도, 판정 품질 집계) |
+| 버전 비교 (`--compare <이전 summary.json>`) | `report.md` 끝에 지표별 이전 · 현재 · 차이 표 (탐지율·Critical 미탐률·정밀도·[변경] 정밀도, 판정 품질 집계) |
 
 ---
 
@@ -318,8 +323,9 @@ pytest tests/test_kpi.py tests/test_kpi_judgement.py                        # �
 |---|---|
 | 판정 | 탐지·미탐·오탐·평가 제외·범위 밖 각각, 중복 노드 한 번만 |
 | 정답 로드 | `must_find`·`reference_only`·pending 경로 → 정답/제외 분류, DBIO 단계 2/3 산출 |
-| flow | 단순 = Retriever 노드, 복잡 = Simulator hop 노드, 결과 없음 → `evaluable=false` |
-| 지표 | 분모 0 생략, threshold 미달 → `all_passed=false` + `warnings` |
+| flow | 단순 = Composer 단순 응답 경로 노드 (Retriever·Explorer 결과 아님), 복잡 = Simulator hop 노드, 결과 없음 → `evaluable=false` |
+| 실행 로그 | 재계획 시 tool 한도는 라운드별 최댓값, 합계는 `tool_calls_total`, 재탐색은 Retriever 실행 수 합계 |
+| 지표 | 분모 0 생략, threshold 미달 → `all_passed=false` + `warnings`, [변경] 노드 정밀도 (평가 제외 미포함, 표시 없으면 생략), 정답 노드 1개 → 정밀도 하한 미적용 |
 | 판정 품질 | 실제 Simulator·Verifier·Composer 출력(tos·swing)에 대해 일치/불일치·설명, 표시 없는 Simulator 출력은 표시 지표 생략, 단순 flow 권장 catch/miss/over, 재분석·Verifier 미해결, 변경 노드 우선 |
 | swing | 노드 유형·단계(DBIO: TP·배치 직접 2, Module 경유 3)·시스템 추정·노드 판정 |
 | 배치 | 판정 품질 집계, 리포트 절·건수/비율 표시, 버전 비교 행 |

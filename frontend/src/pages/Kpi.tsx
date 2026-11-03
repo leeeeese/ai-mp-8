@@ -104,7 +104,8 @@ export function Kpi() {
           <h2 id="kpi-run" className="text-sm font-semibold">실행 · 전체 세션 {shown.length}건</h2>
           <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
             <Tile label="평균 소요 시간" value={shown.length ? formatMs(mean(shown, 'latency_ms') ?? 0) : '-'} sub="세션당 에이전트 실행 시간 합" />
-            <Tile label="평균 도구 호출" value={mean(shown, 'tool_calls')?.toFixed(1) ?? '-'} sub="세션당 tool 호출 수" />
+            <Tile label="평균 도구 호출" value={(mean(shown, 'tool_calls_total') ?? mean(shown, 'tool_calls'))?.toFixed(1) ?? '-'}
+                  sub="세션당 tool 호출 합 (재계획 포함)" />
             <Tile label="재계획 발생" value={pct(ratio(shown.filter((r) => (r.metrics.replans ?? 0) > 0).length, shown.length))}
                   sub="Verifier 보완 필요로 다시 계획한 세션" />
             <Tile label="상세 분석 권장 · 재분석" value={`${recommended(simple)} / ${shown.filter((r) => r.reanalyzed).length}`}
@@ -176,7 +177,7 @@ export function Kpi() {
                       <td className="font-mono">{pct(r.metrics.node_recall ?? null)}</td>
                       <td className="font-mono">{pct(r.metrics.node_precision ?? null)}</td>
                       <td className="whitespace-nowrap font-mono text-muted">
-                        {formatMs(r.metrics.latency_ms ?? 0)} · {r.metrics.tool_calls ?? '-'} · {r.metrics.replans ?? 0}
+                        {formatMs(r.metrics.latency_ms ?? 0)} · {r.metrics.tool_calls_total ?? r.metrics.tool_calls ?? '-'} · {r.metrics.replans ?? 0}
                       </td>
                       <td>
                         {r.judgement_notes.length + r.missed_nodes.length === 0 ? (

@@ -47,7 +47,7 @@ DIFFICULTY = {"Major": "상", "Medium": "중", "Minor": "하"}
 # summary 에 옮길 KPI 지표 (KpiMetricName 값). 없는 지표는 '-' (해당 없음)
 SUMMARY_METRICS = [
     ("node_recall", "탐지율"), ("critical_miss_rate", "Critical 미탐률"), ("node_precision", "정밀도"),
-    ("complexity_match", "복잡도 일치"), ("difficulty_match", "난이도 일치"), ("feasibility_match", "가능 여부 일치"),
+    ("change_node_precision", "[변경] 정밀도"), ("complexity_match", "복잡도 일치"), ("difficulty_match", "난이도 일치"), ("feasibility_match", "가능 여부 일치"),
     ("area_impact_match", "영역 일치"), ("change_tag_accuracy", "변경/참조 표시"), ("wrong_path_adopted", "오답 경로 채택"),
     ("verifier_unresolved", "Verifier 미해결"),
 ]

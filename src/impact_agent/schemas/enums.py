@@ -193,7 +193,8 @@ class KpiMetricName(str, Enum):
     NODE_RECALL = "node_recall"  # 노드 탐지율 = TP / (TP + FN)
     NODE_MISS_RATE = "node_miss_rate"  # 노드 미탐률 = FN / (TP + FN)
     CRITICAL_MISS_RATE = "critical_miss_rate"  # Critical 정답 노드 중 FN 비율 (권장 0)
-    NODE_PRECISION = "node_precision"  # 노드 정밀도 = TP / (TP + FP)
+    NODE_PRECISION = "node_precision"  # 노드 정밀도 = TP / (TP + FP). 정답 노드 1개면 하한 미적용 (기록만)
+    CHANGE_NODE_PRECISION = "change_node_precision"  # [변경] 노드 정밀도 = [변경] 으로 표시한 노드 중 TP / (TP + FP) (측정만)
     EXCLUDED_NODES = "excluded_nodes"  # 평가 제외 노드 수
     OUT_OF_SCOPE_NODES = "out_of_scope_nodes"  # 범위 밖 노드 수
     # judgement (판정 품질, 측정만. 1 = 일치/해당, 0 = 불일치/해당 없음, 비율은 0~1. 비교값이 없으면 생략)
@@ -208,7 +209,8 @@ class KpiMetricName(str, Enum):
     VERIFIER_UNRESOLVED = "verifier_unresolved"  # (복잡) 재계획 한도 안에 Verifier 보완 필요를 못 메움
     # performance (실행 로그)
     LATENCY_MS = "latency_ms"
-    TOOL_CALLS = "tool_calls"
-    EXPLORE_LOOPS = "explore_loops"
+    TOOL_CALLS = "tool_calls"  # 분석 라운드(Planner 실행)별 tool 호출의 최댓값 (한도 MAX_TOOL_CALLS 는 라운드마다 새로 줌)
+    TOOL_CALLS_TOTAL = "tool_calls_total"  # tool 호출 합계 (재계획 라운드 포함, 측정만)
+    EXPLORE_LOOPS = "explore_loops"  # Explorer ⇄ Retriever 왕복 수 = Retriever 실행 수 합계 (재계획 라운드 포함)
     REPLANS = "replans"
     TOTAL_TOKENS = "total_tokens"

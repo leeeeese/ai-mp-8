@@ -4,6 +4,7 @@ import pytest
 from pydantic import BaseModel
 
 from impact_agent.agents import KpiAgent, SimulatorAgent, Supervisor
+from impact_agent.agents import simulator as simulator_module
 from impact_agent.agents.simulator import (
     REFERENCE_IMPACT,
     DraftAlternative,
@@ -257,6 +258,68 @@ def test_swing_rule_only_end_to_end():
     assert not any(p.cross_domain for x in out.area_impacts for p in x.paths)          # swing 단일 도메인
     assert a[Area.DB].difficulty is Difficulty.MINOR                                  # logic_change: 스키마 아님
     assert a[Area.INTERFACE].difficulty is Difficulty.MAJOR                           # 규칙: 인터페이스
+
+
+class CallerGraph:
+    """영역 없는 경로의 호출 진입점 찾기용 그래프 (GraphStore 의 node · in_edges 만)."""
+
+    def __init__(self, nodes, edges):
+        self.nodes = {n.node_id: n for n in nodes}
+        self.edges = [GraphEdge(from_id=a, to_id=b, type=t) for a, b, t in edges]
+        self.calls = 0
+
+    def node(self, node_id):
+        return self.nodes.get(node_id)
+
+    def in_edges(self, node_id):
+        self.calls += 1
+        return [e for e in self.edges if e.to_id == node_id]
+
+
+ORPHAN_GRAPH = CallerGraph(SWING + [swing("MOD:Calc.batch", "Module", R.LOGIC), swing("MOD:Calc.deep", "Module", R.LOGIC),
+                                    swing("MOD:Calc.mid", "Module", R.LOGIC), swing("MOD:Calc.lone", "Module", R.LOGIC)], [
+    ("BAT:ZPNTBB01", "MOD:Calc.batch", "INVOKES"),                                   # 배치가 바로 호출
+    ("MOD:Calc.mid", "MOD:Calc.deep", "INVOKES"), ("TP:PntSvc.getPnt", "MOD:Calc.mid", "INVOKES"),
+    ("SCR:ZPNTSS02", "TP:PntSvc.getPnt", "CALLS"),                                    # 3 hop 위 화면
+    ("TBL:TB_PNT_HST", "MOD:Calc.lone", "READS"),                                     # 호출 엣지 아님 → 무시
+])
+
+
+def test_orphan_paths_get_area_and_limit():
+    # 진입 노드 없이 Module 만 있는 경로 (시작 노드가 곧 목표 역할): 영역이 없으면 결과·KPI 에서 기록 없이 빠진다
+    paths = [(1, SW_SCREEN, StopReason.TARGET_REACHED), (1, SW_BATCH, StopReason.TARGET_REACHED),
+             (1, ["MOD:PntSvc.checkLimit"], StopReason.TARGET_REACHED),   # P1-3 Explorer 엣지의 호출 노드(TP) 영역
+             (1, ["MOD:Calc.batch"], StopReason.TARGET_REACHED),          # P1-4 그래프: 배치가 호출 → batch
+             (1, ["MOD:Calc.deep"], StopReason.TARGET_REACHED),           # P1-5 그래프: 3 hop 위 화면 → screen
+             (1, ["MOD:Calc.lone"], StopReason.TARGET_REACHED)]           # P1-6 그래프에도 호출 진입점 없음 → screen
+    out = SimulatorAgent(use_llm=False, store=ORPHAN_GRAPH).run(make_swing_state(paths))
+    a = by_area(out)
+
+    def areas(pid):
+        return [ar for ar, x in a.items() if pid in [p.path_id for p in x.paths]]
+
+    assert areas("P1-3") == [Area.SCREEN, Area.INTERFACE, Area.BATCH]
+    assert areas("P1-4") == [Area.BATCH] and areas("P1-5") == [Area.SCREEN] and areas("P1-6") == [Area.SCREEN]
+    assert [s for s in out.unverified_segments if s.startswith("영역 추정")] == [
+        "영역 추정: P1-3 (MOD:PntSvc.checkLimit) 진입점이 없어 호출 노드의 영역(screen, interface, batch)을 따름",
+        "영역 추정: P1-4 (MOD:Calc.batch) 진입점이 없어 그래프의 호출 진입점(BAT:ZPNTBB01) 기준 batch",
+        "영역 추정: P1-5 (MOD:Calc.deep) 진입점이 없어 그래프의 호출 진입점(SCR:ZPNTSS02) 기준 screen",
+        "영역 추정: P1-6 (MOD:Calc.lone) 진입점이 없어 screen 으로 둠 (그래프 4 hop 안에 호출 진입점 없음, 진입 영역 확인 필요)",
+    ]
+
+
+def test_orphan_paths_without_graph_and_untouched_paths(monkeypatch):
+    def no_graph():
+        raise KeyError("NEO4J_URI")
+
+    monkeypatch.setattr(simulator_module, "get_graph_store", no_graph)            # 그래프 설정·연결 실패
+    paths = [(1, SW_SCREEN, StopReason.TARGET_REACHED), (1, ["MOD:Calc.batch"], StopReason.TARGET_REACHED)]
+    out = SimulatorAgent(use_llm=False).run(make_swing_state(paths))
+    assert "영역 추정: P1-2 (MOD:Calc.batch) 진입점이 없어 screen 으로 둠 (그래프를 조회하지 못함, 진입 영역 확인 필요)" \
+        in out.unverified_segments
+    graph = CallerGraph(SWING, [])
+    out = SimulatorAgent(use_llm=False, store=graph).run(make_swing_state(SHARED_PATHS))
+    assert not any(s.startswith("영역 추정") for s in out.unverified_segments) and graph.calls == 0  # 영역이 있으면 조회 안 함
 
 
 def test_swing_evidence_confidence_and_llm_input():

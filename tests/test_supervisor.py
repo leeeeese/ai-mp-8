@@ -19,6 +19,7 @@ from impact_agent.schemas import (
     ReexploreRequest,
     RequestType,
     RetrieverOutput,
+    SimpleAnswer,
     SimulationOutput,
     SmPart,
     StructuredRequest,
@@ -62,7 +63,9 @@ def make_supervisor(complexity, reexplore=False, verify=VerifyResult.PASS, items
     sup.simulator = Fake(lambda s: SimulationOutput(area_impacts=[]))
     sup.verifier = Fake(lambda s: VerifierOutput(result=verify, checks=[], reason="r"))
     sup.seen_kpi = []
-    sup.composer = Fake(lambda s: (sup.seen_kpi.append(s.kpi), ComposerOutput(complexity=complexity, markdown="ok"))[1])
+    simple = SimpleAnswer(conclusion_lines=["a", "b", "c"], evidence_table=[]) if complexity is Complexity.SIMPLE else None
+    sup.composer = Fake(lambda s: (sup.seen_kpi.append(s.kpi),
+                                   ComposerOutput(complexity=complexity, markdown="ok", simple_answer=simple))[1])
     return sup
 
 

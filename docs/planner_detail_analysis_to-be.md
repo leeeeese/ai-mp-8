@@ -11,6 +11,7 @@
 | 2026-10-29 | (SE) 최초 작성. Planner 복잡도 기준, reanalysis 시 complex, Composer 상세 분석 권장·사유, UI 재분석 요청 |
 | 2026-11-02 | (SE) Composer 권장 신호 강/약에 맞춘 YJ 추가 수정 사항 1~9 |
 | 2026-11-03 | (YJ) 이 판으로 덮어씀: 1~9 반영 결과, E2E 16건 테스트(v6-1 · v6-2 · v6-3), SE 반영 요청 |
+| 2026-11-03 | (SE) 4장 #2·#3 처리 현황, 6장 YJ 반영 요청 추가 (Logic 시작 노드 경로의 진입점 역추적) |
 
 ## 1. 결정 사항 (유지)
 
@@ -68,6 +69,8 @@ UI 와 같은 전체 흐름(Planner → … → Composer → KPI). 1차 simple �
 | 6 | 〃 | 공통코드 경로(`CTL:CmmCdController.selectCdList` → `SQL:CmmCdMapper.selectCdList` → `TBL:TCP_CMM_CD`)가 이제 입력에 들어감 → 공통코드 데이터 등록을 TBL [변경](add/modify)으로 판정하는지 확인 | SC-003 [변경] 재현율 0.50 (정답 변경 노드 2개 중 1개) |
 | 7 | 스키마 공유 | `ExplorerOutput.unresolved_items` 추가, `MatchSource` 에서 `glossary` 제거 | 머지 후 `tests/test_schema_sync.py` 로 확인 |
 
+SE 처리 현황 (2026-11-03, SE): #2 `change_node_precision` 추가 (측정만), #3 정답 노드 1개면 노드 정밀도 하한 미적용 (기록만) — [SE_kpi-agent-design.md](SE_kpi-agent-design.md) v0.4. 나머지는 미처리.
+
 ## 5. 확인 방법
 
 ```bash
@@ -77,3 +80,27 @@ zsh scripts/YJ/run_all.sh <실행 폴더> <기준 실행>             # 예: v6/
 ```
 
 report.html 5장 "개선 후보" 아래쪽 `[SE]` 항목이 이 문서 4장과 같은 내용이다.
+
+## 6. YJ 반영 요청 (SE 작성, 2026-11-03)
+
+### 6-1. Logic 시작 노드 경로의 진입점 역추적 (`agents/explorer.py`)
+
+**현상**: 시작 노드가 Module(Logic)이고 목표 역할도 Logic 이면 `traverse_graph` 가 바로 `target_reached` 로 끝나, 그 노드 하나(또는 Module 끼리만 이어진) 경로가 된다. 이 노드를 누가 호출하는지(진입점 쪽 엣지)는 Explorer 결과(`paths`·`edges`)에 남지 않는다.
+
+| 실행 | 진입 노드 없는 경로 | 예 |
+|---|---|---|
+| SE v1 (20261102-v1) H-2 | 4건 | `MOD:ProdScrbSvc.checkScrbAvail` (정답 노드) |
+| SE v2 (20261103-v2) H-1 | 4건 | `MOD:ProdScrbSvc.checkAgeLimit` · `checkProdReln` · `checkScrbAvail`, `MOD:CombScrbSvc.validateCombMbr → … → MOD:CommCdSvc.getCdAttr` |
+| SE v2 H-2 | 6건 | 위 3개, `MOD:CombDcBatch.calcDcAmt`, `MOD:ProdScrbSvc.checkAgeLimit → MOD:AgeCalcUtil.*` 2건 |
+
+그래프에는 호출 쪽이 있다: `BAT:ZCMBBB0100010 -INVOKES-> MOD:CombDcBatch.calcDcAmt`, `TP:ProdScrbSvc.scrbProd · changeFeeProd -INVOKES-> MOD:ProdScrbSvc.checkScrbAvail -INVOKES-> checkAgeLimit · checkProdReln`. H-1 에서는 `BAT:ZCMBBB0100010` 이 같은 항목의 시작 노드였는데도 `calcDcAmt` 로 가는 엣지가 결과에 없었다.
+
+**영향**
+- Simulator 영역 배정: 영역은 경로의 진입 노드로 정하므로(SE_agent_design 1-1) 이 경로는 영역이 없다. 전에는 어느 영역 경로에도 들어가지 않아 결과·레포트·KPI 에서 기록 없이 빠졌다 (v1 H-2 `checkScrbAvail` 미탐의 원인).
+- 진입점 기반 신호: 공유 노드(`rules.shared_nodes`, 진입점 2개 이상)와 Composer 진입점 수(`entry_points`)는 Explorer 경로 첫 노드가 Entry 인 것만 센다. 이 노드들의 진입점은 세지 않아 공유 노드 판정·난이도 보정·상세 분석 권장 신호가 약하게 나올 수 있다.
+
+**SE 쪽 임시 대응 (반영됨)**: `simulator.assign_orphan_areas` 가 영역 없는 경로에 (1) Explorer 엣지의 호출 노드 영역 → (2) 그래프 역방향 호출 진입점(Screen·Batch, 4 hop) 영역 → (3) screen 순으로 영역을 정하고 분석 한계에 "영역 추정: …" 으로 남긴다. v2 H-1·H-2 기준 (3) 으로 떨어지는 경로는 0건 (`calcDcAmt` → batch). 영역만 보완하고 경로·진입점 신호는 바꾸지 않는다.
+
+**요청**: 진입점(Entry) 없이 끝난 경로(시작 노드가 Logic·DataAccess 등이고 목표 역할에 바로 닿은 경우)는 진입점까지 역방향으로 이어 경로에 넣는다 (예: `BAT:ZCMBBB0100010 → MOD:CombDcBatch.calcDcAmt`). hop 상한·tool 한도 안에서, 진입점이 여러 개면 진입점별 경로로. 반영되면 Simulator 의 "영역 추정" 분석 한계가 0건이 되고 `assign_orphan_areas` 는 안전장치로만 남는다.
+
+**확인**: SE `scripts/SE/run_scenarios.py` 로 H-1·H-2 실행 → `<case>.md` 분석 한계에 "영역 추정" 이 없는지, `summary.json` 의 KPI 탐지율 유지.

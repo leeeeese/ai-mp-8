@@ -12,6 +12,7 @@ from impact_agent.schemas import (
     Area,
     AreaImpact,
     Complexity,
+    ComposerOutput,
     Confidence,
     Difficulty,
     Direction,
@@ -30,6 +31,7 @@ from impact_agent.schemas import (
     PlannerOutput,
     RequestType,
     RetrieverOutput,
+    SimpleAnswer,
     SimulationOutput,
     SmPart,
     StopReason,
@@ -73,12 +75,10 @@ def make_state(output, answer_key=KEY, complexity=Complexity.COMPLEX, tool_calls
             area=Area.DB, impact_type=ImpactType.MODIFY, paths=[ImpactPath(path_id="p", hops=hops)],
             feasibility=Feasibility.FEASIBLE, difficulty=Difficulty.MINOR, difficulty_basis="b",
             confidence=Confidence.CONFIRMED)])
-    elif output is not None:  # 단순: Retriever 결과 (앞 절반은 근거 있음, 나머지는 근거 없음)
-        half = len(output) // 2
-        state.retriever = RetrieverOutput(
-            evidence=[Evidence(node_id=n, file_path="f", summary="s", source_kind="source") for n in output[:half]],
-            nodes_without_evidence=output[half:],
-        )
+    elif output is not None:  # 단순: Composer 단순 응답 경로
+        hops = [PathHop(node=n, relation="r", impact="i", confidence=Confidence.CONFIRMED) for n in output]
+        state.composer = ComposerOutput(complexity=complexity, markdown="m", simple_answer=SimpleAnswer(
+            conclusion_lines=["a", "b", "c"], evidence_table=[], impact_paths=[ImpactPath(path_id="p", hops=hops)]))
     state.agent_runs = [AgentRunRecord(agent="explorer", latency_ms=10, tool_calls=tool_calls)]
     return state
 
@@ -129,6 +129,36 @@ def test_thresholds_and_warnings():
     assert not out.all_passed and len(out.warnings) == 3
 
 
+def tag_hops(state, changed):
+    """Simulator 경로 hop 에 [변경]/[참조] 표시를 붙인다 (changed 노드만 [변경])."""
+    for h in state.simulation.area_impacts[0].paths[0].hops:
+        h.impact = "[변경] x" if h.node in changed else "[참조] y"
+    return state
+
+
+def test_change_node_precision():
+    state = tag_hops(make_state(OUTPUT), {"SCR:S1", "TP:TP1", "MOD:M9"})
+    v = metrics(KpiAgent().run(state))
+    assert v[KpiMetricName.NODE_PRECISION] == pytest.approx(5 / 7)         # [참조] 노드 T9 도 오탐
+    assert v[KpiMetricName.CHANGE_NODE_PRECISION] == pytest.approx(2 / 3)  # [변경] 3개 중 M9 만 오탐
+    m = next(x for x in KpiAgent().run(state).metrics if x.name is KpiMetricName.CHANGE_NODE_PRECISION)
+    assert m.threshold is None and m.passed is None                       # 측정만
+
+    key = KEY.model_copy(update={"excluded_nodes": [ExcludedNode(node_id="MOD:M9", reason="reference_only")]})
+    state.answer_key = key                                                # 평가 제외 노드는 노드 정밀도와 같이 세지 않음
+    assert metrics(KpiAgent().run(state))[KpiMetricName.CHANGE_NODE_PRECISION] == 1.0
+
+    assert KpiMetricName.CHANGE_NODE_PRECISION not in metrics(KpiAgent().run(make_state(OUTPUT)))   # 표시 없음 → 생략
+
+
+def test_single_answer_precision_threshold_not_applied():
+    key = AnswerKey(req_id="T-1", answer_nodes=[answer("TBL:T1", 4)])
+    out = KpiAgent().run(make_state(["SCR:S1", "TP:TP1", "TBL:T1"], answer_key=key))
+    m = next(x for x in out.metrics if x.name is KpiMetricName.NODE_PRECISION)
+    assert m.value == pytest.approx(1 / 3) and m.threshold is None and m.passed is None   # 기록만, 미달 아님
+    assert out.all_passed and out.warnings == []
+
+
 def test_zero_denominator_is_not_applicable():
     key = AnswerKey(req_id="T-0", answer_nodes=[])
     v = metrics(KpiAgent().run(make_state([], answer_key=key, complexity=Complexity.COMPLEX)))
@@ -149,14 +179,29 @@ def test_missing_final_nodes_is_not_evaluable(complexity):
     assert out.warnings and KpiMetricName.NODE_RECALL not in metrics(out)
 
 
-def test_simple_final_nodes_from_retriever():
+def test_simple_final_nodes_from_composer_paths():
     state = make_state(["SCR:S1", "TP:TP1", "TP:TP1", "MOD:M1"], complexity=Complexity.SIMPLE)
-    state.retriever.evidence.append(Evidence(node_id="SCR:S1", file_path="g", summary="s", source_kind="screen"))
-    state.retriever.evidence.append(Evidence(node_id=None, file_path="doc", summary="s", source_kind="ops_doc"))
-    # Explorer 결과가 아니라 Retriever 최종 결과 (근거 + 근거 없음), 중복·node_id 없는 근거 제외
+    # Retriever 근거만 있고 경로에 없는 노드(사용자 답변에 안 보임)·Explorer 결과는 세지 않음, 중복 제외
+    state.retriever = RetrieverOutput(evidence=[Evidence(node_id="MOD:OFF", file_path="g", summary="s", source_kind="source")],
+                                      nodes_without_evidence=["TBL:OFF"])
     state.explorer = ExplorerOutput(start_nodes=[], nodes=[], edges=[], paths=[
         ExplorePath(item_id=1, nodes=["SCR:OTHER"], direction=Direction.FORWARD, stop_reason=StopReason.TARGET_REACHED)])
     assert KpiAgent.final_nodes(state) == ["SCR:S1", "TP:TP1", "MOD:M1"]
+
+
+def test_tool_calls_per_round_and_explore_loops_total():
+    # 재계획 1회: 라운드마다 tool 한도를 새로 주므로 한도 비교는 라운드별 최댓값, 합계는 따로. 재탐색은 Retriever 실행 수 합계
+    state = make_state(OUTPUT)
+    n = config.MAX_TOOL_CALLS
+    state.agent_runs = [AgentRunRecord(agent=a, latency_ms=1, tool_calls=t) for a, t in [
+        ("planner", 0), ("explorer", n - 5), ("retriever", 3), ("explorer", 1), ("retriever", 1), ("simulator", 0),
+        ("planner", 0), ("explorer", n - 2), ("retriever", 2), ("composer", 0)]]
+    state.explore_loop_count = 1                                              # 마지막 라운드 값 (쓰지 않음)
+    out = KpiAgent().run(state)
+    v = metrics(out)
+    assert v[KpiMetricName.TOOL_CALLS] == n and v[KpiMetricName.TOOL_CALLS_TOTAL] == 2 * n
+    assert v[KpiMetricName.EXPLORE_LOOPS] == 3
+    assert KpiMetricName.TOOL_CALLS not in {x.name for x in out.metrics if x.passed is False}   # 라운드마다 한도 안
 
 
 def test_complex_final_nodes_from_simulation_not_retriever():

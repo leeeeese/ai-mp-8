@@ -143,6 +143,7 @@ Simulator·Verifier·Composer 가 같은 함수(`rules.path_areas`)를 쓴다.
 | Batch 단독 (나가는 엣지 없음) | SC-006 참고 `BAT:TBCH1020`·`TBCH4020` | batch (+ interface) |
 | EntryHandler 에서 시작 | SC-003 `CTL:CmmCdController.selectCdList → SQL:… → TBL:TCP_CMM_CD` | screen 으로 본다 |
 | Table 에서 시작 | SC-002·SC-006 `TBL:… → COL:…` | db 만 |
+| Logic 만 (진입 노드 없음, 시작 노드가 곧 목표 역할) | H-1·H-2 `MOD:ProdScrbSvc.checkProdReln` (1노드) | (1) 경로 첫 노드를 호출하는 노드(Explorer 엣지)의 영역 → (2) 그래프 역방향 호출 진입점(Screen·Batch, 호출 엣지 `CALLS`·`INVOKES`·`EXECUTES`·`OPENS`, 4 hop) 의 영역 → (3) 둘 다 없거나 그래프 조회 실패면 screen. 분석 한계에 "영역 추정" 과 근거(진입점 ID)를 남김 (`simulator.assign_orphan_areas`, `entry_areas_in_graph`). 근본 해결은 Explorer 진입점 역추적 ([planner_detail_analysis_to-be.md](planner_detail_analysis_to-be.md) 6-1). 영역이 없으면 어느 영역 경로에도 안 들어가 결과·레포트·KPI 에서 기록 없이 빠졌음 (v1 H-2 `MOD:ProdScrbSvc.checkScrbAvail` 미탐) |
 
 ### 1-2. 난이도 판단 기준
 

@@ -8,7 +8,7 @@ import pytest
 
 from impact_agent.agents import ComposerAgent, KpiAgent, SimulatorAgent, VerifierAgent
 from impact_agent.agents.composer import DraftChange, SimpleDraft
-from impact_agent.agents.kpi import infer_system, judge, load_answer_key, node_type, stage_of
+from impact_agent.agents.kpi import change_judgements, infer_system, judge, load_answer_key, node_type, stage_of
 from impact_agent.llm import Usage
 from impact_agent.schemas import (
     AnswerKey,
@@ -227,7 +227,7 @@ def eval_kpi():
 def case(case_id, flow, gt, state, key):
     kpi = kpi_of(state, key)
     return {"case_id": case_id, "system": "swing", "sm_part": "product", "flow": flow, "gt_complexity": gt,
-            "kpi": kpi, "rows": kpi.judgements}
+            "kpi": kpi, "rows": kpi.judgements, "change_rows": change_judgements(state, key)}
 
 
 def batch_cases():

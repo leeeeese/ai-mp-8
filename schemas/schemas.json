@@ -2199,6 +2199,7 @@
         "node_miss_rate",
         "critical_miss_rate",
         "node_precision",
+        "change_node_precision",
         "excluded_nodes",
         "out_of_scope_nodes",
         "complexity_match",
@@ -2212,6 +2213,7 @@
         "verifier_unresolved",
         "latency_ms",
         "tool_calls",
+        "tool_calls_total",
         "explore_loops",
         "replans",
         "total_tokens"
