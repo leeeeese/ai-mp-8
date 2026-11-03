@@ -38,7 +38,7 @@ load_dotenv(ROOT / ".env")
 from impact_agent.agents import Supervisor  # noqa: E402
 from impact_agent.agents.kpi import load_answer_key  # noqa: E402
 from impact_agent.agents.simulator import requirement_difficulty  # noqa: E402
-from impact_agent.api.runner import ProgressAgent, Runner  # noqa: E402
+from impact_agent.api.runner import Runner  # noqa: E402
 from impact_agent.schemas import Complexity, FollowupInput, FollowupType, SmPart, UserInput  # noqa: E402
 from impact_agent.state import AgentState  # noqa: E402
 
@@ -57,13 +57,34 @@ MAX_LIST = 30  # md 목록 상한
 # --- 실행 ---------------------------------------------------------------------------
 
 
+class KpiTimeline:
+    """KPI Agent 래퍼: 타임라인에 running / done 만 남긴다.
+
+    api.runner.ProgressAgent 는 진행 패널 단계(agent_log.TITLE 의 6개 에이전트)만 다루므로 KPI 를 감싸면
+    TITLE["kpi"] 에서 KeyError 가 난다. KPI 는 패널·상세 로그에 블록이 없어 이벤트만 낸다.
+    """
+
+    def __init__(self, inner: object, runner: Runner) -> None:
+        self.inner, self.runner = inner, runner
+
+    def __getattr__(self, item: str):
+        return getattr(self.inner, item)
+
+    def run(self, state: AgentState):
+        self.runner.emit({"node": "kpi", "status": "running"})
+        start = time.perf_counter()
+        out = self.inner.run(state)
+        self.runner.emit({"node": "kpi", "status": "done", "elapsedMs": round((time.perf_counter() - start) * 1000)})
+        return out
+
+
 def run_case(case: str) -> tuple[AgentState, float, dict]:
     gt = json.loads((GT_DIR / f"{case}.json").read_text(encoding="utf-8"))
     user_input = UserInput(request_text=gt["request_text"], sm_part=SmPart(gt["sm_part"]))
     t0 = time.perf_counter()
     sup = Supervisor()
     runner = Runner(sup)  # UI 진행 패널과 같은 이벤트. KPI 는 패널에 없어 여기서만 감싼다
-    sup.kpi = ProgressAgent("kpi", sup.kpi, runner)
+    sup.kpi = KpiTimeline(sup.kpi, runner)
     timeline: list[dict] = []
 
     def sink(round_no: int):
