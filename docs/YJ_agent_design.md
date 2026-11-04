@@ -298,7 +298,7 @@ python -m impact_agent ... --confirm "비마케팅 여부=COL:TCP_MSG_SCRT.ADVT_
 pytest                                                                 # 가짜 그래프·LLM (Neo4j 불필요)
 ```
 
-시나리오 평가 (Neo4j, 실제 LLM). v6 부터 UI 와 같은 **E2E 전체 흐름**(Planner → … → Composer → KPI)으로 16건을 돌린다. 1차 complex 는 끝까지, 1차 simple · 정답 complex 는 "상세 분석 요청"을 눌렀다고 보고 reanalysis(권장 사유 + "참고: " 참고 신호)로 2차 complex, Verifier 재계획 라운드는 complex 유지:
+시나리오 평가 (Neo4j, 실제 LLM). v6 부터 UI 와 같은 **E2E 전체 흐름**(Planner → … → Composer → KPI)으로 16건을 돌린다. 1차 complex 는 끝까지, 1차 simple · 정답 complex 는 "상세 분석 요청"을 눌렀다고 보고 reanalysis(권장 사유 + "참고: " 참고 신호)로 2차 complex, Verifier 재계획 라운드는 complex 유지. 1차 simple · 정답 complex 는 Composer 권장 여부와 관계없이 클릭을 가정하고, 1차 신호는 "권장 → 상세 분석 가능 / 참고 신호만 / 신호 없음 (놓침)", 정답 simple 에 권장이 붙으면 "불필요한 권장"으로 따로 채점한다 (KPI `complexity_match` 는 재분석 후 값이라 1차 오판은 report "1차 복잡도 일치"에서 봄):
 
 ```bash
 zsh scripts/YJ/run_all.sh v6/v6-3 v6/v6-2        # 16건 순차 + report.html (기준 실행 대비 증감). 끊기면 같은 명령으로 이어서

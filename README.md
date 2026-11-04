@@ -335,7 +335,15 @@ cd ~/Desktop/impact-agent && PYTHONPATH=src python3 scripts/YJ/run_scenarios.py 
 - 버전 폴더 아래 `-1`, `-2`, … 순서로 쌓는다 (v6-1 = E2E 첫 기준선, v6-2 · v6-3 = 수정 후)
 - 결과: `outputs/runs/YJ/<실행 폴더>/` — `report.html`(기준 실행 대비 지표 · 케이스별 변화 산점도와 "이전 → 이후" 표 · 판정 흐름 · 단계별 정답 손실 · 시간·토큰·정밀도 · 개선 후보), `tos/` · `swing/` 아래 케이스별 `<케이스>.md` · `<케이스>.log`(실행 로그)와 영역별 `summary.md`
 - 개선 후보(report 5장)는 실행 폴더의 `findings.json` 에 적으면 그 내용으로, 없으면 자동 징후로 채운다
-- 흐름 가정: 1차 complex → 끝까지 / 1차 simple + 정답 complex → "상세 분석 요청" 클릭 가정 → 2차 complex / Verifier 재계획은 complex 유지
+- 테스트 방식 (report 맨 위 "테스트 방식"에도 같은 내용). 정답 복잡도는 "사용자가 상세 분석 요청을 눌렀을지"를 정하는 데만 쓰고 에이전트 입력에는 넣지 않는다
+
+  | 1차 판정 | 정답 | 평가에서 하는 일 | 채점 (`detail_flow`) |
+  |---|---|---|---|
+  | complex | - | 끝까지 (Verifier 재계획 라운드도 complex 유지) | - |
+  | simple | complex | 1차를 끝까지 돌린 뒤 **권장 여부와 관계없이 "상세 분석 요청" 클릭 가정** → reanalysis(권장 사유 줄 + "참고: " 줄, 없으면 "상세 분석 요청") → Planner complex 고정 → 탐색부터 끝까지 | 권장 → 상세 분석 가능 / 참고 신호만 / **신호 없음 (놓침)** |
+  | simple | simple | 단순 응답으로 끝 (권장이 붙어도 누르지 않음) | **불필요한 권장** / 정상 |
+
+  KPI Agent 의 `complexity_match` 는 재분석 후 값이라 1차 오판은 report 의 "1차 복잡도 일치"·판정 흐름에서 본다. 1차 KPI 는 `flow.first_kpi` 에 따로 저장
 - 끊겨도 같은 명령이면 끝난 케이스는 건너뛴다. 처음부터: `FRESH=1`
 
 ### 5. 종료

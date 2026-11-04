@@ -388,6 +388,19 @@ def _changes(rows: list[dict], base: dict[str, dict], base_name: str, changed: b
             f'<div class="scs">{plots}</div>{_change_table(rows, base, changed)}')
 
 
+# 테스트 방식 (report 맨 위에 접어 둠). 정답 복잡도는 "사용자가 상세 분석 요청을 눌렀을지"를 정하는 데만 쓰고 에이전트 입력에는 넣지 않는다
+TEST_METHOD = """<details class="note"><summary><b>테스트 방식</b> — 정답셋 16건을 UI 와 같은 전체 흐름으로 1회씩 실행</summary>
+<table class="grid"><thead><tr><th>1차 판정 (Planner)</th><th>정답</th><th>평가에서 하는 일</th><th>채점</th></tr></thead><tbody>
+<tr><td>complex</td><td>-</td><td>그대로 끝까지 (Simulator → Verifier → Composer → KPI). Verifier 재계획 라운드도 complex 유지</td><td>-</td></tr>
+<tr><td>simple</td><td>complex</td><td>1차(단순 응답·Composer 권장)를 끝까지 돌린 뒤, <b>권장 여부와 관계없이 사용자가 "상세 분석 요청"을 눌렀다고 가정</b> →
+reanalysis 후속 입력(Composer 권장 사유 줄 + "참고: " 참고 신호 줄, 둘 다 없으면 "상세 분석 요청") → Planner 가 complex 로 고정(코드 규칙) → tool 한도를 새로 받아 탐색부터 끝까지</td>
+<td>1차 권장이 있었으면 "권장 → 상세 분석 가능", 참고 신호만이면 "참고 신호만 (권장 없음)", 없으면 <b>"신호 없음 (놓침)"</b></td></tr>
+<tr><td>simple</td><td>simple</td><td>단순 응답으로 끝 (권장·참고 신호가 붙어도 누르지 않은 것으로 봄)</td><td>권장이 붙으면 <b>"불필요한 권장"</b>, 아니면 정상</td></tr>
+</tbody></table>
+<p class="small">• 1차 KPI 는 따로 저장(<code>flow.first_kpi</code>), 표의 KPI 는 마지막 결과 기준. KPI Agent 의 복잡도 일치(<code>complexity_match</code>)는 재분석 후 값이라 1차 오판이 드러나지 않으므로, 1차 오판은 1-1 "1차 복잡도 일치"와 2장 판정 흐름에서 본다.
+• 케이스당 1회 실행이라 LLM 응답 편차가 섞여 있다. • 재분석 내용 원문은 케이스 기록(<code>&lt;케이스&gt;.md</code>)에 있다.</p></details>"""
+
+
 def write_report(run_dir: Path, baseline_dir: Path | None = None) -> Path:
     rows = load(run_dir)
     base_rows = load(baseline_dir) if baseline_dir and baseline_dir.exists() else []
@@ -421,6 +434,7 @@ h1{{font-size:22px;margin:0}}h2{{font-size:16px;margin:36px 0 4px}}h2+p{{margin:
 .tiles{{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:10px}}
 .tile{{background:var(--surface);border:1px solid var(--ring);border-left:4px solid var(--ink);padding:10px 12px}}
 .tl{{font-size:12px;color:var(--ink2)}}.tv{{font-size:26px;font-weight:650;font-variant-numeric:tabular-nums}}.tn{{font-size:11px;color:var(--muted)}}
+.note{{background:var(--surface);border:1px solid var(--ring);padding:10px 14px;margin:14px 0}}.note summary{{cursor:pointer}}
 .delta{{display:inline-block;margin-top:4px;font-size:12px;font-weight:600}}.delta.good{{color:var(--good)}}.delta.bad{{color:var(--bad)}}
 table{{border-collapse:collapse;width:100%;background:var(--surface);border:1px solid var(--ring)}}th,td{{padding:6px 9px;border-bottom:1px solid var(--line);text-align:left;vertical-align:top}}
 thead th{{font-size:12px;color:var(--ink2);font-weight:600;background:var(--page);white-space:nowrap}}tbody th{{font-weight:600;white-space:nowrap}}
@@ -447,6 +461,7 @@ a{{color:inherit}}@media (max-width:760px){{.cbody{{grid-template-columns:1fr}}.
 </style></head><body><main>
 <header><h1>{html.escape(title)}</h1><div class="meta">정답셋 {len(rows)}건 · UI 와 같은 전체 흐름 (Planner → … → Composer → KPI Agent)
 {f" · 기준 실행 <b>{html.escape(baseline_dir.name)}</b> ({len(base_rows)}건)과 비교" if base_rows else ""} · 생성 {datetime.now():%Y-%m-%d %H:%M}</div></header>
+{TEST_METHOD}
 
 <h2>1. 한눈에 — KPI Agent 지표</h2><p>KPI Agent 가 케이스마다 낸 지표의 평균 (정의: <code>docs/SE_kpi-agent-design.md</code>). 핵심 = [변경] 노드 정밀도 · [변경] 재현율 · 노드 탐지율 (16건 합산), 참고 = Critical 미탐률 · 노드 정밀도, 판정 = Planner·Simulator·Composer 판정 일치, 성능 = 실행 로그.{" KPI 측정 방식이 기준 실행과 달라 이 절은 비교하지 않는다." if changed else " 증감은 기준 실행 대비 (✓ 개선 · ! 악화)." if base_rows else ""}</p>
 {kpi_html}
