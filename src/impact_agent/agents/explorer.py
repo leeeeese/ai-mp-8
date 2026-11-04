@@ -67,6 +67,9 @@ MIN_SCORE = 0.5  # 이보다 낮은 후보는 시작 노드로 쓰지 않음 (�
 RELATIVE_SCORE = 0.8  # 1등 점수 대비 이 비율 이상인 후보까지 시작 노드로 채택
 MAX_START_PER_MENTION = 3
 MAX_CONTEXT_PATHS = 40  # ReAct 입력에 보여 줄 경로 수
+ENTRY_HOPS = 4  # 진입점 없이 시작한 경로의 첫 노드에서 호출 관계를 거슬러 진입점(화면·배치)을 찾는 최대 단계
+CALLER_EDGES = ("CALLS", "INVOKES", "EXECUTES")  # 호출하는 쪽 → 호출되는 쪽
+EXTEND_WRITES = True  # 쓰기 접근에서 끝난 경로를 쓰는 테이블까지 (_extend_writes_to_tables)
 UNSUPPORTED_PER_START = 2  # 매칭 근거 없는 출발 노드에서 언급 노드를 지나지 않는 경로 상한 (v6-1: 정답 경로 재현율 손실 없이 줄어듦)
 CODE_VALUE = re.compile(r"문구|사유|코드값|코드 값|설정값|공통코드")  # 공통코드에 담기는 값 (Column 언급)
 CODE_TABLE_TERMS = ["공통코드", "공통 코드"]
@@ -341,6 +344,84 @@ class ExplorerAgent(BaseAgent[ExplorerOutput]):
             out.paths.append(ExplorePath(item_id=item_id, nodes=nodes, direction=direction,
                                          reached_role=p.reached_role, stop_reason=p.stop_reason))
 
+    def _entry_chain(self, node_id: str) -> list[str] | None:
+        """node_id 를 호출하는 가장 가까운 진입점(화면·배치)까지의 노드 [진입점, …, node_id]. 공통 노드는 거치지 않고, 같은 거리면 ID 순."""
+        prev: dict[str, str] = {node_id: ""}
+        frontier = [node_id]
+        for _ in range(ENTRY_HOPS):
+            nxt = []
+            for nid in frontier:
+                for e in sorted(self.store.in_edges(nid), key=lambda x: x.from_id):
+                    src = self.store.node(e.from_id)
+                    if e.type not in CALLER_EDGES or e.from_id in prev or src is None or src.properties.get("is_common"):
+                        continue
+                    prev[e.from_id] = nid
+                    if src.role is NodeRole.ENTRY:
+                        chain = [e.from_id]
+                        while chain[-1] != node_id:
+                            chain.append(prev[chain[-1]])
+                        return chain
+                    nxt.append(e.from_id)
+            frontier = nxt
+        return None
+
+    def _extend_to_entries(self, out: ExplorerOutput) -> None:
+        """진입점 없이 처리(EntryHandler·Logic·DataAccess)에서 시작한 경로 앞에 그 처리를 부르는 가장 가까운 진입점을 잇는다.
+        경로는 지우거나 늘리지 않고 앞만 붙인다 (Simulator 영역 배정·진입점 수 신호가 진입 노드를 쓰기 때문, 파트너 요청 6-1)."""
+        chains: dict[str, list[str] | None] = {}
+        known_n, known_e = {n.node_id for n in out.nodes}, {(e.from_id, e.to_id, e.type) for e in out.edges}
+        codes = {x.node_id for x in out.start_nodes if x.reason.startswith("공통코드")}
+        extended = 0
+        for i, p in enumerate(out.paths):
+            first = self.store.node(p.nodes[0])
+            if first is None or first.role not in (NodeRole.ENTRY_HANDLER, NodeRole.LOGIC, NodeRole.DATA_ACCESS):
+                continue
+            if first.properties.get("is_common") or codes & set(p.nodes):  # 공통 처리는 부르는 곳이 많아 한 곳을 고르면 틀린 진입점이 됨
+                continue
+            if p.nodes[0] not in chains:
+                chains[p.nodes[0]] = self._entry_chain(p.nodes[0])
+            chain = chains[p.nodes[0]]
+            if not chain or any(n in p.nodes for n in chain[:-1]):
+                continue
+            for a, b in zip(chain, chain[1:]):
+                for e in self.store.out_edges(a):
+                    if e.to_id == b and e.type in CALLER_EDGES and (e.from_id, e.to_id, e.type) not in known_e:
+                        out.edges.append(e)
+                        known_e.add((e.from_id, e.to_id, e.type))
+            for n in chain[:-1]:
+                if n not in known_n and (node := self.store.node(n)):
+                    out.nodes.append(node)
+                    known_n.add(n)
+            out.paths[i] = p.model_copy(update={"nodes": [*chain[:-1], *p.nodes]})
+            extended += 1
+        if extended:
+            trace(f"진입점 없이 시작한 경로 {extended}개 앞에 진입점 연결 ({', '.join(sorted({c[0] for c in chains.values() if c}))})",
+                  section=self._section, label="경로 정리")
+
+    def _extend_writes_to_tables(self, out: ExplorerOutput) -> None:
+        """데이터 접근에서 끝난 경로가 테이블 하나에 쓰면(WRITES) 그 테이블까지 잇는다. 목표가 Logic·DataAccess 인 항목도
+        갱신되는 데이터는 영향 범위라서 (읽기만 하는 접근은 잇지 않음)."""
+        known_n, known_e = {n.node_id for n in out.nodes}, {(e.from_id, e.to_id, e.type) for e in out.edges}
+        extended = 0
+        for i, p in enumerate(out.paths):
+            last = self.store.node(p.nodes[-1])
+            if last is None or last.role is not NodeRole.DATA_ACCESS:
+                continue
+            writes = [e for e in self.store.out_edges(p.nodes[-1]) if e.type == "WRITES"]
+            if len(writes) != 1 or writes[0].to_id in p.nodes:
+                continue
+            e = writes[0]
+            if e.to_id not in known_n and (node := self.store.node(e.to_id)):
+                out.nodes.append(node)
+                known_n.add(e.to_id)
+            if (e.from_id, e.to_id, e.type) not in known_e:
+                out.edges.append(e)
+                known_e.add((e.from_id, e.to_id, e.type))
+            out.paths[i] = p.model_copy(update={"nodes": [*p.nodes, e.to_id], "reached_role": NodeRole.TABLE})
+            extended += 1
+        if extended:
+            trace(f"쓰기 접근에서 끝난 경로 {extended}개를 쓰는 테이블까지 연결", section=self._section, label="경로 정리")
+
     def _extend_to_columns(self, out: ExplorerOutput) -> None:
         """데이터 접근·테이블에서 끝난 경로가 언급 매칭 컬럼의 테이블을 읽거나 쓰면 테이블·컬럼까지 잇는다 (같은 항목의 언급만)."""
         cols: dict[int, dict[str, str]] = {}  # 항목 → 테이블 → 컬럼
@@ -383,6 +464,8 @@ class ExplorerAgent(BaseAgent[ExplorerOutput]):
 
     def _arrange_paths(self, plan: PlannerOutput, out: ExplorerOutput, supplements: list[ExplorePath] = ()) -> None:
         self._extend_to_columns(out)
+        if EXTEND_WRITES:
+            self._extend_writes_to_tables(out)
         focus = {s.node_id for s in out.start_nodes}  # 언급으로 찾았거나 ReAct·재탐색이 고른 노드
         # 언급 검색으로 매칭된 노드 + Retriever 가 원문 근거로 재탐색을 요청한 노드 (ReAct 가 고른 노드는 점수 없음)
         matched = {s.node_id for s in out.start_nodes if s.score} | self._evidence_starts
@@ -422,6 +505,15 @@ class ExplorerAgent(BaseAgent[ExplorerOutput]):
                 continue
             seen.add(key)
             kept.append(p)
+
+        # 2-1) 진입점 없이 시작한 경로 앞에 진입점 (컬럼 합치기·포함 경로 정리가 끝난 뒤 앞만 붙임, 같아진 경로는 하나만)
+        out.paths = kept
+        self._extend_to_entries(out)
+        kept, seen = [], set()
+        for p in out.paths:
+            if (p.item_id, tuple(p.nodes)) not in seen:
+                seen.add((p.item_id, tuple(p.nodes)))
+                kept.append(p)
 
         # 3) 매칭 근거 없는 출발 노드에서 언급 노드를 하나도 지나지 않는 경로는 출발 노드당 UNSUPPORTED_PER_START 개까지
         def support(p: ExplorePath) -> int:  # 언급 검색으로 매칭됐거나 요건 표현이 들어 있는 노드 수 (출발 노드 포함)

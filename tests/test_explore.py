@@ -375,3 +375,34 @@ def test_reexplore_request_nodes_are_not_capped(env):
     agent._arrange_paths(p, out)
     assert len(out.paths) == 3
 
+
+
+def test_path_without_entry_gets_nearest_entry_prefix_and_write_table(env):
+    # 진입점 없이 처리에서 시작한 경로는 앞에 가장 가까운 진입점을, 쓰기 접근에서 끝나면 쓰는 테이블을 잇는다 (경로 수는 그대로)
+    store, _ = env
+    p = plan([item(ChangeType.LOGIC_CHANGE, [Mention(kind=MentionKind.FUNCTION, phrase="주문 저장")], Direction.FORWARD, NodeRole.LOGIC)])
+    path = ["SVC:OrdService.save", "SVC:OrdService.saveItem", "SQL:OrdMapper.insert"]
+    out = ExplorerOutput(start_nodes=[StartNodeChoice(item_id=1, node_id=path[0], matched_keyword="주문 저장", match_source=MatchSource.TEXT,
+                                                      score=1.0, reason="r")],
+                         nodes=[store.node(n) for n in path], edges=[],
+                         paths=[ExplorePath(item_id=1, nodes=path, direction=Direction.FORWARD, reached_role=NodeRole.LOGIC,
+                                            stop_reason=StopReason.TARGET_REACHED)])
+    agent = ExplorerAgent(store=store)
+    agent._evidence_starts, agent._section = set(), "t"
+    agent._arrange_paths(p, out)
+    assert [q.nodes for q in out.paths] == [["SCR:ORD01", "CTL:OrdController.save", *path, "TBL:TOR_ORD"]]
+    assert {"SCR:ORD01", "TBL:TOR_ORD"} <= {n.node_id for n in out.nodes}
+
+
+def test_common_code_path_keeps_no_entry_prefix(env):
+    # 공통 처리(공통코드 조회)는 부르는 화면이 많아 한 곳을 골라 붙이지 않는다
+    store, _ = env
+    p = plan([item(ChangeType.SCREEN_CHANGE, [Mention(kind=MentionKind.COLUMN, phrase="안내 문구")], Direction.FORWARD, NodeRole.ENTRY_HANDLER)])
+    path = ["CTL:CmmCdController.get", "SQL:CmmCdMapper.list", "TBL:TCM_CMM_CD"]
+    out = ExplorerOutput(start_nodes=[], nodes=[store.node(n) for n in path], edges=[],
+                         paths=[ExplorePath(item_id=1, nodes=path, direction=Direction.REVERSE, reached_role=NodeRole.ENTRY_HANDLER,
+                                            stop_reason=StopReason.TARGET_REACHED)])
+    agent = ExplorerAgent(store=store)
+    agent._evidence_starts, agent._section = set(), "t"
+    agent._arrange_paths(p, out)
+    assert out.paths[0].nodes == path
