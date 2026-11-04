@@ -146,7 +146,11 @@ const M = [
   { k: "unneeded", n: "불필요한 권장 (건)", s: -1 },
   { k: "se_seconds", n: "SE 구간 시간 (초)", s: -1 },
   { k: "se_tokens", n: "SE 토큰", s: -1 },
+  { k: "total_seconds", n: "전체 시간 (초)", s: -1 },
+  { k: "result_paths", n: "결과 경로 수 (합)", s: -1 },
 ];
+const E2E = META.from === "e2e";
+const upstreamText = m => m.from === "e2e" ? "e2e (회차마다 전체 흐름)" : `상류 고정 ${m.from}`;
 const KINDS = ["경로에 없음 (상류)", "LLM 입력 밖 (경로 상한)", "판정 누락 (기본값 [참조])", "LLM 이 [참조] 판정", "표시 없음"];
 const NS = "http://www.w3.org/2000/svg";
 const el = (t, a = {}, p) => { const e = document.createElementNS(NS, t); for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); if (p) p.appendChild(e); return e; };
@@ -169,7 +173,7 @@ const cases = Object.keys(REPS[0].cases);
 const sumc = (r, f) => Object.values(r.cases).reduce((a, c) => a + f(c), 0);
 
 document.getElementById("title").textContent = `SE 반복 실험 ${META.exp_id}` + (META.label ? ` · ${META.label}` : "");
-document.getElementById("sub").textContent = `상류 고정 ${META.from} · ${REPS.length}회 반복 · 케이스 ${cases.length}건 · 코드 ${META.commit} · ${META.updated}`;
+document.getElementById("sub").textContent = `${upstreamText(META)} · ${REPS.length}회 반복 · 케이스 ${cases.length}건 · 코드 ${META.commit} · ${META.updated}`;
 
 // --- 타일 ---
 const T = k => stat(vals(REPS, k));
@@ -178,7 +182,9 @@ const tiles = [
   ["[변경] 노드 정밀도 (주 지표)", T("change_precision").mean.toFixed(3), `범위 ${T("change_precision").lo.toFixed(3)} ~ ${T("change_precision").hi.toFixed(3)}`],
   ["[변경] 재현율", T("change_recall").mean.toFixed(3), `맞힌 수 ${Math.min(...hits)}~${Math.max(...hits)} / ${tot}`],
   ["노드 탐지율", T("node_recall").mean.toFixed(3), `범위 ${T("node_recall").lo.toFixed(3)} ~ ${T("node_recall").hi.toFixed(3)}`],
-  ["SE 구간 시간", `${Math.round(T("se_seconds").mean)}초`, `범위 ${Math.round(T("se_seconds").lo)}~${Math.round(T("se_seconds").hi)}초 · 토큰 평균 ${Math.round(T("se_tokens").mean).toLocaleString("ko-KR")}`],
+  E2E && T("total_seconds")
+    ? ["전체 시간 (16건 합)", `${Math.round(T("total_seconds").mean)}초`, `범위 ${Math.round(T("total_seconds").lo)}~${Math.round(T("total_seconds").hi)}초 · 경로 수 ${Math.round(T("result_paths").lo)}~${Math.round(T("result_paths").hi)}`]
+    : ["SE 구간 시간", `${Math.round(T("se_seconds").mean)}초`, `범위 ${Math.round(T("se_seconds").lo)}~${Math.round(T("se_seconds").hi)}초 · 토큰 평균 ${Math.round(T("se_tokens").mean).toLocaleString("ko-KR")}`],
 ];
 document.getElementById("tiles").innerHTML = tiles.map(([l, v, n]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v}</div><div class="note">${n}</div></div>`).join("");
 
@@ -224,7 +230,8 @@ document.getElementById("metricTbl").innerHTML = `<thead><tr><th class="l">지�
 // --- 이전 실험 대비 ---
 if (BASE && BASE.repeats.length) {
   document.getElementById("cmpSec").hidden = false;
-  document.getElementById("cmpDesc").textContent = `${BASE.meta.exp_id}${BASE.meta.label ? " · " + BASE.meta.label : ""} (상류 ${BASE.meta.from}, ${BASE.repeats.length}회) 대비. 판정: 평균 차이가 두 실험의 회차 범위(최대-최소) 중 큰 값보다 크면 개선·악화, 아니면 편차 안.` + (BASE.meta.from !== META.from ? " ⚠️ 상류가 달라 직접 비교가 어렵습니다." : "");
+  document.getElementById("cmpDesc").textContent = `${BASE.meta.exp_id}${BASE.meta.label ? " · " + BASE.meta.label : ""} (${upstreamText(BASE.meta)}, ${BASE.repeats.length}회) 대비. 판정: 평균 차이가 두 실험의 회차 범위(최대-최소) 중 큰 값보다 크면 개선·악화, 아니면 편차 안.` +
+    (BASE.meta.from !== META.from ? (BASE.meta.from === "e2e" || E2E ? " ⚠️ 한쪽은 e2e, 한쪽은 상류 고정이라 탐지율·경로 수·시간 차이에는 상류 변동이 섞입니다. SE 판정 지표 위주로 보세요." : " ⚠️ 상류가 달라 직접 비교가 어렵습니다.") : "");
   document.getElementById("cmpTbl").innerHTML = `<thead><tr><th class="l">지표</th><th>이전 평균 (범위)</th><th>이번 평균 (범위)</th><th>차이</th><th class="l">판정</th></tr></thead><tbody>` +
     M.map(m => {
       const b = stat(vals(BASE.repeats, m.k)), a = stat(vals(REPS, m.k));
@@ -272,7 +279,9 @@ document.getElementById("fps").innerHTML = fps.map(f => `<li>${f.case} <code>${f
   document.getElementById("caseTbl").innerHTML = head + `<tbody>${body}</tbody>`;
 })();
 
-document.getElementById("foot").textContent = `scripts/SE/run_experiment.py 결과 (outputs/runs/SE/experiments/${META.exp_id}/experiment.json). 상류(Planner·Explorer·Retriever)는 ${META.from} 그대로, SE 구간(Simulator·Verifier·Composer·KPI)만 회차마다 다시 실행 (재계획 미실행). [변경] 노드 정밀도·재현율은 케이스별 TP·FP·맞힌 수를 합산한 비율, 그 밖의 비율 지표는 케이스 평균.`;
+document.getElementById("foot").textContent = `scripts/SE/run_experiment.py 결과 (outputs/runs/SE/experiments/${META.exp_id}/experiment.json). ` +
+  (E2E ? "회차마다 전체 흐름(Planner → Explorer ⇄ Retriever → Simulator → Verifier → Composer → KPI, 재계획 포함)을 새로 실행 (run_scenarios.py 와 같음)."
+       : `상류(Planner·Explorer·Retriever)는 ${META.from} 그대로, SE 구간(Simulator·Verifier·Composer·KPI)만 회차마다 다시 실행 (재계획 미실행).`) + ` [변경] 노드 정밀도·재현율은 케이스별 TP·FP·맞힌 수를 합산한 비율, 그 밖의 비율 지표는 케이스 평균.`;
 </script>
 </body>
 </html>

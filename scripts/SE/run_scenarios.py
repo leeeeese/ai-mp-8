@@ -335,39 +335,35 @@ def summary_md(summary: list[dict]) -> str:
     return "\n".join(L) + "\n"
 
 
-def main() -> None:
-    ap = argparse.ArgumentParser()
-    ap.add_argument("cases", nargs="+")
-    ap.add_argument("--run-id", default=datetime.now().strftime("%Y%m%d-%H%M"))
-    ap.add_argument("--fresh", action="store_true", help="이미 끝난 케이스도 다시 실행 (기본은 이어서 실행)")
-    ap.add_argument("--rebuild", action="store_true", help="실행 없이 저장된 state.json 으로 md·summary 만 다시 만듦")
-    args = ap.parse_args()
-    out_dir = ROOT / "outputs" / "runs" / "SE" / args.run_id
-    out_dir.mkdir(parents=True, exist_ok=True)
+def run_all(cases: list[str], out_dir: Path, fresh: bool = False, rebuild: bool = False) -> list[dict]:
+    """cases 를 전체 흐름으로 실행해 out_dir 에 기록하고 summary 를 돌려준다 (run_experiment.py --e2e 도 부른다).
 
-    # 이어서 실행: 케이스가 끝날 때마다 summary 를 저장하므로, 중간에 끊겨도 다시 돌리면 끝난 케이스는 건너뛴다
+    이어서 실행: 케이스가 끝날 때마다 summary 를 저장하므로, 중간에 끊겨도 다시 돌리면 끝난 케이스는 건너뛴다.
+    rebuild 면 실행 없이 저장된 state.json 으로 md·summary 만 다시 만든다 (지연·흐름은 summary 의 값).
+    """
+    out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / "summary.json"
-    summary = [] if args.fresh or not path.exists() else json.loads(path.read_text(encoding="utf-8"))
+    summary = [] if fresh or not path.exists() else json.loads(path.read_text(encoding="utf-8"))
 
     def save() -> None:
-        order = {c: i for i, c in enumerate(args.cases)}
+        order = {c: i for i, c in enumerate(cases)}
         summary.sort(key=lambda s: order.get(s["case"], len(order)))
         path.write_text(json.dumps(summary, ensure_ascii=False, indent=2), encoding="utf-8")
         (out_dir / "summary.md").write_text(summary_md(summary), encoding="utf-8")
 
-    if args.rebuild:  # 저장된 state.json 으로 다시 만들기 (지연·흐름은 summary 의 값)
+    if rebuild:
         old = {s["case"]: s for s in summary if "error" not in s}
         summary = [record(c, json.loads((GT_DIR / f"{c}.json").read_text(encoding="utf-8")),
                           AgentState.model_validate_json((out_dir / f"{c}.state.json").read_text(encoding="utf-8")),
                           old[c]["result"]["latency_s"], old[c]["flow"], out_dir)
-                   for c in args.cases if c in old]
+                   for c in cases if c in old]
         save()
         print(f"다시 만듦: {out_dir} ({len(summary)}건)")
-        return
+        return summary
     done = {s["case"] for s in summary if "error" not in s}
     summary = [s for s in summary if s["case"] in done]
 
-    for case in args.cases:
+    for case in cases:
         if case in done:
             print(f"[{case}] 이미 완료 — 건너뜀", flush=True)
             continue
@@ -388,6 +384,17 @@ def main() -> None:
               f"탐지율 {fmt(k.get('node_recall'))}  [변경] 정밀도 {fmt(k.get('change_node_precision'))}  노드 정밀도 {fmt(k.get('node_precision'))}", flush=True)
     save()
     print(f"기록: {out_dir}")
+    return summary
+
+
+def main() -> None:
+    ap = argparse.ArgumentParser()
+    ap.add_argument("cases", nargs="+")
+    ap.add_argument("--run-id", default=datetime.now().strftime("%Y%m%d-%H%M"))
+    ap.add_argument("--fresh", action="store_true", help="이미 끝난 케이스도 다시 실행 (기본은 이어서 실행)")
+    ap.add_argument("--rebuild", action="store_true", help="실행 없이 저장된 state.json 으로 md·summary 만 다시 만듦")
+    args = ap.parse_args()
+    run_all(args.cases, ROOT / "outputs" / "runs" / "SE" / args.run_id, args.fresh, args.rebuild)
 
 
 if __name__ == "__main__":

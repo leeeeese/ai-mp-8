@@ -326,12 +326,13 @@ pytest tests/test_kpi.py tests/test_kpi_judgement.py                        # �
 PYTHONPATH=src python3 scripts/SE/run_scenarios.py <16건> --run-id <run>                       # 상류 기준 run (전체 흐름 1회)
 PYTHONPATH=src python3 scripts/SE/run_experiment.py --from <run> --repeat 3 --exp-id <기준 실험> --label "기준"
 PYTHONPATH=src python3 scripts/SE/run_experiment.py --from <run> --repeat 3 --exp-id <새 실험> --label "<변경>" --compare <기준 실험>
+PYTHONPATH=src python3 scripts/SE/run_experiment.py --e2e --repeat 3 --exp-id <e2e 실험> --label "e2e"      # 상류 고정 없이 전체 흐름 반복
 ```
 
-- 출력: `outputs/runs/SE/experiments/<exp_id>/r1…rN/`(회차별, `run_scenarios.py` 형식), `experiment.md`·`experiment.json`
-- 지표: [변경] 노드 정밀도(주 지표)·[변경] 재현율·탐지율·태그 정확도·난이도·영역 일치·불필요한 권장·노드 정밀도(참고)·SE 시간·토큰의 회차 평균·범위, 케이스별 회차 값, 놓친 [변경] 노드 분류(경로에 없음 / LLM 입력 밖 / 판정 누락 / LLM 이 [참조] 판정 / 표시 없음), [변경] 오탐 빈도
-- 비교 판정: 평균 차이가 두 실험의 회차 범위 중 큰 값보다 크면 개선·악화, 아니면 편차 안. 비교할 실험은 같은 `--from` 이어야 한다 (다르면 경고)
-- 재계획은 실행하지 않는다 (`scripts/SE/replay_run.py` 와 같음)
+- 모드: 상류 고정(`--from <run>`)은 SE 구간만 반복해 SE 변경 효과를 본다 (재계획 미실행, `scripts/SE/replay_run.py` 와 같음). e2e(`--e2e`)는 회차마다 전체 흐름(재계획 포함, `run_scenarios.py` 와 같음)을 새로 실행해 에이전트 전체 성능과 상류까지 포함한 실행 편차를 본다. 케이스를 생략하면 e2e 는 정답셋 16건
+- 출력: `outputs/runs/SE/experiments/<exp_id>/r1…rN/`(회차별, `run_scenarios.py` 형식), `experiment.md`·`experiment.json`·`experiment.html`(`scripts/SE/experiment_html.py`)
+- 지표: [변경] 노드 정밀도(주 지표)·[변경] 재현율·탐지율·태그 정확도·난이도·영역 일치·불필요한 권장·노드 정밀도(참고)·SE 시간·토큰·전체 시간·결과 경로 수의 회차 평균·범위, 케이스별 회차 값, 놓친 [변경] 노드 분류(경로에 없음 / LLM 입력 밖 / 판정 누락 / LLM 이 [참조] 판정 / 표시 없음), [변경] 오탐 빈도
+- 비교 판정: 평균 차이가 두 실험의 회차 범위 중 큰 값보다 크면 개선·악화, 아니면 편차 안. 비교할 실험은 모드·상류가 같아야 한다 (다르면 경고. e2e 와 상류 고정을 비교하면 탐지율·경로 수·시간 차이에 상류 변동이 섞인다)
 
 | 확인 | 내용 |
 |---|---|
