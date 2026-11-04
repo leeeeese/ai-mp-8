@@ -13,6 +13,7 @@
     r1 … rN/            회차별 기록 (run_scenarios.py 와 같은 형식: <case>.md · <case>.state.json · summary.json)
     experiment.json     설정(상류 run · 회차 · git 커밋) · 회차별 지표 · 케이스별 회차 값 · 놓친 [변경] 노드 분류
     experiment.md       지표 평균·범위 · 케이스 안정성 · 놓친 [변경] 노드 분류 · (--compare) 이전 실험 대비
+    experiment.html     같은 내용을 한 페이지로 (scripts/SE/experiment_html.py)
 """
 
 import argparse
@@ -25,6 +26,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 
+from experiment_html import write_html  # noqa: E402
 from replay_run import RUNS, replay_all  # noqa: E402
 from run_scenarios import GT_DIR, ROOT  # noqa: E402
 
@@ -237,7 +239,8 @@ def main() -> None:
             print(f"주의: 비교 실험의 상류({base['meta'].get('from')})가 이번({meta['from']})과 다릅니다", flush=True)
     meta_path.write_text(json.dumps({"meta": meta, **data}, ensure_ascii=False, indent=2), encoding="utf-8")
     (exp_dir / "experiment.md").write_text(report(meta, data, base), encoding="utf-8")
-    print(f"기록: {exp_dir / 'experiment.md'}")
+    html = write_html(args.exp_id, args.compare if base else None)
+    print(f"기록: {exp_dir / 'experiment.md'} · {html}")
 
 
 if __name__ == "__main__":
