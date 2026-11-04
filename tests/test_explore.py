@@ -273,6 +273,19 @@ def test_tool_budget_is_respected(env, monkeypatch):
     assert [e.node_id for e in state.retriever.evidence] == ["SCR:ORD01"] and state.explore_loop_count == 1
 
 
+def test_mention_searches_are_capped_per_item(env, monkeypatch):
+    # 언급이 많아도 항목당 언급 검색은 상한까지만 (앞 언급 우선), 생략한 언급은 tool_limit 미해결로 남기고 탐색·Retriever 몫은 남는다
+    from impact_agent import rules
+    from impact_agent.agents import explorer as explorer_mod
+
+    monkeypatch.setattr(explorer_mod, "RULE_SEARCH_BUDGET", 2)
+    mentions = [Mention(kind=MentionKind.SCREEN, phrase="주문 등록")] + [Mention(kind=MentionKind.TERM, phrase=f"없는 표현 {i}") for i in range(6)]
+    state = analyze(supervisor(env, plan([item(ChangeType.DATA_ADD, mentions, Direction.FORWARD, NodeRole.TABLE)])))
+    assert state.explorer.tool_call_count == 3  # 검색 2 + 탐색 1
+    assert sum(u.kind == "tool_limit" for u in state.explorer.unresolved_items) == 5
+    assert state.explorer.paths and rules.RULE_SEARCH_BUDGET == 12
+
+
 def test_same_search_runs_once(env):
     # 두 항목이 같은 언급 표현을 가지면 검색 tool 은 한 번만 부른다
     mentions = [Mention(kind=MentionKind.SCREEN, phrase="주문 등록")]

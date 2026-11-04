@@ -69,3 +69,27 @@ def test_replan_keeps_complex():
     out = PlannerAgent(llm=FakeLLM(Complexity.SIMPLE)).run(s)
     assert out.complexity is Complexity.COMPLEX and out.complexity_reason.startswith("재계획 (복잡 흐름 유지) 1차")
     assert AgentName.SIMULATOR in {p.agent for p in out.plan}
+
+
+def test_identifier_in_request_becomes_mention_when_llm_omits_it():
+    # 요청 문장의 식별번호(상품코드·화면 ID)가 언급에 없으면 코드가 Term 언급으로 더한다 (있으면 그대로)
+    st = AgentState(user_input=UserInput(request_text="안내 화면(ZCMBSS0100010) 에서 NA00004184 상품 문구를 바꿔 주세요",
+                                         sm_part=SmPart.PRODUCT))
+    out = PlannerAgent(llm=FakeLLM()).run(st)
+    phrases = [m.phrase for m in out.items[0].mentions]
+    assert phrases == ["안내 화면", "ZCMBSS0100010", "NA00004184"]
+    assert all(m.kind is MentionKind.TERM for m in out.items[0].mentions[1:])
+    out = PlannerAgent(llm=FakeLLM()).run(state())           # 식별번호가 없으면 그대로
+    assert [m.phrase for m in out.items[0].mentions] == ["안내 화면"]
+
+
+def test_identifier_inside_long_phrase_still_added():
+    # 긴 표현 안에만 있는 번호는 따로 선 언급으로 더한다
+    st = AgentState(user_input=UserInput(request_text="안내 화면에서 NA00004184 상품 문구를 바꿔 주세요", sm_part=SmPart.PRODUCT))
+    llm = FakeLLM()
+    out = PlannerAgent(llm=llm).run(st)
+    out.items[0].mentions[0].phrase = "안내 화면(NA00004184)"
+    from impact_agent.agents.planner import ensure_identifier_mentions
+    out.items[0].mentions = out.items[0].mentions[:1]
+    assert ensure_identifier_mentions(out, st.user_input.request_text) == ["NA00004184"]
+

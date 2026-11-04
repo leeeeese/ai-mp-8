@@ -4,6 +4,8 @@ LLM 은 요건 항목 분리·변경 유형·언급 표현(동의어·의미 힌
 복잡도는 프롬프트의 판정 예시로 기준을 준다 (Few-shot, Brown et al. 2020).
 재계획이면 이전 탐색 명세와 누적된 누락 사유(replan_feedback)를 함께 넘긴다 (Reflexion, Shinn et al. 2023).
 목표 역할·방향·hop 상한(rules.CHANGE_TYPE_RULES), 실행 계획, 탐색 영역(rules.SM_PART_DOMAINS)은 코드가 정한다.
+요청 문장의 식별번호(상품코드·화면 ID·프로그램 ID 등 영문+숫자)가 어떤 언급에도 없으면 코드가 Term 언급으로 더한다
+(LLM 이 실행마다 언급을 빼먹는 편차 보정, v6-3 M-2 상품코드 누락).
 노드 ID 는 정하지 않는다 (그래프를 모르는 상태에서 판단). 복잡도는 요건 문장에서 확인되는 것만으로 판정한다.
 
 사용자 상세 분석 요청: 마지막 후속 입력이 reanalysis(결과 화면의 상세 분석 권장을 사용자가 확인)면
@@ -12,6 +14,7 @@ Verifier 재계획 라운드(이전 판정 complex + replan_feedback)도 complex
 """
 
 import os
+import re
 
 from pydantic import BaseModel, Field
 
@@ -111,6 +114,27 @@ def build_output(draft: PlannerDraft, state: AgentState) -> PlannerOutput:
 
 
 LLM_SECTION = "동작 · LLM 판정"
+# 시스템 ID 형태: 영문 2자 이상 + 숫자 4자리 이상 (상품코드 NA00004184 · 화면 ID ZCMBSS0100010 · TOSCP0210M).
+# 영문 1자 + 숫자(사번 A11855 · 캠페인 C260900301 같은 데이터 값)는 그래프에 없으므로 넣지 않는다
+IDENTIFIER = re.compile(r"(?<![A-Za-z0-9])[A-Z]{2,8}\d{4,}[A-Z0-9]*(?![A-Za-z0-9])")
+
+
+def ensure_identifier_mentions(out: PlannerOutput, request_text: str) -> list[str]:
+    """요청 문장의 식별번호가 따로 선 언급(표현·동의어 그대로)으로 없으면, 그 번호가 들어 있는 항목(없으면 첫 항목)에 Term 언급으로 더한다.
+    "휴대폰결제 이용동의(NA00004184) 해지" 처럼 긴 표현 안에만 있으면 번호로 찾지 못하므로 따로 더한다 (v6-3 M-2)."""
+    if not out.items:
+        return []
+    said = {t for it in out.items for m in it.mentions for t in (m.phrase, *m.synonyms, m.confirmed_node or "")}
+    added = []
+    for ident in dict.fromkeys(IDENTIFIER.findall(request_text)):
+        if ident in said:
+            continue
+        item = next((it for it in out.items if ident in it.text), out.items[0])
+        item.mentions.append(Mention(kind=MentionKind.TERM, phrase=ident, maybe_new=False, synonyms=[]))
+        added.append(ident)
+    return added
+
+
 REANALYSIS_REASON = "사용자 상세 분석 요청"
 REPLAN_REASON = "재계획 (복잡 흐름 유지)"
 
@@ -178,6 +202,8 @@ class PlannerAgent(BaseAgent[PlannerOutput]):
         draft, self.last_usage = self.llm.parse(self.system_prompt, user, PlannerDraft)
         trace(f"LLM 판단 {draft.complexity.value} · 항목 {len(draft.items)}개 · 공통 제외 {draft.exclude_common}", section=LLM_SECTION, label="응답")
         out = apply_reanalysis(build_output(draft, state), state)
+        if added := ensure_identifier_mentions(out, state.user_input.request_text):
+            trace(f"요청 문장의 식별번호를 언급으로 추가: {', '.join(added)}", section=LLM_SECTION, label="언급 보정")
         if out.complexity is not draft.complexity or state.followups or state.replan_feedback:
             trace(f"최종 {out.complexity.value}" + (" (코드 규칙으로 변경)" if out.complexity is not draft.complexity else ""), section=LLM_SECTION, label="규칙 적용")
         return out

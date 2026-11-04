@@ -53,6 +53,55 @@ def _mean(xs: list) -> float | None:
     return sum(xs) / len(xs) if xs else None
 
 
+# 하류(Simulator·Verifier·Composer·KPI) 결과에 달린 지표. 기준 실행과 KPI 측정 방식이 다르면 증감을 보이지 않는다
+DOWNSTREAM = {"over", "miss", "crec", "latency", "tokens"}
+
+
+def kpi_changed(rows: list[dict], base_rows: list[dict]) -> bool:
+    """KPI 측정 방식이 바뀌었나: 2026-11-03 SE KPI 개편([변경] 노드 정밀도 추가) 전후를 change_node_precision 기록 여부로 가린다."""
+    has = lambda rs: any("change_node_precision" in (s.get("kpi") or {}) for s in rs)  # noqa: E731
+    return bool(base_rows) and has(rows) != has(base_rows)
+
+
+def kpi_tiles(rows: list[dict]) -> list[dict]:
+    """KPI Agent 지표 (docs/SE_kpi-agent-design.md 1-4): 핵심(quality) · 판정(judgement) · 성능(performance). 케이스 평균, 하한은 통과 수."""
+    k = lambda s: s.get("kpi") or {}  # noqa: E731
+    vals = lambda name: [k(s)[name] for s in rows if k(s).get(name) is not None]  # noqa: E731
+    passed = lambda name, ok: f"{sum(ok(v) for v in vals(name))}/{len(vals(name))}건"  # noqa: E731
+    tools = vals("tool_calls")
+    # KPI 화면(frontend Kpi.tsx)과 같이 16건 카운트를 합산한 비율. 카운트가 없는 이전 기록은 케이스 평균
+    cs = [s["kpi_counts"] for s in rows if s.get("kpi_counts")]
+    c = lambda name: sum(x.get(name) or 0 for x in cs)  # noqa: E731
+    pool = lambda a, b, name: (c(a) / (c(a) + c(b)) if c(a) + c(b) else None) if cs else _mean(vals(name))  # noqa: E731
+    pooled = "16건 합산" if cs else "케이스 평균"
+    return [
+        {"key": "k_cprec", "group": "핵심", "label": "[변경] 노드 정밀도", "value": pool("change_tp", "change_fp", "change_node_precision"),
+         "fmt": "f", "up": True, "note": f"정밀도 주 지표 · {pooled} · 하한 0.5 · 케이스 통과 {passed('change_node_precision', lambda v: v >= 0.5)}"},
+        {"key": "k_crec", "group": "핵심", "label": "[변경] 재현율", "value": (c("change_hit") / c("change_total") if c("change_total") else None) if cs else None,
+         "fmt": "f", "up": True, "note": f"측정만 · 정답 변경 노드 {c('change_total')}개 중 [변경] {c('change_hit')}" if cs else "카운트 없는 이전 기록"},
+        {"key": "k_recall", "group": "핵심", "label": "노드 탐지율", "value": pool("tp", "fn", "node_recall"), "fmt": "f", "up": True,
+         "note": f"{pooled} · 하한 0.8 · 케이스 통과 {passed('node_recall', lambda v: v >= 0.8)}"},
+        {"key": "k_crit", "group": "참고", "label": "Critical 미탐률",
+         "value": (c("critical_missed") / c("critical_total") if c("critical_total") else None) if cs else _mean(vals("critical_miss_rate")),
+         "fmt": "f", "up": False,
+         "note": f"목표 0 · 0인 케이스 {passed('critical_miss_rate', lambda v: v == 0)}" if vals("critical_miss_rate") else "KPI Agent 기록 없음 (정답 노드에 Critical 표시 없음)"},
+        {"key": "k_prec", "group": "참고", "label": "노드 정밀도 (참고)", "value": pool("tp", "fp", "node_precision"), "fmt": "f", "up": True,
+         "note": f"측정만 · {pooled} · 결과 경로 위 노드 전체 기준"},
+        {"key": "k_cx", "group": "판정", "label": "복잡도 일치", "value": _mean(vals("complexity_match")), "fmt": "pct", "up": True, "note": "재분석 후 값 기준"},
+        {"key": "k_tag", "group": "판정", "label": "[변경]/[참조] 표시 정확도", "value": _mean(vals("change_tag_accuracy")), "fmt": "f", "up": True,
+         "note": "정답 변경·참조 노드 중 표시가 맞은 비율"},
+        {"key": "k_area", "group": "판정", "label": "영역 판정 일치", "value": _mean(vals("area_impact_match")), "fmt": "f", "up": True, "note": "복잡 · 4개 영역"},
+        {"key": "k_diff", "group": "판정", "label": "난이도 일치", "value": _mean(vals("difficulty_match")), "fmt": "pct", "up": True, "note": "복잡"},
+        {"key": "k_feas", "group": "판정", "label": "구현 가능 여부 일치", "value": _mean(vals("feasibility_match")), "fmt": "pct", "up": True, "note": "복잡"},
+        {"key": "k_unres", "group": "판정", "label": "재계획 미해결", "value": sum(vals("verifier_unresolved")), "fmt": "n", "up": False, "note": "복잡 · Verifier 보완 필요 남음"},
+        {"key": "k_tools", "group": "성능", "label": "tool 호출 (라운드 최대)", "value": _mean(tools), "fmt": "f", "up": False,
+         "note": f"한도 20 · 도달 {sum(v >= 20 for v in tools)}/{len(tools)}건"},
+        {"key": "k_lat", "group": "성능", "label": "지연", "value": _mean([v / 1000 for v in vals("latency_ms")]), "fmt": "s", "up": False, "note": "케이스 평균"},
+        {"key": "k_tok", "group": "성능", "label": "토큰", "value": _mean(vals("total_tokens")), "fmt": "k", "up": False, "note": "케이스 평균"},
+        {"key": "k_replan", "group": "성능", "label": "재계획", "value": sum(vals("replans")), "fmt": "n", "up": False, "note": "16건 합계"},
+    ]
+
+
 def tiles(rows: list[dict]) -> list[dict]:
     """(라벨, 값, 표시 형식, 높을수록 좋은가, 설명)."""
     n = len(rows)
@@ -69,13 +118,11 @@ def tiles(rows: list[dict]) -> list[dict]:
          "fmt": "pct", "up": True, "note": f"{sum(a for a, _ in must)}/{sum(b for _, b in must)}"},
         {"key": "crit", "label": "Critical 경로 미탐", "value": crit[0], "fmt": "n", "up": False, "note": f"전체 {crit[1]}개 중"},
         {"key": "handoff", "label": "Simulator 전달 경로", "value": _mean([_r(s).get("handoff_path_recall") for s in rows]), "fmt": "f", "up": True, "note": "평균 (앞 40개 안)"},
-        {"key": "recall", "label": "KPI 노드 탐지율", "value": _mean([(s.get("kpi") or {}).get("node_recall") for s in rows]), "fmt": "f", "up": True, "note": "평균 (KPI Agent)"},
         {"key": "prec", "label": "노드 정밀도", "value": statistics.median(v) if (v := [_r(s).get("node_precision") for s in rows if _r(s).get("node_precision") is not None]) else None,
          "fmt": "f", "up": True, "note": "중앙값 (Explorer 노드)"},
         {"key": "over", "label": "불필요한 권장", "value": sum(detail(s) == "불필요한 권장" for s in simple), "fmt": "n", "up": False, "note": f"정답 단순 {len(simple)}건 중"},
         {"key": "miss", "label": "놓친 복잡 요건", "value": sum(detail(s) == "신호 없음 (놓침)" for s in complex_), "fmt": "n", "up": False, "note": f"정답 복잡 {len(complex_)}건 중"},
-        {"key": "cprec", "label": "[변경] 노드 정밀도", "value": _mean([_r(s).get("change_precision") for s in rows]), "fmt": "f", "up": True, "note": "평균 (고친다고 한 노드 중 정답)"},
-        {"key": "kprec", "label": "KPI 노드 정밀도", "value": _mean([(s.get("kpi") or {}).get("node_precision") for s in rows]), "fmt": "f", "up": True, "note": "평균 (KPI Agent)"},
+        {"key": "crec", "label": "[변경] 노드 재현율", "value": _mean([_r(s).get("change_recall") for s in rows]), "fmt": "f", "up": True, "note": "평균 (정답 변경 노드 중 [변경] 표시, 평가 스크립트)"},
         {"key": "latency", "label": "평균 지연", "value": _mean([_r(s).get("latency_s") for s in rows]), "fmt": "s", "up": False, "note": "케이스당 (재분석 포함)"},
         {"key": "tokens", "label": "평균 토큰", "value": _mean([(_r(s).get("input_tokens") or 0) + (_r(s).get("output_tokens") or 0) for s in rows]) if rows else None,
          "fmt": "k", "up": False, "note": "케이스당 입력+출력"},
@@ -256,6 +303,9 @@ CHANGE_COLS = [
 ]
 
 
+DOWNSTREAM_COLS = {"KPI 탐지율", "KPI 정밀도", "[변경] 정밀도", "지연(s)", "토큰(k)"}
+
+
 def _arrow(old, new, kind: str, up: bool | None, expected: str | None = None) -> str:
     """'이전 → 이후' 칸. 좋아지면 ✓(초록), 나빠지면 !(빨강), 같으면 흐리게."""
     def show(v) -> str:
@@ -276,15 +326,16 @@ def _arrow(old, new, kind: str, up: bool | None, expected: str | None = None) ->
     return f'<td class="chg {tone or "same"}">{mark}{text}</td>'
 
 
-def _change_table(rows: list[dict], base: dict[str, dict]) -> str:
+def _change_table(rows: list[dict], base: dict[str, dict], changed: bool = False) -> str:
+    cols = [c for c in CHANGE_COLS if not (changed and c[0] in DOWNSTREAM_COLS)]
     body = []
     for s in rows:
         b = base.get(s["case"])
         if b is None:
             continue
         exp = (s.get("flow") or {}).get("expected")
-        body.append(f"<tr><th scope=row>{s['case']}</th>" + "".join(_arrow(get(b), get(s), kind, up, exp) for _, get, kind, up in CHANGE_COLS) + "</tr>")
-    head = "".join(f"<th>{label}</th>" for label, *_ in CHANGE_COLS)
+        body.append(f"<tr><th scope=row>{s['case']}</th>" + "".join(_arrow(get(b), get(s), kind, up, exp) for _, get, kind, up in cols) + "</tr>")
+    head = "".join(f"<th>{label}</th>" for label, *_ in cols)
     return f'<div class="wide"><table class="chgt"><thead><tr><th>케이스</th>{head}</tr></thead><tbody>{"".join(body)}</tbody></table></div>'
 
 
@@ -318,15 +369,23 @@ def _scatter(rows: list[dict], base: dict[str, dict], label: str, get, up: bool,
             f'<text class="tk" x="9" y="{W / 2}" transform="rotate(-90 9 {W / 2})" text-anchor="middle">이번 실행</text></svg></figure>')
 
 
-def _changes(rows: list[dict], base: dict[str, dict], base_name: str) -> str:
+def _changes(rows: list[dict], base: dict[str, dict], base_name: str, changed: bool = False) -> str:
     if not base:
         return ""
-    plots = (_scatter(rows, base, "KPI 노드 정밀도", lambda s: (s.get("kpi") or {}).get("node_precision"), True)
-             + _scatter(rows, base, "Simulator 전달 경로", lambda s: _r(s).get("handoff_path_recall"), True)
-             + _scatter(rows, base, "토큰 (천)", lambda s: ((_r(s).get("input_tokens") or 0) + (_r(s).get("output_tokens") or 0)) / 1000, False, "k"))
+    if changed:  # KPI 측정 방식이 달라 하류 지표는 비교하지 않음 → 상류(Planner·Explorer) 지표만
+        plots = (_scatter(rows, base, "정답 경로 재현율", lambda s: _r(s).get("path_recall"), True)
+                 + _scatter(rows, base, "Simulator 전달 경로", lambda s: _r(s).get("handoff_path_recall"), True)
+                 + _scatter(rows, base, "경로 수", lambda s: _r(s).get("paths_found"), False))
+        note = (' <b>KPI 측정 방식이 기준 실행과 달라(2026-11-03 SE KPI 개편) 상류(Planner·Explorer) 지표만 비교한다.</b> '
+                'KPI·[변경] 판정·지연·토큰은 이번 실행이 새 기준선이다.')
+    else:
+        plots = (_scatter(rows, base, "KPI 노드 정밀도", lambda s: (s.get("kpi") or {}).get("node_precision"), True)
+                 + _scatter(rows, base, "Simulator 전달 경로", lambda s: _r(s).get("handoff_path_recall"), True)
+                 + _scatter(rows, base, "토큰 (천)", lambda s: ((_r(s).get("input_tokens") or 0) + (_r(s).get("output_tokens") or 0)) / 1000, False, "k"))
+        note = ""
     return (f'<h2>1-2. {html.escape(base_name)} 대비 케이스별 변화</h2><p>칸마다 "기준 실행 → 이번 실행". 좋아지면 ✓, 나빠지면 !. '
-            f'산점도는 가로가 기준 실행, 세로가 이번 실행이고 점에 마우스를 올리면 값이 나온다.</p>'
-            f'<div class="scs">{plots}</div>{_change_table(rows, base)}')
+            f'산점도는 가로가 기준 실행, 세로가 이번 실행이고 점에 마우스를 올리면 값이 나온다.{note}</p>'
+            f'<div class="scs">{plots}</div>{_change_table(rows, base, changed)}')
 
 
 def write_report(run_dir: Path, baseline_dir: Path | None = None) -> Path:
@@ -334,10 +393,20 @@ def write_report(run_dir: Path, baseline_dir: Path | None = None) -> Path:
     base_rows = load(baseline_dir) if baseline_dir and baseline_dir.exists() else []
     base = {s["case"]: s for s in base_rows}
     cur_t, base_t = tiles(rows), {t["key"]: t for t in tiles(base_rows)} if base_rows else {}
-    tile_html = "".join(
-        f'<div class="tile"><div class="tl">{t["label"]}</div><div class="tv">{_fmt(t["value"], t["fmt"])}</div>'
-        f'<div class="tn">{t["note"]}</div>{_delta(t["value"], base_t.get(t["key"], {}).get("value"), t["fmt"], t["up"]) if base_rows else ""}</div>'
-        for t in cur_t)
+    base_k = {t["key"]: t for t in kpi_tiles(base_rows)} if base_rows else {}
+    changed = kpi_changed(rows, base_rows)
+    new_base = '<span class="delta muted">측정 기준 변경 · 비교 안 함</span>'
+
+    def tile(t: dict, base_v, hide: bool) -> str:
+        delta = (new_base if hide else _delta(t["value"], base_v, t["fmt"], t["up"])) if base_rows else ""
+        return (f'<div class="tile"><div class="tl">{t["label"]}</div><div class="tv">{_fmt(t["value"], t["fmt"])}</div>'
+                f'<div class="tn">{t["note"]}</div>{delta}</div>')
+
+    tile_html = "".join(tile(t, base_t.get(t["key"], {}).get("value"), changed and t["key"] in DOWNSTREAM) for t in cur_t)
+    kpi_html = "".join(
+        f'<h4 style="margin-top:10px">{g}</h4><div class="tiles">'
+        + "".join(tile(t, base_k.get(t["key"], {}).get("value"), changed) for t in kpi_tiles(rows) if t["group"] == g) + "</div>"
+        for g in ("핵심", "참고", "판정", "성능"))
     title = f"YJ 시나리오 실행 기록 · {run_dir.name}"
     doc = f"""<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>{html.escape(title)}</title><style>
@@ -379,10 +448,13 @@ a{{color:inherit}}@media (max-width:760px){{.cbody{{grid-template-columns:1fr}}.
 <header><h1>{html.escape(title)}</h1><div class="meta">정답셋 {len(rows)}건 · UI 와 같은 전체 흐름 (Planner → … → Composer → KPI Agent)
 {f" · 기준 실행 <b>{html.escape(baseline_dir.name)}</b> ({len(base_rows)}건)과 비교" if base_rows else ""} · 생성 {datetime.now():%Y-%m-%d %H:%M}</div></header>
 
-<h2>1. 한눈에</h2><p>탐색 품질·판정 흐름 지표.{" 증감은 기준 실행 대비이고, 좋아진 방향은 ✓, 나빠진 방향은 ! 로 표시한다." if base_rows else " 기준 실행 없이 이 run 만 (다음 run 부터 --baseline 으로 비교)."}</p>
+<h2>1. 한눈에 — KPI Agent 지표</h2><p>KPI Agent 가 케이스마다 낸 지표의 평균 (정의: <code>docs/SE_kpi-agent-design.md</code>). 핵심 = [변경] 노드 정밀도 · [변경] 재현율 · 노드 탐지율 (16건 합산), 참고 = Critical 미탐률 · 노드 정밀도, 판정 = Planner·Simulator·Composer 판정 일치, 성능 = 실행 로그.{" KPI 측정 방식이 기준 실행과 달라 이 절은 비교하지 않는다." if changed else " 증감은 기준 실행 대비 (✓ 개선 · ! 악화)." if base_rows else ""}</p>
+{kpi_html}
+
+<h2>1-1. 탐색 지표 (YJ 평가 스크립트)</h2><p>Planner·Explorer·Retriever 품질과 판정 흐름 (정답 경로 기준).{" 증감은 기준 실행 대비이고, 좋아진 방향은 ✓, 나빠진 방향은 ! 로 표시한다." if base_rows else " 기준 실행 없이 이 run 만 (다음 run 부터 --baseline 으로 비교)."}</p>
 <div class="tiles">{tile_html}</div>
 
-{_changes(rows, base, baseline_dir.name if baseline_dir else "")}
+{_changes(rows, base, baseline_dir.name if baseline_dir else "", changed)}
 
 <h2>2. 판정 흐름</h2><p>정답 복잡도와 실제 흐름. 1차 simple · 정답 complex 는 "상세 분석 요청"을 눌렀다고 가정해 2차로 간다.</p>
 <table><thead><tr><th>케이스</th><th>정답</th><th>1차 판정</th><th>상세 분석 권장</th><th>재분석</th><th>Verifier</th><th>최종</th></tr></thead>

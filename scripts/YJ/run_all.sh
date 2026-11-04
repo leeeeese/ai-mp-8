@@ -28,6 +28,8 @@ export PYTHONPATH=src PYTHONWARNINGS=ignore
 echo "=== 시작 $(date '+%F %T') · Python $PY" | tee -a $LOG
 $PY scripts/YJ/run_scenarios.py --all --run-id $VER ${BASE:+--baseline $BASE} ${VERBOSE:+--verbose} ${FRESH:+--fresh} 2>&1 \
   | grep --line-buffered -v "HTTP Request" | tee -a $LOG
+# 실행 중 케이스마다 쓰는 report 와 별개로, 끝난 뒤 저장된 summary 전체로 report 를 다시 만든다 (기준 실행 비교 포함)
+$PY scripts/YJ/run_scenarios.py --report $VER ${BASE:+--baseline $BASE} 2>&1 | tee -a $LOG
 if [[ -n $GUARDRAIL ]]; then
   for r in 1 2 3; do
     if [[ -f $OUT/guardrail/r$r/guardrail.json ]]; then echo "[guardrail r$r] 이미 완료 — 건너뜀" | tee -a $LOG; continue; fi

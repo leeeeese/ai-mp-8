@@ -35,7 +35,7 @@ from pydantic import BaseModel, Field
 
 from .. import config
 from ..llm import LLMClient, Usage, react_llm
-from ..rules import EXPLORER_MAX_REACT_STEPS, MENTION_LABELS, RESERVED_FOR_RETRIEVER, ROLE_RANK
+from ..rules import EXPLORER_MAX_REACT_STEPS, MENTION_LABELS, RESERVED_FOR_RETRIEVER, ROLE_RANK, RULE_SEARCH_BUDGET
 from ..schemas import (
     Direction,
     ExploreItem,
@@ -140,6 +140,7 @@ class ExplorerAgent(BaseAgent[ExplorerOutput]):
             self._section = "동작 · 규칙 탐색"
             trace(f"항목 {len(plan.items)}개 · tool 최대 {self._budget - self._reserve}회", section=self._section, label="범위")
             out = ExplorerOutput(start_nodes=[], nodes=[], edges=[])
+            self._search_quota = max(2, RULE_SEARCH_BUDGET // max(len(plan.items), 1))  # 항목당 언급 검색 상한
             for item in plan.items:
                 self._guard(out, lambda: self._explore_item(item, plan, out))
             self._arrange_paths(plan, out)
@@ -240,6 +241,7 @@ class ExplorerAgent(BaseAgent[ExplorerOutput]):
     def _match_starts(self, item: ExploreItem, plan: PlannerOutput, out: ExplorerOutput,
                       result: ItemExploreResult) -> list[str]:
         starts: list[str] = []
+        searched = 0
         for m in item.mentions:
             if m.confirmed_node and self.store.node(m.confirmed_node):
                 starts.append(m.confirmed_node)
@@ -248,6 +250,12 @@ class ExplorerAgent(BaseAgent[ExplorerOutput]):
                 continue
             key = (m.phrase, *m.synonyms, "|", *(MENTION_LABELS[m.kind] or []))
             if key not in self._searches:
+                if searched >= getattr(self, "_search_quota", len(item.mentions)):  # 언급이 많아도 탐색·Retriever 몫을 남긴다
+                    trace(f"'{m.phrase}' → 검색 생략 (항목당 언급 검색 {self._search_quota}회 상한, 앞 언급 우선)",
+                          section=self._section, label=f"  {m.kind.value}")
+                    _unresolved(out, item.item_id, "tool_limit", f"[항목 {item.item_id}] 검색 생략 (언급 검색 상한): {m.phrase}")
+                    continue
+                searched += 1
                 self._searches[key] = self._tool(search_graph_nodes, SearchGraphNodesInput(
                     terms=[m.phrase, *m.synonyms], domains=plan.domains, labels=MENTION_LABELS[m.kind], top_k=5))
             hits = self._searches[key]

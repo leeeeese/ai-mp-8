@@ -59,8 +59,8 @@ GT_DIR = ROOT / "eval" / "ground_truth"
 ALL_CASES = ["SC-001", "SC-002", "SC-003", "SC-004", "SC-005", "SC-006",
              "H-1", "H-2", "M-1", "M-2", "M-3", "M-4", "L-1", "L-2", "L-3", "L-4"]
 DIFFICULTY = {"Major": "상", "Medium": "중", "Minor": "하"}
-KPI_NAMES = ["node_recall", "node_precision", "critical_miss_rate", "complexity_match", "difficulty_match", "feasibility_match",
-             "area_impact_match", "change_tag_accuracy", "verifier_unresolved"]
+KPI_NAMES = ["node_recall", "node_precision", "change_node_precision", "critical_miss_rate", "complexity_match", "difficulty_match", "feasibility_match",
+             "area_impact_match", "change_tag_accuracy", "verifier_unresolved", "tool_calls_total"]
 
 
 # --- 평가 ---------------------------------------------------------------------------
@@ -283,6 +283,14 @@ def _kpi_values(state: AgentState) -> dict:
     return {m.name.value: m.value for m in state.kpi.metrics} if state.kpi else {}
 
 
+def _kpi_counts(state: AgentState) -> dict | None:
+    """KPI 화면과 같은 합산용 카운트 (api.views.kpi_record 의 counts: TP·FN·FP·Critical·[변경] tp/fp/hit/total)."""
+    if not state.kpi:
+        return None
+    from impact_agent.api.views import kpi_record
+    return kpi_record({"id": "", "title": "", "smPart": "", "finishedAt": "", "agentVersion": ""}, state)["counts"]
+
+
 # --- 기록 ---------------------------------------------------------------------------
 
 
@@ -400,7 +408,7 @@ def record(case: str, gt: dict, state: AgentState, seconds: float, flow: dict, o
             "difficulty": DIFFICULTY.get(gt["difficulty"], gt["difficulty"]), "flow": flow,
             "result": {**{k: v for k, v in ev.items() if k != "path_rows"}, **pf},
             "first_round": {k: first[k] for k in ("path_recall", "must_find", "node_precision", "paths_found")} if first else None,
-            "kpi": _kpi_values(state), "agent_latency_s": pf["agent_latency_s"],
+            "kpi": _kpi_values(state), "kpi_counts": _kpi_counts(state), "agent_latency_s": pf["agent_latency_s"],
             "flags": diagnose(case, state, ev, flow, gt)}
 
 
