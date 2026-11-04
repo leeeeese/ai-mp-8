@@ -177,7 +177,12 @@ export interface KpiRecord {
   req_id: string | null; // 정답셋 사례면 요건 ID (그때만 evaluable)
   evaluable: boolean; // 정답 대비 품질·판정 지표를 계산했는지 (일반 요청은 false → 성능 지표만)
   metrics: Partial<Record<KpiMetricName, number>>;
-  counts?: { tp: number; fn: number; fp: number; critical_missed: number; critical_total: number }; // 합산 집계용
+  // 합산 집계용. change_* 는 [변경] 노드: tp·fp = [변경] 표시 중 정답/오탐, hit·total = 정답 변경 노드 중 [변경] 으로 맞힌 수/전체
+  // (change_* 는 2026-11-04 이후 기록에만 있음)
+  counts?: {
+    tp: number; fn: number; fp: number; critical_missed: number; critical_total: number;
+    change_tp?: number; change_fp?: number; change_hit?: number; change_total?: number;
+  };
   missed_nodes: string[];
   false_positive_nodes: string[];
   reanalyzed: boolean;
