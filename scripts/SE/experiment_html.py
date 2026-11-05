@@ -281,7 +281,7 @@ document.getElementById("fps").innerHTML = fps.map(f => `<li>${f.case} <code>${f
 
 document.getElementById("foot").textContent = `scripts/SE/run_experiment.py 결과 (outputs/runs/SE/experiments/${META.exp_id}/experiment.json). ` +
   (E2E ? "회차마다 전체 흐름(Planner → Explorer ⇄ Retriever → Simulator → Verifier → Composer → KPI, 재계획 포함)을 새로 실행 (run_scenarios.py 와 같음)."
-       : `상류(Planner·Explorer·Retriever)는 ${META.from} 그대로, SE 구간(Simulator·Verifier·Composer·KPI)만 회차마다 다시 실행 (재계획 미실행).`) + ` [변경] 노드 정밀도·재현율·노드 탐지율·노드 정밀도는 케이스별 TP·FP·FN·맞힌 수를 합산한 비율 (KPI 화면·배치 평가와 같음), 그 밖의 비율 지표는 케이스 평균.`;
+       : `상류(Planner·Explorer·Retriever)는 ${META.from} 그대로, SE 구간(Simulator·Verifier·Composer·KPI)만 회차마다 다시 실행 (재계획 미실행).`) + ` [변경] 노드 정밀도·재현율·노드 탐지율·노드 정밀도는 케이스별 TP·FP·FN·맞힌 수를 합산한 비율 (KPI 화면·배치 평가와 같음, [변경] 재현율은 운영 문의 제외), 그 밖의 비율 지표는 케이스 평균.`;
 </script>
 </body>
 </html>

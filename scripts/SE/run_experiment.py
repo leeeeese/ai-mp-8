@@ -178,7 +178,7 @@ def report(meta: dict, data: dict, base: dict | None) -> str:
     L = [f"# SE 반복 실험 {meta['exp_id']}" + (f" · {meta['label']}" if meta.get("label") else ""), "",
          ("- e2e: 회차마다 전체 흐름(상류 포함)을 새로 실행" if meta["from"] == E2E else f"- 상류 고정: `{meta['from']}`")
          + f" · 회차 {len(reps)}/{meta['repeat']} · 코드 {meta['commit']} · {meta['updated']}",
-         "- 지표는 회차마다 실행한 케이스 전체로 계산한 뒤 회차 사이의 평균과 범위(최소~최대)로 낸다. 정밀도 주 지표는 [변경] 노드 정밀도", ""]
+         "- 지표는 회차마다 실행한 케이스 전체로 계산한 뒤 회차 사이의 평균과 범위(최소~최대)로 낸다. 정밀도 주 지표는 [변경] 노드 정밀도. [변경] 재현율은 운영 문의(정답셋 input_type=ops_inquiry)를 뺀 합산", ""]
     if not reps:
         return "\n".join(L + ["끝난 회차가 없습니다."]) + "\n"
     L += ["## 지표 (회차 평균 · 범위)", "", "| 지표 | 평균 | 범위 | " + " | ".join(f"r{r['repeat']}" for r in reps) + " |",

@@ -134,6 +134,8 @@ load_inputs → validate → extract → normalize → match → classify → ag
 | `answer_nodes[{node_id, type, stage, severity}]` | 반드시 찾아야 하는 노드 (탐지율 분모) | `expected.impacted` 중 `must_find=true` |
 | `excluded_nodes[{node_id, reason}]` | 정답을 확정하지 못한 노드. 분모에서 빼고 건수 공개 | `must_find=false`, `reference_only`, 정답 경로 위 비영향 노드, 미확정(`pending`) 경로 노드 |
 | `distractor_nodes` | 키워드가 겹치지만 영향 없는 노드 (오탐 분석용) | `distractors` |
+| `input_type` | 입력 유형. 운영 문의(`ops_inquiry`)는 [변경] 재현율 제외 (1-4, v0.7) | `input_type` (없으면 None, swing 은 요건) |
+| `change_nodes`, `reference_nodes` | [변경] 재현율·[변경]/[참조] 판정 비교값 | `expected.impacted` 중 modify·add / `reference_only` + impacted 중 reference_only |
 
 - `severity`: Critical (미탐 시 장애·과금 오류 가능) / Major (오동작·운영 이슈 가능, 기본값) / Minor (참고·부수적).
 
@@ -310,7 +312,7 @@ load_inputs → validate → extract → normalize → match → classify → ag
 | 모델 | 내용 |
 |---|---|
 | enums | `KpiCategory`(quality / performance), `NodeSeverity`(Critical / Major / Minor), `NodeVerdict`(detected / missed / false_positive / excluded / out_of_scope), `KpiMetricName` |
-| `AnswerKey` | `req_id`, `system`, `sm_part`, `complexity`, `eval_target_labels`, `answer_nodes[AnswerNode]`, `excluded_nodes[ExcludedNode]`, `distractor_nodes` |
+| `AnswerKey` | `req_id`, `system`, `sm_part`, `complexity`, `input_type`, `eval_target_labels`, `answer_nodes[AnswerNode]`, `excluded_nodes[ExcludedNode]`, `distractor_nodes`, 판정 비교값(`expected_difficulty`, `expected_feasibility`, `expected_areas`, `change_nodes`, `reference_nodes`, `wrong_paths`) |
 | `AgentRunRecord` | `agent`, `latency_ms`, `tool_calls`, `input_tokens`, `output_tokens` |
 | `KpiMetric` | `name`, `category`, `value`, `unit`, `threshold`, `passed` |
 | `NodeJudgement` | `node_id`, `type`, `stage`, `severity`, `verdict`, `in_output` |

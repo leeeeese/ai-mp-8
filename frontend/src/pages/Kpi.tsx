@@ -132,7 +132,7 @@ export function Kpi() {
                 <ThresholdMeter label="[변경] 노드 정밀도 (정밀도 주 지표)" value={changePrecision} target={KPI_MIN.precision} better="higher"
                                 sub={changePrecisionSub} />
                 <Tile label="[변경] 재현율 (측정만)" value={pct(changeRecall)}
-                      sub={withChange.length ? `정답 변경 노드 ${ctotal}개 중 [변경] 으로 맞힘 ${chit} 합산` : '정답 변경 노드 중 [변경] · 사례 평균 (이전 기록)'} />
+                      sub={withChange.length ? `정답 변경 노드 ${ctotal}개 중 [변경] 으로 맞힘 ${chit} 합산 · 운영 문의 제외` : '정답 변경 노드 중 [변경] · 사례 평균 (이전 기록)'} />
                 <ThresholdMeter label="노드 탐지율" value={ratio(tp, tp + fn)} target={KPI_MIN.recall} better="higher" sub={`TP ${tp} · FN ${fn} 합산`} />
               </div>
               <h3 className="text-xs font-semibold text-muted">보조 지표</h3>
