@@ -195,6 +195,7 @@ class KpiMetricName(str, Enum):
     CRITICAL_MISS_RATE = "critical_miss_rate"  # Critical 정답 노드 중 FN 비율 (권장 0)
     NODE_PRECISION = "node_precision"  # 노드 정밀도 = TP / (TP + FP). 검토 부담 참고 지표 (측정만)
     CHANGE_NODE_PRECISION = "change_node_precision"  # [변경] 노드 정밀도 = [변경] 으로 표시한 노드 중 TP / (TP + FP). 정밀도 주 지표 (≥ KPI_MIN_PRECISION)
+    CHANGE_NODE_RECALL = "change_node_recall"  # [변경] 재현율 = 정답 변경 노드 중 [변경] 으로 맞힌 수 / 정답 변경 노드 수 (측정만)
     EXCLUDED_NODES = "excluded_nodes"  # 평가 제외 노드 수
     OUT_OF_SCOPE_NODES = "out_of_scope_nodes"  # 범위 밖 노드 수
     # judgement (판정 품질, 측정만. 1 = 일치/해당, 0 = 불일치/해당 없음, 비율은 0~1. 비교값이 없으면 생략)

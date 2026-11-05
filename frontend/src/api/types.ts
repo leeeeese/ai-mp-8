@@ -161,7 +161,8 @@ export interface Report {
 
 /** 백엔드 KpiMetricName 값 */
 export type KpiMetricName =
-  | 'node_recall' | 'node_miss_rate' | 'critical_miss_rate' | 'node_precision' | 'change_node_precision'
+  | 'change_node_precision' | 'change_node_recall' | 'node_recall'
+  | 'node_miss_rate' | 'critical_miss_rate' | 'node_precision'
   | 'excluded_nodes' | 'out_of_scope_nodes'
   | 'complexity_match' | 'difficulty_match' | 'feasibility_match' | 'area_impact_match' | 'change_tag_accuracy'
   | 'wrong_path_adopted' | 'detail_recommended' | 'complex_minor' | 'verifier_unresolved'

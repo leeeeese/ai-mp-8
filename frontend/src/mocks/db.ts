@@ -92,7 +92,7 @@ export const kpiRecords: KpiRecord[] = [
   seedRecord('s-sc001', {
     req_id: 'SC-001', complexity: 'complex',
     counts: { tp: 4, fn: 0, fp: 22, critical_missed: 0, critical_total: 2, change_tp: 2, change_fp: 0, change_hit: 2, change_total: 2 },
-    metrics: { node_recall: 1, node_miss_rate: 0, critical_miss_rate: 0, node_precision: 4 / 26, change_node_precision: 1, complexity_match: 1,
+    metrics: { node_recall: 1, node_miss_rate: 0, critical_miss_rate: 0, node_precision: 4 / 26, change_node_precision: 1, change_node_recall: 2 / 2, complexity_match: 1,
       difficulty_match: 1, feasibility_match: 1, area_impact_match: 1, change_tag_accuracy: 0.9, wrong_path_adopted: 0,
       complex_minor: 0, verifier_unresolved: 0, ...perf('complex') },
     false_positive_nodes: ['SQL:CmpnMapper.selectCmpn', 'SCR:TOSCP0120M'],
@@ -109,7 +109,7 @@ export const kpiRecords: KpiRecord[] = [
   seedRecord('s-l1', {
     req_id: 'L-1', complexity: 'simple',
     counts: { tp: 7, fn: 0, fp: 16, critical_missed: 0, critical_total: 0, change_tp: 5, change_fp: 0, change_hit: 5, change_total: 7 },
-    metrics: { node_recall: 1, node_miss_rate: 0, node_precision: 7 / 23, change_node_precision: 1, complexity_match: 1, detail_recommended: 0, ...perf('simple') },
+    metrics: { node_recall: 1, node_miss_rate: 0, node_precision: 7 / 23, change_node_precision: 1, change_node_recall: 5 / 7, complexity_match: 1, detail_recommended: 0, ...perf('simple') },
     judgement_notes: [],
   }),
   seedRecord('s-h1', {
@@ -117,7 +117,7 @@ export const kpiRecords: KpiRecord[] = [
     counts: { tp: 5, fn: 0, fp: 14, critical_missed: 0, critical_total: 4, change_tp: 2, change_fp: 1, change_hit: 2, change_total: 6 },
     metrics: { node_recall: 1, node_miss_rate: 0, critical_miss_rate: 0, node_precision: 5 / 19, complexity_match: 1,
       difficulty_match: 1, feasibility_match: 1, area_impact_match: 0.75, change_tag_accuracy: 1, complex_minor: 0,
-      change_node_precision: 2 / 3, verifier_unresolved: 0, ...perf('complex', 1, 2) },
+      change_node_precision: 2 / 3, change_node_recall: 2 / 6, verifier_unresolved: 0, ...perf('complex', 1, 2) },
     judgement_notes: ['영역 영향 유형 불일치: db 정답 modify/실행 reference_only'],
   }),
 ];

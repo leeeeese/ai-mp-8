@@ -4,7 +4,7 @@ UI 타입은 대부분 camelCase 이고, 상세 분석 권장(detail_analysis_*)
 UI 에만 있는 값(plannerVerdict·process·Report 전체 판정·일정 불확실성)은 여기서 만든다 (가안, docs/ui_design.md 7장).
 """
 
-from ..agents.kpi import change_judgements, hop_tags
+from ..agents.kpi import change_hits, change_judgements
 from ..agents.simulator import CHANGE_TAG, requirement_difficulty
 from ..schemas import AreaImpact, Complexity, Feasibility, ImpactType, NodeSeverity, NodeVerdict, VerifyResult
 from ..state import AgentState
@@ -101,7 +101,7 @@ def kpi_record(meta: dict, state: AgentState) -> dict:
     # [변경] 노드 정밀도(주 지표)·재현율 합산용: [변경] 표시 노드의 판정, 정답 변경 노드 중 [변경] 으로 맞힌 수
     key = state.answer_key
     changed_rows = change_judgements(state, key) if k.evaluable and key else []
-    changed = {n for n, t in hop_tags(state).items() if t == "change"}
+    hit, total = change_hits(state, key) if key else (0, 0)
     return {
         "session_id": meta["id"], "title": meta["title"], "sm_part": meta["smPart"], "complexity": k.complexity.value,
         "created_at": meta["finishedAt"], "agent_version": meta["agentVersion"], "req_id": k.req_id,
@@ -112,7 +112,7 @@ def kpi_record(meta: dict, state: AgentState) -> dict:
             "critical_missed": sum(r.verdict is NodeVerdict.MISSED for r in crit), "critical_total": len(crit),
             "change_tp": sum(r.verdict is NodeVerdict.DETECTED for r in changed_rows),
             "change_fp": sum(r.verdict is NodeVerdict.FALSE_POSITIVE for r in changed_rows),
-            "change_hit": len(changed & set(key.change_nodes)) if key else 0, "change_total": len(key.change_nodes) if key else 0,
+            "change_hit": hit, "change_total": total,
         } if k.evaluable else None,
         "missed_nodes": k.missed_nodes, "false_positive_nodes": k.false_positive_nodes,
         "reanalyzed": k.reanalyzed, "judgement_notes": k.judgement_notes,

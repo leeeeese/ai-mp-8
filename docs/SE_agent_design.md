@@ -19,7 +19,7 @@
         │ 통과 · 재계획 한도 초과                                   ▼
       3 Composer     코드+LLM  단순 응답 / 레포트·체크리스트·회신 메일·MD/PDF (Jinja2)
         ┆ (평가, PoC)
-      KPI Agent      규칙      정답 노드 목록 + 실행 로그 → 탐지율·미탐률·정밀도
+      KPI Agent      규칙      정답 노드 목록 + 실행 로그 → [변경] 정밀도·[변경] 재현율·탐지율 (+ 보조)
 ```
 
 | 에이전트 | LLM | 입력 (AgentState) | 출력 | 구현 |
@@ -364,7 +364,7 @@ Supervisor 의 `Supervisor.followup(session_id, FollowupInput)` 이 진입점을
 
 ## 4. KPI Agent
 
-**역할**: Composer 이후 PoC 평가. 정답 노드 목록과 실행 로그를 대조해 노드 판정(탐지·미탐·오탐·제외·범위 밖)과 탐지율·미탐률·Critical 미탐률·정밀도, **판정 품질**(복잡도·난이도·가능 여부·영역 영향 유형·[변경]/[참조] 판정·오답 경로·상세 분석 권장, 측정만), 실행 성능을 낸다 (LLM 미사용). 상세는 [SE_kpi-agent-design.md](SE_kpi-agent-design.md).
+**역할**: Composer 이후 PoC 평가. 정답 노드 목록과 실행 로그를 대조해 노드 판정(탐지·미탐·오탐·제외·범위 밖)과 핵심 KPI([변경] 노드 정밀도·[변경] 재현율·노드 탐지율), 보조 지표(미탐률·Critical 미탐률·노드 정밀도), **판정 품질**(복잡도·난이도·가능 여부·영역 영향 유형·[변경]/[참조] 판정·오답 경로·상세 분석 권장, 측정만), 실행 성능을 낸다 (LLM 미사용). 상세는 [SE_kpi-agent-design.md](SE_kpi-agent-design.md).
 
 **출력 `KpiOutput`**: `metrics`(quality·judgement·performance), `judgements`, `by_type`, `by_stage`, `missed_nodes`, `false_positive_nodes`, `all_passed`, `warnings`, `reanalyzed`, `judgement_notes` (Composer 에 전달하지 않음)
 

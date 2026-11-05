@@ -70,10 +70,12 @@ export function Kpi() {
   const sum = (k: keyof NonNullable<KpiRecord['counts']>, rs = evaluated) => rs.reduce((a, r) => a + (r.counts?.[k] ?? 0), 0);
   const [tp, fn, fp] = [sum('tp'), sum('fn'), sum('fp')];
   const critTotal = sum('critical_total');
-  // [변경] 노드 정밀도(정밀도 주 지표)·재현율도 합산. change_* 카운트가 없는 이전 기록은 [변경] 정밀도만 사례 평균으로 대신한다
+  // 핵심 3지표: [변경] 노드 정밀도(정밀도 주 지표) → [변경] 재현율 → 노드 탐지율 (KPI 설계서 1-4). 모두 합산.
+  // change_* 카운트가 없는 이전 기록은 [변경] 정밀도·재현율을 사례 평균으로 대신한다
   const withChange = evaluated.filter((r) => r.counts?.change_tp !== undefined);
   const [ctp, cfp, chit, ctotal] = [sum('change_tp', withChange), sum('change_fp', withChange), sum('change_hit', withChange), sum('change_total', withChange)];
   const changePrecision = withChange.length ? ratio(ctp, ctp + cfp) : mean(evaluated, 'change_node_precision');
+  const changeRecall = withChange.length ? ratio(chit, ctotal) : mean(evaluated, 'change_node_recall');
   const changePrecisionSub = withChange.length
     ? `[변경] 표시 ${ctp + cfp}개 중 정답 ${ctp} · 오탐 ${cfp} 합산`
     : '[변경] 표시 중 정답 · 사례 평균 (이전 기록)';
@@ -127,15 +129,16 @@ export function Kpi() {
           ) : (
             <>
               <div className="grid gap-3 md:grid-cols-3">
-                <ThresholdMeter label="노드 탐지율" value={ratio(tp, tp + fn)} target={KPI_MIN.recall} better="higher" sub={`TP ${tp} · FN ${fn} 합산`} />
-                <ThresholdMeter label="Critical 미탐률" value={ratio(sum('critical_missed'), critTotal)} target={0} better="lower"
-                                sub={`Critical 정답 ${critTotal}개`} />
                 <ThresholdMeter label="[변경] 노드 정밀도 (정밀도 주 지표)" value={changePrecision} target={KPI_MIN.precision} better="higher"
                                 sub={changePrecisionSub} />
+                <Tile label="[변경] 재현율 (측정만)" value={pct(changeRecall)}
+                      sub={withChange.length ? `정답 변경 노드 ${ctotal}개 중 [변경] 으로 맞힘 ${chit} 합산` : '정답 변경 노드 중 [변경] · 사례 평균 (이전 기록)'} />
+                <ThresholdMeter label="노드 탐지율" value={ratio(tp, tp + fn)} target={KPI_MIN.recall} better="higher" sub={`TP ${tp} · FN ${fn} 합산`} />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <Tile label="[변경] 재현율 (측정만)" value={withChange.length ? pct(ratio(chit, ctotal)) : '-'}
-                      sub={withChange.length ? `정답 변경 노드 ${ctotal}개 중 [변경] 으로 맞힘 ${chit} 합산` : '이전 기록에는 카운트 없음'} />
+              <h3 className="text-xs font-semibold text-muted">보조 지표</h3>
+              <div className="grid gap-3 md:grid-cols-2">
+                <ThresholdMeter label="Critical 미탐률" value={ratio(sum('critical_missed'), critTotal)} target={0} better="lower"
+                                sub={`Critical 정답 ${critTotal}개`} />
                 <Tile label="노드 정밀도 (참고, 측정만)" value={pct(ratio(tp, tp + fp))}
                       sub={`결과 경로 위 노드 전체 기준 TP ${tp} · FP ${fp}. 경로 수(상류)가 값을 정함`} />
               </div>
@@ -174,9 +177,9 @@ export function Kpi() {
                     <th scope="col">세션</th>
                     <th scope="col">SM · flow</th>
                     <th scope="col">정답셋</th>
-                    <th scope="col">탐지율</th>
                     <th scope="col">[변경] 정밀도</th>
                     <th scope="col">[변경] 재현</th>
+                    <th scope="col">탐지율</th>
                     <th scope="col">노드 정밀도(참고)</th>
                     <th scope="col">시간 · 도구 · 재계획</th>
                     <th scope="col">판정 불일치</th>
@@ -192,11 +195,11 @@ export function Kpi() {
                       </td>
                       <td className="whitespace-nowrap">{SM_LABEL[r.sm_part]} · {r.complexity === 'simple' ? '단순' : '복잡'}</td>
                       <td className={cn('whitespace-nowrap', !r.req_id && 'text-muted')}>{r.req_id ?? '일반 요청'}</td>
-                      <td className="font-mono">{pct(r.metrics.node_recall ?? null)}</td>
                       <td className="font-mono">{pct(r.metrics.change_node_precision ?? null)}</td>
                       <td className="whitespace-nowrap font-mono">
                         {r.counts?.change_total ? `${r.counts.change_hit ?? 0}/${r.counts.change_total}` : '-'}
                       </td>
+                      <td className="font-mono">{pct(r.metrics.node_recall ?? null)}</td>
                       <td className="font-mono text-muted">{pct(r.metrics.node_precision ?? null)}</td>
                       <td className="whitespace-nowrap font-mono text-muted">
                         {formatMs(r.metrics.latency_ms ?? 0)} · {r.metrics.tool_calls_total ?? r.metrics.tool_calls ?? '-'} · {r.metrics.replans ?? 0}

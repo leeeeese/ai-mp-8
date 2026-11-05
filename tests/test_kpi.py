@@ -151,6 +151,20 @@ def test_change_node_precision():
     assert KpiMetricName.CHANGE_NODE_PRECISION not in metrics(KpiAgent().run(make_state(OUTPUT)))   # 표시 없음 → 생략
 
 
+def test_change_node_recall():
+    # 정답 변경 노드 3개 중 [변경] 으로 맞힌 것 2개 (MOD:M2 는 경로에 없음). 측정만
+    key = KEY.model_copy(update={"change_nodes": ["SCR:S1", "TBL:T1", "MOD:M2"]})
+    state = tag_hops(make_state(OUTPUT, answer_key=key), {"SCR:S1", "TBL:T1", "MOD:M9"})
+    out = KpiAgent().run(state)
+    m = next(x for x in out.metrics if x.name is KpiMetricName.CHANGE_NODE_RECALL)
+    assert m.value == pytest.approx(2 / 3) and m.threshold is None and m.passed is None
+    names = [x.name for x in out.metrics]                                 # 핵심 3지표가 맨 앞, 이 순서
+    assert names[:3] == [KpiMetricName.CHANGE_NODE_PRECISION, KpiMetricName.CHANGE_NODE_RECALL, KpiMetricName.NODE_RECALL]
+
+    assert metrics(KpiAgent().run(tag_hops(make_state(OUTPUT, answer_key=key), set())))[KpiMetricName.CHANGE_NODE_RECALL] == 0
+    assert KpiMetricName.CHANGE_NODE_RECALL not in metrics(KpiAgent().run(tag_hops(make_state(OUTPUT), {"SCR:S1"})))  # 정답 변경 노드 없음 → 생략
+
+
 def test_precision_threshold_on_change_nodes_not_path_nodes():
     # 노드 정밀도는 경로 위 노드 전체가 분모라 측정만, 하한은 [변경] 노드 정밀도에 적용
     key = AnswerKey(req_id="T-1", answer_nodes=[answer("TBL:T1", 4)])

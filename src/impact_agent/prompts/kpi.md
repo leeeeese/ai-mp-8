@@ -26,13 +26,18 @@ PoC 평가용 에이전트. **Composer 이후** 실행하며, 결과는 Composer
 
 `judgements` 에 노드별 판정표, `by_type` / `by_stage` 에 노드 유형·단계별 탐지 성능을 남긴다.
 
-## 핵심 KPI (quality)
+## 핵심 KPI (quality, 이 순서)
 | 지표 | 계산 | 기준 |
 |---|---|---|
+| change_node_precision ([변경] 노드 정밀도, 정밀도 주 지표) | [변경] 으로 표시한 노드 중 TP / (TP + FP) | ≥ KPI_MIN_PRECISION |
+| change_node_recall ([변경] 재현율) | 정답 변경 노드 중 [변경] 으로 맞힌 수 / 정답 변경 노드 수 | - (측정만) |
 | node_recall (노드 탐지율) | TP / (TP + FN) | ≥ KPI_MIN_RECALL |
+
+## 보조 지표 (quality)
+| 지표 | 계산 | 기준 |
+|---|---|---|
 | node_miss_rate (노드 미탐률) | FN / (TP + FN) | - |
 | critical_miss_rate (Critical 미탐률) | Critical 정답 중 FN / Critical 정답 | 권장 0 (측정만) |
-| change_node_precision ([변경] 노드 정밀도, 정밀도 주 지표) | [변경] 으로 표시한 노드 중 TP / (TP + FP) | ≥ KPI_MIN_PRECISION |
 | node_precision (노드 정밀도, 참고) | TP / (TP + FP) | - (측정만, 검토 부담 참고) |
 | excluded_nodes / out_of_scope_nodes | 판정별 건수 | - |
 

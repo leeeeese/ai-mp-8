@@ -23,7 +23,15 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from impact_agent.agents import KpiAgent
-from impact_agent.agents.kpi import by_stage, by_type, change_judgements, group_kpis, load_answer_key, ratio
+from impact_agent.agents.kpi import (
+    by_stage,
+    by_type,
+    change_hits,
+    change_judgements,
+    group_kpis,
+    load_answer_key,
+    ratio,
+)
 from impact_agent.schemas import Complexity, NodeSeverity, NodeVerdict
 from impact_agent.state import AgentState
 
@@ -32,8 +40,8 @@ GT_DIR = ROOT / "eval" / "ground_truth"
 JUDGEMENT = ["complexity_match", "difficulty_match", "feasibility_match", "area_impact_match", "change_tag_accuracy",
              "wrong_path_adopted", "detail_recommended", "complex_minor", "verifier_unresolved"]
 # 버전 비교표에 올리는 값 (summary 의 overall · judgement 키)
-COMPARE = [("overall", "node_recall"), ("overall", "critical_miss_rate"), ("overall", "node_precision"),
-           ("overall", "change_node_precision"), ("judgement", "complexity_match_rate"), ("judgement", "difficulty_match_rate"),
+COMPARE = [("overall", "change_node_precision"), ("overall", "change_node_recall"), ("overall", "node_recall"),
+           ("overall", "critical_miss_rate"), ("overall", "node_precision"), ("judgement", "complexity_match_rate"), ("judgement", "difficulty_match_rate"),
            ("judgement", "feasibility_match_rate"), ("judgement", "area_impact_match_avg"),
            ("judgement", "change_tag_accuracy_avg"), ("judgement", "detail_catch_rate"),
            ("judgement", "detail_over_rate"), ("judgement", "wrong_path_adopted"), ("judgement", "complex_minor"),
@@ -72,12 +80,14 @@ def summarize(cases: list[dict], axis: str | None) -> dict:
         tp, fn, fp = (g.tp, g.fn, g.fp) if g else (0, 0, 0)
         ch = group_kpis([r for c in group for r in c["change_rows"]], lambda r: "all").get("all")
         crit_missed, crit_total = critical_counts(rows)
+        hit, total = sum(c["change_hit"][0] for c in group), sum(c["change_hit"][1] for c in group)
         result[k] = {
             "cases": len(group), "tp": tp, "fn": fn, "fp": fp,
             "node_recall": ratio(tp, tp + fn), "node_miss_rate": ratio(fn, tp + fn),
             "critical_miss_rate": ratio(crit_missed, crit_total), "critical_total": crit_total,
             "node_precision": ratio(tp, tp + fp),
             "change_node_precision": ch.precision if ch else None,
+            "change_node_recall": ratio(hit, total), "change_hit": hit, "change_total": total,
             "excluded": sum(r.verdict is NodeVerdict.EXCLUDED for r in rows),
             "out_of_scope": sum(r.verdict is NodeVerdict.OUT_OF_SCOPE for r in rows),
         }
@@ -150,8 +160,8 @@ def report_markdown(summary: dict, cases: list[dict], previous: dict | None = No
     lines = [f"# KPI 평가 리포트 ({summary['agent_version']})", "",
              f"평가 {len(cases)}건 · 제외 {len(summary['skipped'])}건 · 재분석 {j['reanalyzed']}건", "",
              "## 노드 탐지", "", "| 지표 | 값 |", "|---|---|"]
-    lines += [f"| {k} | {fmt(o.get(k), k)} |" for k in ("node_recall", "node_miss_rate", "critical_miss_rate", "node_precision",
-                                                         "change_node_precision")]
+    lines += [f"| {k} | {fmt(o.get(k), k)} |" for k in ("change_node_precision", "change_node_recall", "node_recall",
+                                                         "node_miss_rate", "critical_miss_rate", "node_precision")]
     lines += ["", "## 판정 품질 (측정만)", "", "| 지표 | 값 |", "|---|---|"]
     lines += [f"| {k} | {fmt(v, k)} |" for k, v in j.items()]
     missed = [(c["case_id"], r) for c in cases for r in c["rows"] if r.verdict is NodeVerdict.MISSED]
@@ -206,6 +216,7 @@ def main() -> int:
             "sm_part": key.sm_part.value if key.sm_part else "-", "flow": kpi.complexity.value,
             "gt_complexity": key.complexity.value if isinstance(key.complexity, Complexity) else "-",
             "kpi": kpi, "rows": kpi.judgements, "change_rows": change_judgements(state, key),
+            "change_hit": change_hits(state, key),
         })
 
     with open(out_dir / "judgements.csv", "w", newline="", encoding="utf-8-sig") as fp:
@@ -216,7 +227,8 @@ def main() -> int:
                 w.writerow([c["case_id"], args.agent_version, r.node_id, r.type, "" if r.stage is None else r.stage,
                             r.severity.value if r.severity else "", r.verdict.value, r.in_output])
 
-    names = ["node_recall", "node_miss_rate", "critical_miss_rate", "node_precision", "change_node_precision", "excluded_nodes",
+    names = ["change_node_precision", "change_node_recall", "node_recall", "node_miss_rate", "critical_miss_rate",
+             "node_precision", "excluded_nodes",
              "out_of_scope_nodes", "latency_ms", "tool_calls", "tool_calls_total", "explore_loops"]
     with open(out_dir / "cases.csv", "w", newline="", encoding="utf-8-sig") as fp:
         w = csv.writer(fp)
@@ -249,9 +261,9 @@ def main() -> int:
     pct = lambda x: "-" if x is None else f"{x * 100:.1f}%"
     print(f"평가 {len(cases)}건 · 제외 {len(skipped)}건 → {out_dir}")
     if o:
-        print(f"탐지율 {pct(o['node_recall'])} · 미탐률 {pct(o['node_miss_rate'])} · "
-              f"Critical 미탐률 {pct(o['critical_miss_rate'])} · [변경] 정밀도 {pct(o['change_node_precision'])} · "
-              f"노드 정밀도(참고) {pct(o['node_precision'])}")
+        print(f"[변경] 정밀도 {pct(o['change_node_precision'])} · [변경] 재현율 {pct(o['change_node_recall'])} · "
+              f"탐지율 {pct(o['node_recall'])} | 보조: 미탐률 {pct(o['node_miss_rate'])} · "
+              f"Critical 미탐률 {pct(o['critical_miss_rate'])} · 노드 정밀도(참고) {pct(o['node_precision'])}")
     jd = summary["judgement"]
     print(f"복잡도 일치 {pct(jd['complexity_match_rate'])} · 난이도 일치 {pct(jd['difficulty_match_rate'])} · "
           f"영역 일치 {pct(jd['area_impact_match_avg'])} · 상세 분석 권장 catch {pct(jd['detail_catch_rate'])}")

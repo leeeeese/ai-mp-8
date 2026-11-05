@@ -209,25 +209,34 @@ def _metric(
     return KpiMetric(name=name, category=category, value=value, unit=unit, threshold=threshold, passed=passed)
 
 
-def quality_metrics(rows: list[NodeJudgement], changed: list[NodeJudgement] = ()) -> list[KpiMetric]:
-    """핵심 KPI. changed 는 [변경] 으로 표시한 노드의 판정 (change_judgements, 없으면 [변경] 노드 정밀도 생략)."""
+def quality_metrics(
+    rows: list[NodeJudgement], changed: list[NodeJudgement] = (), change_hit: tuple[int, int] | None = None,
+) -> list[KpiMetric]:
+    """KPI (quality). 핵심 3지표([변경] 노드 정밀도 → [변경] 재현율 → 노드 탐지율) 다음에 보조 지표.
+
+    changed 는 [변경] 으로 표시한 노드의 판정 (change_judgements, 없으면 [변경] 노드 정밀도 생략),
+    change_hit 는 (정답 변경 노드 중 [변경] 으로 맞힌 수, 정답 변경 노드 수) (change_hits, 정답 변경 노드가 없으면 생략).
+    """
     q = KpiCategory.QUALITY
     count = {v: sum(r.verdict is v for r in rows) for v in NodeVerdict}
     tp, fn, fp = count[NodeVerdict.DETECTED], count[NodeVerdict.MISSED], count[NodeVerdict.FALSE_POSITIVE]
     critical = [r for r in rows if r.severity is NodeSeverity.CRITICAL and r.verdict in (NodeVerdict.DETECTED, NodeVerdict.MISSED)]
     metrics = []
+    # 핵심
+    if (g := group_kpis(changed, lambda r: "all").get("all")) and g.precision is not None:  # 정밀도 주 지표
+        metrics.append(_metric(KpiMetricName.CHANGE_NODE_PRECISION, q, g.precision, "ratio", config.KPI_MIN_PRECISION))
+    if change_hit and change_hit[1]:  # 측정만
+        metrics.append(_metric(KpiMetricName.CHANGE_NODE_RECALL, q, change_hit[0] / change_hit[1], "ratio"))
     if tp + fn:
-        metrics += [
-            _metric(KpiMetricName.NODE_RECALL, q, tp / (tp + fn), "ratio", config.KPI_MIN_RECALL),
-            _metric(KpiMetricName.NODE_MISS_RATE, q, fn / (tp + fn), "ratio"),
-        ]
+        metrics.append(_metric(KpiMetricName.NODE_RECALL, q, tp / (tp + fn), "ratio", config.KPI_MIN_RECALL))
+    # 보조
+    if tp + fn:
+        metrics.append(_metric(KpiMetricName.NODE_MISS_RATE, q, fn / (tp + fn), "ratio"))
     if critical:
         missed = sum(r.verdict is NodeVerdict.MISSED for r in critical)
         metrics.append(_metric(KpiMetricName.CRITICAL_MISS_RATE, q, missed / len(critical), "ratio"))
     if tp + fp:  # 검토 부담 참고 지표 (측정만)
         metrics.append(_metric(KpiMetricName.NODE_PRECISION, q, tp / (tp + fp), "ratio"))
-    if (g := group_kpis(changed, lambda r: "all").get("all")) and g.precision is not None:  # 정밀도 주 지표
-        metrics.append(_metric(KpiMetricName.CHANGE_NODE_PRECISION, q, g.precision, "ratio", config.KPI_MIN_PRECISION))
     metrics += [
         _metric(KpiMetricName.EXCLUDED_NODES, q, count[NodeVerdict.EXCLUDED], "count"),
         _metric(KpiMetricName.OUT_OF_SCOPE_NODES, q, count[NodeVerdict.OUT_OF_SCOPE], "count"),
@@ -268,6 +277,12 @@ def hop_tags(state: AgentState) -> dict[str, str]:
 def change_judgements(state: AgentState, key: AnswerKey) -> list[NodeJudgement]:
     """[변경] 으로 표시한 노드의 판정 ([변경] 노드 정밀도용). 평가 제외·범위 밖은 노드 정밀도와 같이 세지 않는다."""
     return judge(key, [n for n, t in hop_tags(state).items() if t == "change"])
+
+
+def change_hits(state: AgentState, key: AnswerKey) -> tuple[int, int]:
+    """[변경] 재현율용 (정답 변경 노드 중 [변경] 으로 맞힌 수, 정답 변경 노드 수)."""
+    changed = {n for n, t in hop_tags(state).items() if t == "change"}
+    return len(changed & set(key.change_nodes)), len(key.change_nodes)
 
 
 def tag_accuracy(tags: dict[str, str], key: AnswerKey, j: KpiCategory) -> tuple[list[KpiMetric], list[str]]:
@@ -364,7 +379,7 @@ class KpiAgent(BaseAgent[KpiOutput]):
 
         rows = judge(key, nodes)
         judged, notes = judgement_metrics(state, key, complexity)
-        metrics = quality_metrics(rows, change_judgements(state, key)) + judged + metrics
+        metrics = quality_metrics(rows, change_judgements(state, key), change_hits(state, key)) + judged + metrics
         failed = [m for m in metrics if m.passed is False]
         return KpiOutput(
             **base,
