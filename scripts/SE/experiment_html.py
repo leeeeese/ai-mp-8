@@ -266,7 +266,7 @@ document.getElementById("fps").innerHTML = fps.map(f => `<li>${f.case} <code>${f
 
 // --- 케이스별 회차 값 ---
 (function () {
-  const cols = [["[변경] 재현", c => `${c.change_hit}/${c.change_total}`], ["[변경] 오탐", c => `${c.change_fp.length}`],
+  const cols = [["[변경] 재현", c => c.change_total ? `${c.change_hit}/${c.change_total}` : "-"], ["[변경] 오탐", c => `${c.change_fp.length}`],
                 ["태그 정확도", c => c.tag == null ? "-" : c.tag.toFixed(2)], ["탐지율", c => c.node_recall == null ? "-" : c.node_recall.toFixed(2)],
                 ["SE(s)", c => `${Math.round(c.se_seconds)}`]];
   const reps = REPS.map(r => `r${r.repeat}`).join(" · ");

@@ -59,6 +59,7 @@ class AnswerKey(BaseModel):
     system: Domain | None = Field(default=None, description="swing / tos (집계 축)")
     sm_part: SmPart | None = None
     complexity: Complexity | None = Field(default=None, description="정답 복잡도 (집계 축·확장 KPI 용)")
+    input_type: str | None = Field(default=None, description="정답셋 입력 유형 (requirement / ops_inquiry). 운영 문의는 [변경] 재현율 제외")
     eval_target_labels: list[str] = Field(default_factory=list, description="평가할 노드 유형. 비우면 전체 유형")
     answer_nodes: list[AnswerNode] = Field(default_factory=list, description="반드시 찾아야 하는 노드 (탐지율 분모)")
     excluded_nodes: list[ExcludedNode] = Field(default_factory=list)

@@ -2978,6 +2978,19 @@
           "default": null,
           "description": "정답 복잡도 (집계 축·확장 KPI 용)"
         },
+        "input_type": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "description": "정답셋 입력 유형 (requirement / ops_inquiry). 운영 문의는 [변경] 재현율 제외",
+          "title": "Input Type"
+        },
         "eval_target_labels": {
           "description": "평가할 노드 유형. 비우면 전체 유형",
           "items": {

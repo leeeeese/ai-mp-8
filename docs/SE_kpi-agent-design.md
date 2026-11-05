@@ -1,4 +1,4 @@
-# Agent 설계서: KPI Agent (v0.6)
+# Agent 설계서: KPI Agent (v0.7)
 
 > 담당: **KPI Agent** · Simulator · Verifier · Composer (SE, [SE_agent_design.md](SE_agent_design.md)) / Supervisor · Planner · Explorer · Retriever ([YJ_agent_design.md](YJ_agent_design.md))
 > 자연어 요건 기반 영향도 분석 AI Agent PoC 의 성능 측정용 평가 에이전트. 기준: [agent_workflow_diagram.png](agent_workflow_diagram.png), 노드 ID 규칙 [mock_data.md](mock_data.md). 기준일 2026-11-05. 남은 과제는 8장.
@@ -13,6 +13,7 @@
 | v0.4 (2026-11-03) | [변경] 노드 정밀도 `change_node_precision` 추가 (측정만). 정답 노드가 1개인 요건은 노드 정밀도 하한 미적용. 근거: [planner_detail_analysis_to-be.md](planner_detail_analysis_to-be.md) 4장 #2·#3. 에이전트 출력과 정합: 단순 `final_nodes` 를 Composer 단순 응답 경로로, `tool_calls` 를 라운드별 최댓값으로 (`tool_calls_total` 추가), `explore_loops` 를 Retriever 실행 수 합계로 |
 | v0.5 (2026-11-03) | 정밀도 주 지표를 [변경] 노드 정밀도로: `KPI_MIN_PRECISION` 하한을 `change_node_precision` 에 적용하고 `node_precision` 은 측정만 (정답 노드 1개 예외 규칙은 필요 없어져 삭제). 근거: 노드 정밀도는 결과 경로 수가 정해 SE 판정으로 움직이지 않음 (SE v3 기준 무관 경로를 모두 빼도 0.21 상한), [변경] 정밀도는 판정 정확도를 직접 보여 줌 (v1~v3 0.89~0.97) |
 | v0.6 (2026-11-05) | [변경] 재현율 `change_node_recall` 을 KPI Agent 정식 지표로 추가 (측정만, 이전에는 실험 스크립트·KPI 화면에서만 계산). 1-4 KPI 표를 **핵심 3지표**([변경] 노드 정밀도 → [변경] 재현율 → 노드 탐지율)와 **보조 지표**로 분리하고, KPI 화면·실험 리포트·배치 평가·실행 스크립트·에이전트 로그의 지표 순서를 같게 맞추고, 실험(`run_experiment.py`)의 노드 탐지율·정밀도를 케이스 평균에서 합산 비율로 바꿈 |
+| v0.7 (2026-11-05) | **운영 문의는 [변경] 재현율에서 제외**: 정답셋 `input_type=ops_inquiry`(SC-002·SC-004·SC-006)는 원인 확인 요청이라 [변경] 표시를 기대하지 않는다. 지표 생략·합산 분모 제외. 판별은 Planner 판정이 아니라 정답셋 값 (`AnswerKey.input_type`). [변경] 노드 정밀도·`change_tag_accuracy` 는 그대로 |
 
 ## 0. 한눈에 보기
 
@@ -178,7 +179,7 @@ load_inputs → validate → extract → normalize → match → classify → ag
 | KPI (`KpiMetricName`) | 계산식 | 기준 |
 |---|---|---|
 | [변경] 노드 정밀도 `change_node_precision` (정밀도 주 지표) | [변경] 으로 표시한 노드 중 TP ÷ (TP + FP) | `KPI_MIN_PRECISION` 이상. [변경] 표시가 없으면 생략 |
-| [변경] 재현율 `change_node_recall` | 정답 변경 노드 중 [변경] 으로 맞힌 수 ÷ 정답 변경 노드 수 | 측정만 (threshold 없음). 정답 변경 노드가 없으면 생략 |
+| [변경] 재현율 `change_node_recall` | 정답 변경 노드 중 [변경] 으로 맞힌 수 ÷ 정답 변경 노드 수 | 측정만 (threshold 없음). 정답 변경 노드가 없거나 **운영 문의**(정답셋 `input_type=ops_inquiry`)면 생략 |
 | 노드 탐지율 `node_recall` (= 재현율) | TP ÷ (TP + FN) | `KPI_MIN_RECALL` 이상 |
 
 **보조 지표 (quality)**
@@ -191,7 +192,7 @@ load_inputs → validate → extract → normalize → match → classify → ag
 | 평가 제외 수 `excluded_nodes`, 범위 밖 수 `out_of_scope_nodes` | 건수 | 항상 함께 공개 |
 
 - 비율은 0~1 로 저장하고 리포트에서 % 로 표시한다. 분모가 0 이면 "해당 없음"(지표 생략).
-- **[변경] 재현율:** 정답 변경 노드(`AnswerKey.change_nodes` = `expected.impacted` 중 modify·add) 중 에이전트가 [변경] 으로 표시한 노드의 비율. [변경] 표시는 `change_tag_accuracy`·`change_node_precision` 과 같은 출처(`hop_tags`: 복잡 = Simulator 영향 경로, 단순 = Composer 단순 응답 경로). 계산은 `kpi.change_hits` 하나를 KPI Agent·KPI 화면 기록(`api/views.kpi_record` 의 `counts.change_hit / change_total`)·배치 평가가 함께 쓴다. 실험 스크립트(`scripts/SE/run_experiment.py`)의 `change_recall` 도 같은 정의다 (16건 합산).
+- **[변경] 재현율:** 정답 변경 노드(`AnswerKey.change_nodes` = `expected.impacted` 중 modify·add) 중 에이전트가 [변경] 으로 표시한 노드의 비율. [변경] 표시는 `change_tag_accuracy`·`change_node_precision` 과 같은 출처(`hop_tags`: 복잡 = Simulator 영향 경로, 단순 = Composer 단순 응답 경로). 계산은 `kpi.change_hits` 하나를 KPI Agent·KPI 화면 기록(`api/views.kpi_record` 의 `counts.change_hit / change_total`)·배치 평가가 함께 쓴다. 실험 스크립트(`scripts/SE/run_experiment.py`)의 `change_recall` 도 같은 정의다 (16건 합산). **운영 문의**(정답셋 `input_type=ops_inquiry`: SC-002·SC-004·SC-006)는 원인을 확인하는 요청이라 [변경] 표시를 기대하지 않으므로 `change_hits` 가 (0, 0) 을 돌려 지표를 생략하고 합산 분모에서도 뺀다 (v0.7). 판별은 Planner 의 운영 문의 판정이 아니라 정답셋 값이다 (판정이 틀려도 채점 대상이 흔들리지 않게).
 - **노드 정밀도와 [변경] 노드 정밀도:** 노드 정밀도의 분모는 결과 경로 위 노드 전체(`final_nodes`)라 지나가기만 하는 [참조] 노드도 오탐으로 센다. YJ v6 실행에서 KPI 오탐의 96~99% 가 [참조]·표시 없음 노드였다 (v6-3: 노드 정밀도 0.15, [변경] 정밀도 1.00). 그래서 에이전트가 고친다고 한 노드의 정확도인 [변경] 노드 정밀도를 정밀도 주 지표로 쓰고(하한 적용), 노드 정밀도는 검토 부담 참고로 측정만 한다 (v0.5). [변경] 표시는 `change_tag_accuracy` 와 같은 출처를 쓴다 (복잡 = Simulator 영향 경로, 단순 = Composer 단순 응답 경로). 판정 규칙은 노드 정밀도와 같다: 평가 제외·범위 밖 노드는 세지 않는다 (정답 경로 위 노드를 [변경] 으로 표시해도 분모에 넣지 않는다. 그 표시가 맞는지는 `change_tag_accuracy` 가 본다).
 - **정답 노드가 1개인 요건 (v0.4 → v0.5 삭제):** v0.4 에서는 노드 정밀도 하한의 예외로 두었으나 (SC-005: 탐지율 1.00, 노드 정밀도 0.02, [변경] 정밀도 1.00), v0.5 에서 노드 정밀도를 측정만 하게 되어 예외가 필요 없다.
 - **집계 축:** 사례 / 시스템(swing, tos) / SM 파트 / flow(단순·복잡) / 노드 유형 / 단계 / Agent 버전.

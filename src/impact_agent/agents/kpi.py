@@ -53,6 +53,7 @@ _STAGE_BY_PREFIX = {"SCR": 0, "CTL": 1, "TP": 1, "BAT": 1, "SVC": 2, "MOD": 2, "
 _LOGIC_PREFIXES = {"MOD", "SVC"}
 _SYSTEM_PREFIXES = {Domain.SWING: {"TP", "MOD"}, Domain.TOS: {"CTL", "SVC", "SQL"}}
 TYPE_ORDER = list(_TYPE_BY_PREFIX.values())
+OPS_INQUIRY = "ops_inquiry"  # 정답셋 input_type: 운영 문의 ([변경] 재현율 제외)
 
 
 def _prefix(node_id: str) -> str:
@@ -128,6 +129,7 @@ def load_answer_key(path: str | Path) -> AnswerKey:
         system=gt.get("domain") or infer_system(all_nodes),
         sm_part=gt.get("sm_part"),
         complexity=gt.get("complexity"),
+        input_type=gt.get("input_type"),
         eval_target_labels=gt.get("eval_target_labels", []),
         answer_nodes=answers,
         excluded_nodes=[ExcludedNode(node_id=n, reason=r) for n, r in excluded.items()],
@@ -280,7 +282,13 @@ def change_judgements(state: AgentState, key: AnswerKey) -> list[NodeJudgement]:
 
 
 def change_hits(state: AgentState, key: AnswerKey) -> tuple[int, int]:
-    """[변경] 재현율용 (정답 변경 노드 중 [변경] 으로 맞힌 수, 정답 변경 노드 수)."""
+    """[변경] 재현율용 (정답 변경 노드 중 [변경] 으로 맞힌 수, 정답 변경 노드 수).
+
+    운영 문의(정답셋 input_type=ops_inquiry)는 원인 확인 요청이라 [변경] 표시를 기대하지 않으므로 (0, 0) → 재현율 생략·합산 제외.
+    판별은 Planner 판정이 아니라 정답셋 값으로 한다 (판정이 틀려도 채점 대상이 흔들리지 않게).
+    """
+    if key.input_type == OPS_INQUIRY:
+        return 0, 0
     changed = {n for n, t in hop_tags(state).items() if t == "change"}
     return len(changed & set(key.change_nodes)), len(key.change_nodes)
 

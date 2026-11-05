@@ -165,6 +165,14 @@ def test_change_node_recall():
     assert KpiMetricName.CHANGE_NODE_RECALL not in metrics(KpiAgent().run(tag_hops(make_state(OUTPUT), {"SCR:S1"})))  # 정답 변경 노드 없음 → 생략
 
 
+def test_change_node_recall_skips_ops_inquiry():
+    # 운영 문의는 원인 확인 요청이라 [변경] 재현율에서 뺀다. [변경] 정밀도는 그대로 본다
+    key = KEY.model_copy(update={"change_nodes": ["SCR:S1", "TBL:T1", "MOD:M2"], "input_type": "ops_inquiry"})
+    v = metrics(KpiAgent().run(tag_hops(make_state(OUTPUT, answer_key=key), {"SCR:S1", "MOD:M9"})))
+    assert KpiMetricName.CHANGE_NODE_RECALL not in v
+    assert v[KpiMetricName.CHANGE_NODE_PRECISION] == pytest.approx(1 / 2)
+
+
 def test_precision_threshold_on_change_nodes_not_path_nodes():
     # 노드 정밀도는 경로 위 노드 전체가 분모라 측정만, 하한은 [변경] 노드 정밀도에 적용
     key = AnswerKey(req_id="T-1", answer_nodes=[answer("TBL:T1", 4)])

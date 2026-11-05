@@ -209,7 +209,7 @@ def report(meta: dict, data: dict, base: dict | None) -> str:
         vs = [r["cases"].get(c) for r in reps if c in r["cases"]]
         if not vs:
             continue
-        hits = " · ".join(f"{v['change_hit']}/{v['change_total']}" for v in vs)
+        hits = " · ".join(f"{v['change_hit']}/{v['change_total']}" if v["change_total"] else "-" for v in vs)  # 운영 문의 등 제외는 -
         fps = " · ".join(str(len(v["change_fp"])) for v in vs)
         recalls, tags = " · ".join(fmt(v["node_recall"]) for v in vs), " · ".join(fmt(v["tag"]) for v in vs)
         L.append(f"| {c} | {vs[0]['complexity']} | {hits} | {fps} | {recalls} | {tags} |")

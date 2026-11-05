@@ -30,7 +30,7 @@ PoC 평가용 에이전트. **Composer 이후** 실행하며, 결과는 Composer
 | 지표 | 계산 | 기준 |
 |---|---|---|
 | change_node_precision ([변경] 노드 정밀도, 정밀도 주 지표) | [변경] 으로 표시한 노드 중 TP / (TP + FP) | ≥ KPI_MIN_PRECISION |
-| change_node_recall ([변경] 재현율) | 정답 변경 노드 중 [변경] 으로 맞힌 수 / 정답 변경 노드 수 | - (측정만) |
+| change_node_recall ([변경] 재현율) | 정답 변경 노드 중 [변경] 으로 맞힌 수 / 정답 변경 노드 수 | - (측정만, 운영 문의 `input_type=ops_inquiry` 는 제외) |
 | node_recall (노드 탐지율) | TP / (TP + FN) | ≥ KPI_MIN_RECALL |
 
 ## 보조 지표 (quality)
