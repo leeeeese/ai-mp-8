@@ -36,7 +36,7 @@ from experiment_html import write_html  # noqa: E402
 from replay_run import RUNS, replay_all  # noqa: E402
 from run_scenarios import GT_DIR, ROOT, run_all  # noqa: E402
 
-from impact_agent.agents.kpi import change_judgements, hop_tags, load_answer_key  # noqa: E402
+from impact_agent.agents.kpi import change_hits, change_judgements, hop_tags, load_answer_key  # noqa: E402
 from impact_agent.agents.simulator import MAX_CONTEXT_PATHS, REFERENCE_IMPACT  # noqa: E402
 from impact_agent.rules import build_impact_paths  # noqa: E402
 from impact_agent.schemas import NodeVerdict  # noqa: E402
@@ -46,10 +46,10 @@ EXP_ROOT = RUNS / "experiments"
 # 실험 지표: (키, 이름, 좋아지는 방향 +1/-1). 정밀도 주 지표는 [변경] 노드 정밀도 (KPI 설계서 v0.5)
 METRICS = [
     ("change_precision", "[변경] 노드 정밀도 (합산)", 1), ("change_recall", "[변경] 재현율 (합산)", 1),
-    ("node_recall", "노드 탐지율 (평균)", 1), ("tag_complex", "태그 정확도 complex (평균)", 1),
+    ("node_recall", "노드 탐지율 (합산)", 1), ("tag_complex", "태그 정확도 complex (평균)", 1),
     ("tag_simple", "태그 정확도 simple (평균)", 1), ("difficulty_match", "난이도 일치 (건)", 1),
     ("area_match", "영역 일치 (평균)", 1), ("unneeded", "불필요한 권장 (건)", -1),
-    ("node_precision", "노드 정밀도 (평균, 참고)", 1), ("se_seconds", "SE 구간 시간 (초)", -1), ("se_tokens", "SE 토큰", -1),
+    ("node_precision", "노드 정밀도 (합산, 참고)", 1), ("se_seconds", "SE 구간 시간 (초)", -1), ("se_tokens", "SE 토큰", -1),
     ("total_seconds", "전체 시간 (초)", -1), ("result_paths", "결과 경로 수 (합)", -1),
 ]
 E2E = "e2e"  # meta.from 값: 상류를 고정하지 않고 회차마다 전체 흐름 실행
@@ -98,6 +98,8 @@ def case_values(state: AgentState, kpi: dict) -> dict:
     tags = hop_tags(state)
     changed = {n for n, t in tags.items() if t == "change"}
     rows = change_judgements(state, key)
+    hit, total = change_hits(state, key)
+    verdicts = [r.verdict for r in (state.kpi.judgements if state.kpi else [])]  # 노드 탐지율·정밀도 합산용 (KPI 판정표)
     se = [r for r in state.agent_runs if r.agent in ("simulator", "verifier", "composer")]
     missed = [n for n in key.change_nodes if n not in changed]
     if state.simulation is not None:
@@ -106,7 +108,9 @@ def case_values(state: AgentState, kpi: dict) -> dict:
         paths = {p.path_id for p in (state.composer.simple_answer.impact_paths if state.composer and state.composer.simple_answer else [])}
     return {
         "complexity": key.complexity.value if key.complexity else "-",
-        "change_hit": len(changed & set(key.change_nodes)), "change_total": len(key.change_nodes),
+        "change_hit": hit, "change_total": total,
+        "tp": verdicts.count(NodeVerdict.DETECTED), "fn": verdicts.count(NodeVerdict.MISSED),
+        "fp": verdicts.count(NodeVerdict.FALSE_POSITIVE),
         "change_tp": sum(r.verdict is NodeVerdict.DETECTED for r in rows),
         "change_fp": [r.node_id for r in rows if r.verdict is NodeVerdict.FALSE_POSITIVE],
         "node_recall": kpi.get("node_recall"), "node_precision": kpi.get("node_precision"),
@@ -128,11 +132,13 @@ def repeat_metrics(cases: dict[str, dict], flows: dict[str, str]) -> dict:
 
     tp, fp = sum(v["change_tp"] for v in vals), sum(len(v["change_fp"]) for v in vals)
     hit, total = sum(v["change_hit"] for v in vals), sum(v["change_total"] for v in vals)
+    # 노드 탐지율·정밀도도 KPI 설계서·화면·eval_kpi.py 와 같이 TP/FN/FP 를 합산한 뒤 비율 (케이스 비율의 평균이 아님)
+    ntp, nfn, nfp = (sum(v.get(k, 0) for v in vals) for k in ("tp", "fn", "fp"))
     return {
         "change_precision": tp / (tp + fp) if tp + fp else None, "change_recall": hit / total if total else None,
-        "node_recall": mean("node_recall"), "tag_complex": mean("tag", "complex"), "tag_simple": mean("tag", "simple"),
+        "node_recall": ntp / (ntp + nfn) if ntp + nfn else None, "tag_complex": mean("tag", "complex"), "tag_simple": mean("tag", "simple"),
         "difficulty_match": sum(v["difficulty_match"] or 0 for v in vals), "area_match": mean("area_match"),
-        "unneeded": sum(f == "불필요한 권장" for f in flows.values()), "node_precision": mean("node_precision"),
+        "unneeded": sum(f == "불필요한 권장" for f in flows.values()), "node_precision": ntp / (ntp + nfp) if ntp + nfp else None,
         "se_seconds": sum(v["se_seconds"] for v in vals), "se_tokens": sum(v["se_tokens"] for v in vals),
         "total_seconds": sum(v.get("total_seconds", 0) for v in vals), "result_paths": sum(v.get("result_paths", 0) for v in vals),
         "miss_kinds": dict(Counter(k for v in vals for k in v["missed_change"].values())),

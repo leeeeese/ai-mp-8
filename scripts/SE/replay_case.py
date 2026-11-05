@@ -64,8 +64,8 @@ CHANGE_TAG = "[변경]"
 AUTO_METRICS = [
     ("area_impact_match", "S1 영역 영향 일치"), ("difficulty_match", "S2 난이도 일치"), ("feasibility_match", "S3 가능 여부 일치"),
     ("change_tag_accuracy", "S4·S5 변경/참조 표시"), ("wrong_path_adopted", "오답 경로 채택"),
-    ("node_recall", "탐지율"), ("critical_miss_rate", "Critical 미탐률"), ("node_precision", "노드 정밀도(참고)"),
-    ("change_node_precision", "[변경] 정밀도"),
+    ("change_node_precision", "[변경] 정밀도"), ("change_node_recall", "[변경] 재현율"), ("node_recall", "탐지율"),  # 핵심
+    ("critical_miss_rate", "Critical 미탐률"), ("node_precision", "노드 정밀도(참고)"),  # 보조
 ]
 
 

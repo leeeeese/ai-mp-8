@@ -48,7 +48,7 @@ Supervisor 는 LangGraph `StateGraph(AgentState)` 의 조건부 엣지로 구현
 - NodeRole: Entry / EntryHandler / Logic / DataAccess / Table / Column (영역별 노드 라벨은 `GraphNode.label` 문자열)
 - Direction: forward / reverse / forward_then_reverse
 - KpiCategory: quality / performance
-- KpiMetricName: node_recall, node_miss_rate, critical_miss_rate, node_precision, change_node_precision, excluded_nodes, out_of_scope_nodes, latency_ms, tool_calls, tool_calls_total, explore_loops, replans, total_tokens
+- KpiMetricName: 핵심 change_node_precision, change_node_recall, node_recall / 보조 node_miss_rate, critical_miss_rate, node_precision, excluded_nodes, out_of_scope_nodes / 판정 품질(측정만) complexity_match, difficulty_match, feasibility_match, area_impact_match, change_tag_accuracy, wrong_path_adopted, detail_recommended, complex_minor, verifier_unresolved / 성능 latency_ms, tool_calls, tool_calls_total, explore_loops, replans, total_tokens
 
 ## 데이터 소스
 

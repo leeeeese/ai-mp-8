@@ -128,7 +128,8 @@ def replay_all(source_run: str, out_dir: Path, cases: list[str] | None = None, f
         save()
         k = summary[-1]["result"]["kpi"]
         print(f"[{case}] 완료 SE {flow['replay']['se_seconds']:.0f}s  권장 {flow['detail_flow']}  "
-              f"탐지율 {fmt(k.get('node_recall'))}  [변경] 정밀도 {fmt(k.get('change_node_precision'))}  노드 정밀도 {fmt(k.get('node_precision'))}", flush=True)
+              f"[변경] 정밀도 {fmt(k.get('change_node_precision'))}  [변경] 재현율 {fmt(k.get('change_node_recall'))}  "
+              f"탐지율 {fmt(k.get('node_recall'))}  노드 정밀도(참고) {fmt(k.get('node_precision'))}", flush=True)
     save()
     print(f"기록: {out_dir}")
     return summary

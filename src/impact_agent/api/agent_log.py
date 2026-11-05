@@ -316,7 +316,9 @@ def kpi_brief(state: AgentState) -> str:
     if k is None or not k.evaluable:
         return "정답셋 없음 · 결과물에 반영 안 함"
     v = {m.name.value: m.value for m in k.metrics}
-    parts = [f"{label} {v[n]:.2f}" for n, label in (("node_recall", "탐지율"), ("node_precision", "정밀도"), ("complexity_match", "복잡도 일치"))
+    # 핵심 3지표 ([변경] 노드 정밀도 → [변경] 재현율 → 노드 탐지율, KPI 설계서 1-4) + 복잡도 일치
+    parts = [f"{label} {v[n]:.2f}" for n, label in (("change_node_precision", "[변경] 정밀도"), ("change_node_recall", "[변경] 재현율"),
+                                                    ("node_recall", "탐지율"), ("complexity_match", "복잡도 일치"))
              if v.get(n) is not None]
     return " │ ".join(parts + ["결과물에 반영 안 함"])
 
@@ -326,8 +328,10 @@ def kpi_rows(state: AgentState) -> list[tuple[str, str]]:
     if k is None or not k.evaluable:
         return [("정답셋", "없음 (성능 지표만 기록)")]
     values = {m.name.value: m.value for m in k.metrics}
-    names = {"node_recall": "노드 탐지율", "node_precision": "노드 정밀도", "complexity_match": "복잡도 일치", "feasibility_match": "가능성 일치",
-             "difficulty_match": "난이도 일치", "area_impact_match": "영역 일치"}
+    names = {"change_node_precision": "[변경] 노드 정밀도", "change_node_recall": "[변경] 재현율", "node_recall": "노드 탐지율",  # 핵심
+             "critical_miss_rate": "Critical 미탐률", "node_precision": "노드 정밀도 (참고)",  # 보조
+             "complexity_match": "복잡도 일치", "feasibility_match": "가능성 일치", "difficulty_match": "난이도 일치",
+             "area_impact_match": "영역 일치"}
     rows = [(label, f"{values[n]:.3f}") for n, label in names.items() if values.get(n) is not None]
     if k.missed_nodes:
         rows.append(("미탐", ", ".join(k.missed_nodes)))

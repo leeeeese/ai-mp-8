@@ -1,7 +1,7 @@
-# Agent 설계서: KPI Agent (v0.3 초안)
+# Agent 설계서: KPI Agent (v0.6)
 
 > 담당: **KPI Agent** · Simulator · Verifier · Composer (SE, [SE_agent_design.md](SE_agent_design.md)) / Supervisor · Planner · Explorer · Retriever ([YJ_agent_design.md](YJ_agent_design.md))
-> 자연어 요건 기반 영향도 분석 AI Agent PoC 의 성능 측정용 평가 에이전트. 기준: [agent_workflow_diagram.png](agent_workflow_diagram.png), 노드 ID 규칙 [mock_data.md](mock_data.md). 기준일 2026-10-27. 남은 과제는 8장.
+> 자연어 요건 기반 영향도 분석 AI Agent PoC 의 성능 측정용 평가 에이전트. 기준: [agent_workflow_diagram.png](agent_workflow_diagram.png), 노드 ID 규칙 [mock_data.md](mock_data.md). 기준일 2026-11-05. 남은 과제는 8장.
 
 ## 변경 이력
 
@@ -12,7 +12,7 @@
 | v0.3 | 형식을 YJ 설계서와 통일 (에이전트 단위 역할·입력·처리·출력). 입력·출력을 구현 모델(`AnswerKey`, `AgentRunRecord`, `KpiOutput`)과 그래프 노드 ID(`<접두어>:<키>`)로 표기. 배치 평가(`scripts/eval_kpi.py`) 추가 |
 | v0.4 (2026-11-03) | [변경] 노드 정밀도 `change_node_precision` 추가 (측정만). 정답 노드가 1개인 요건은 노드 정밀도 하한 미적용. 근거: [planner_detail_analysis_to-be.md](planner_detail_analysis_to-be.md) 4장 #2·#3. 에이전트 출력과 정합: 단순 `final_nodes` 를 Composer 단순 응답 경로로, `tool_calls` 를 라운드별 최댓값으로 (`tool_calls_total` 추가), `explore_loops` 를 Retriever 실행 수 합계로 |
 | v0.5 (2026-11-03) | 정밀도 주 지표를 [변경] 노드 정밀도로: `KPI_MIN_PRECISION` 하한을 `change_node_precision` 에 적용하고 `node_precision` 은 측정만 (정답 노드 1개 예외 규칙은 필요 없어져 삭제). 근거: 노드 정밀도는 결과 경로 수가 정해 SE 판정으로 움직이지 않음 (SE v3 기준 무관 경로를 모두 빼도 0.21 상한), [변경] 정밀도는 판정 정확도를 직접 보여 줌 (v1~v3 0.89~0.97) |
-| v0.6 (2026-11-05) | [변경] 재현율 `change_node_recall` 을 KPI Agent 정식 지표로 추가 (측정만, 이전에는 실험 스크립트·KPI 화면에서만 계산). 1-4 KPI 표를 **핵심 3지표**([변경] 노드 정밀도 → [변경] 재현율 → 노드 탐지율)와 **보조 지표**로 분리하고, KPI 화면·실험 리포트·배치 평가의 지표 순서를 같게 맞춤 |
+| v0.6 (2026-11-05) | [변경] 재현율 `change_node_recall` 을 KPI Agent 정식 지표로 추가 (측정만, 이전에는 실험 스크립트·KPI 화면에서만 계산). 1-4 KPI 표를 **핵심 3지표**([변경] 노드 정밀도 → [변경] 재현율 → 노드 탐지율)와 **보조 지표**로 분리하고, KPI 화면·실험 리포트·배치 평가·실행 스크립트·에이전트 로그의 지표 순서를 같게 맞추고, 실험(`run_experiment.py`)의 노드 탐지율·정밀도를 케이스 평균에서 합산 비율로 바꿈 |
 
 ## 0. 한눈에 보기
 
@@ -337,7 +337,7 @@ PYTHONPATH=src python3 scripts/SE/run_experiment.py --from <run> --repeat 3 --ex
 PYTHONPATH=src python3 scripts/SE/run_experiment.py --e2e --repeat 3 --exp-id <e2e 실험> --label "e2e"      # 상류 고정 없이 전체 흐름 반복
 ```
 
-- 모드: 상류 고정(`--from <run>`)은 SE 구간만 반복해 SE 변경 효과를 본다 (재계획 미실행, `scripts/SE/replay_run.py` 와 같음). e2e(`--e2e`)는 회차마다 전체 흐름(재계획 포함, `run_scenarios.py` 와 같음)을 새로 실행해 에이전트 전체 성능과 상류까지 포함한 실행 편차를 본다. 케이스를 생략하면 e2e 는 정답셋 16건
+- 모드: 상류 고정(`--from <run>`)은 SE 구간만 반복해 SE 변경 효과를 본다 (재계획 미실행, `scripts/SE/replay_run.py` 와 같음). [변경] 노드 정밀도·재현율·노드 탐지율·노드 정밀도는 케이스 비율의 평균이 아니라 TP·FP·FN·맞힌 수를 합산한 비율로 낸다 (1-4·배치 평가·KPI 화면과 같음). e2e(`--e2e`)는 회차마다 전체 흐름(재계획 포함, `run_scenarios.py` 와 같음)을 새로 실행해 에이전트 전체 성능과 상류까지 포함한 실행 편차를 본다. 케이스를 생략하면 e2e 는 정답셋 16건
 - 출력: `outputs/runs/SE/experiments/<exp_id>/r1…rN/`(회차별, `run_scenarios.py` 형식), `experiment.md`·`experiment.json`·`experiment.html`(`scripts/SE/experiment_html.py`)
 - 지표: [변경] 노드 정밀도(주 지표)·[변경] 재현율·탐지율·태그 정확도·난이도·영역 일치·불필요한 권장·노드 정밀도(참고)·SE 시간·토큰·전체 시간·결과 경로 수의 회차 평균·범위, 케이스별 회차 값, 놓친 [변경] 노드 분류(경로에 없음 / LLM 입력 밖 / 판정 누락 / LLM 이 [참조] 판정 / 표시 없음), [변경] 오탐 빈도
 - 비교 판정: 평균 차이가 두 실험의 회차 범위 중 큰 값보다 크면 개선·악화, 아니면 편차 안. 비교할 실험은 모드·상류가 같아야 한다 (다르면 경고. e2e 와 상류 고정을 비교하면 탐지율·경로 수·시간 차이에 상류 변동이 섞인다)

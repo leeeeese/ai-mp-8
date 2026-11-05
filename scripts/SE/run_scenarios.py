@@ -46,8 +46,9 @@ GT_DIR = ROOT / "eval" / "ground_truth"
 DIFFICULTY = {"Major": "상", "Medium": "중", "Minor": "하"}
 # summary 에 옮길 KPI 지표 (KpiMetricName 값). 없는 지표는 '-' (해당 없음)
 SUMMARY_METRICS = [
-    ("node_recall", "탐지율"), ("critical_miss_rate", "Critical 미탐률"), ("node_precision", "노드 정밀도(참고)"),
-    ("change_node_precision", "[변경] 정밀도"), ("complexity_match", "복잡도 일치"), ("difficulty_match", "난이도 일치"), ("feasibility_match", "가능 여부 일치"),
+    ("change_node_precision", "[변경] 정밀도"), ("change_node_recall", "[변경] 재현율"), ("node_recall", "탐지율"),  # 핵심
+    ("critical_miss_rate", "Critical 미탐률"), ("node_precision", "노드 정밀도(참고)"),  # 보조
+    ("complexity_match", "복잡도 일치"), ("difficulty_match", "난이도 일치"), ("feasibility_match", "가능 여부 일치"),
     ("area_impact_match", "영역 일치"), ("change_tag_accuracy", "변경/참조 표시"), ("wrong_path_adopted", "오답 경로 채택"),
     ("verifier_unresolved", "Verifier 미해결"),
 ]
@@ -381,7 +382,8 @@ def run_all(cases: list[str], out_dir: Path, fresh: bool = False, rebuild: bool 
         save()
         k = summary[-1]["result"]["kpi"]
         print(f"[{case}] 완료 {seconds:.0f}s  흐름 {flow['path']}  권장 {flow['detail_flow']}  "
-              f"탐지율 {fmt(k.get('node_recall'))}  [변경] 정밀도 {fmt(k.get('change_node_precision'))}  노드 정밀도 {fmt(k.get('node_precision'))}", flush=True)
+              f"[변경] 정밀도 {fmt(k.get('change_node_precision'))}  [변경] 재현율 {fmt(k.get('change_node_recall'))}  "
+              f"탐지율 {fmt(k.get('node_recall'))}  노드 정밀도(참고) {fmt(k.get('node_precision'))}", flush=True)
     save()
     print(f"기록: {out_dir}")
     return summary
