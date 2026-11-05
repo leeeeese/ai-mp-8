@@ -1,7 +1,7 @@
 """상류 고정 재실행: 저장된 run 의 Planner·Explorer·Retriever 결과를 그대로 두고 Simulator → Verifier → Composer → KPI 만 현재 코드로 다시 실행한다.
 
 run_scenarios.py 의 16건 실행은 상류(Planner·Explorer)가 실행마다 달라서 SE 변경 효과와 상류 변동이 섞인다.
-같은 상류 입력으로 SE 구간만 다시 돌려 이전 run 과 바로 비교한다 (replay_case.py 는 케이스 하나를 새 스냅샷으로 여러 번 재생).
+같은 상류 입력으로 SE 구간만 다시 돌려 이전 run 과 바로 비교한다 (여러 번 반복해 평균·범위를 보려면 run_experiment.py --from).
 
     PYTHONPATH=src python3 scripts/SE/replay_run.py --from 20261103-v2 --run-id 20261103-v3-fixed            (전체)
     PYTHONPATH=src python3 scripts/SE/replay_run.py --from 20261103-v2 --run-id 20261103-v3-fixed H-1 H-2   (일부)
