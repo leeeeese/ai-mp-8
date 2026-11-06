@@ -376,9 +376,9 @@ PYTHONPATH=src $PY -m pytest tests/test_api.py tests/test_admin_api.py tests/tes
 - 실행 이름(`<이름>`)·실험 ID 는 자유롭게 정한다 (예: `main-check`, `before`, `after`)
 - 평가 방식은 모든 스크립트가 같다 (아래 "테스트 방식")
 
-**하고 싶은 것별 명령**
+**용도별 실행 명령**
 
-| 하고 싶은 것 | 명령 | 결과 |
+| 용도 | 명령 | 결과 |
 |---|---|---|
 | 16건을 한 번 돌려 전체 상태 확인 (통합 테스트) | `VERBOSE=1 zsh scripts/YJ/run_all.sh <이름>` | `outputs/runs/YJ/<이름>/report.html` |
 | 일부 케이스만 빠르게 확인 | `PYTHONPATH=src python3 scripts/YJ/run_scenarios.py SC-003 L-4 --run-id <이름>` | `outputs/runs/YJ/<이름>/` |
