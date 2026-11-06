@@ -1,6 +1,6 @@
 # 화면 설계서: impact-agent 웹 UI
 
-> 구현: `frontend/` (React 18 + TypeScript + Vite, API 는 MSW mock). 기준일 2026-10-25.
+> 구현: `frontend/` (React 18 + TypeScript + Vite). API 는 백엔드 FastAPI(`src/impact_agent/api`) 또는 MSW mock(`VITE_USE_MOCK`, 기본). 기준일 2026-11-06.
 
 
 ## 1. 개요
@@ -10,7 +10,7 @@
 | 목적 | SM 담당자가 요건·운영 문의를 넣고, Agent 분석 과정과 결과(레포트·체크리스트)를 확인하며, 그래프 적재 현황을 점검 |
 | 사용자 | 유저(기본 권한), 관리자(기본 + 슈퍼 권한). 사내 SSO 가정 |
 | 기술 | React 18 · TypeScript · Vite / Tailwind CSS + CSS 변수 토큰 / Zustand(UI 상태) · TanStack Query(서버 데이터) / React Router / SSE(EventSource, mock 은 타이머) / Cytoscape.js / MSW / lucide-react / @fontsource (로컬 폰트) |
-| 실행 | `cd frontend && npm install && npm run dev` → http://localhost:5173 |
+| 실행 | `cd frontend && npm install && npm run dev` → http://localhost:5173 (mock). 실제 API 는 `VITE_USE_MOCK=false npm run dev` + 백엔드 (아래 7장, README "웹 UI 실행") |
 
 ## 2. 화면 목록
 
@@ -21,7 +21,7 @@
 | UI-03 | 결과물 | `/session/:id/report` | 기본 | [다크](ui/04-report-dark.png) |
 | UI-04 | 적재 현황 | `/graph` | 기본 (재적재 승인은 슈퍼) | [라이트](ui/05-graph-light.png) |
 | UI-05 | 관리 | `/admin` | 슈퍼 | [다크](ui/06-admin-dark.png) |
-| UI-06 | KPI 평가 | `/kpi` | 기본 (전원 열람) | - |
+| UI-06 | KPI 평가 | `/kpi` | 기본 (전원 열람) | [라이트](ui/07-kpi-light.png) |
 
 ## 3. 디자인 시스템
 
@@ -61,7 +61,9 @@ Dribbble "Forge – AI Agent Code Workspace"(라이트) · "AI Knowledge Base Em
 | `Segmented` | 세그먼트 컨트롤 (`role=radiogroup`), 선택값 glow |
 | `ChipSelect` | 칩 모양 네이티브 select |
 | `Badge`, `ConfidenceBadge` | 상태 배지, 근거 `● 확인` / `◐ 추정` |
-| `AgentProgress` | Agent 진행 패널 (단계·경과·한도 미터·근거) |
+| `Layout`, `Sidebar`, `ThemeToggle` | 공통 레이아웃, 사이드바(메뉴·세션 트리·master 대비 카드·mock 사용자), 해/달 테마 토글 |
+| `AgentProgress` | Agent 진행 패널 (단계·경과·한도 미터·근거, "실행 로그" 버튼) |
+| `AgentLog` | 상세 실행 로그 모달 (에이전트별 받은 입력 → 동작 → 근거 → 결과, `GET /api/sessions/{id}/logs`) |
 | `AnswerCard`, `AreaTable`, `QueryBlock` | 답변 카드, 영역별 판정표, 복사용 확인 쿼리 |
 | `GraphPreview` | Cytoscape 2 hop 그래프 (색 = 공통 역할) |
 | `MasterSyncCard` | 적재 현황 · master 대비 카드 |
@@ -77,6 +79,7 @@ Dribbble "Forge – AI Agent Code Workspace"(라이트) · "AI Knowledge Base Em
 │ 홈            │ 본문 (유동 폭)                                │
 │ 적재 현황     │                                              │
 │ 결과물        │                                              │
+│ KPI 평가      │                                              │
 │ 관리 (관리자) │                                              │
 │ ─ 즐겨찾기    │                                              │
 │ ─ 전체 세션   │                                              │
@@ -121,7 +124,8 @@ Dribbble "Forge – AI Agent Code Workspace"(라이트) · "AI Knowledge Base Em
 ┌ 상단 바: 세션 제목 [SM DBM] [복잡] [분석 중]            ☆ ☾ ┐
 ├──────────────────────────────────────┬──────────────────────┤
 │              [사용자 메시지 (우측)]   │ Agent 진행           │
-│ ┌ Agent 답변 카드 ──────────────────┐ │ ○ Supervisor   진행  │
+│ ┌ Agent 답변 카드 ──────────────────┐ │ Agent 진행 [실행 로그]│
+│ │                                    │ │ ○ Supervisor   진행  │
 │ │ Planner 판정                       │ │ ✓ 1 Planner  완료 1.3s│
 │ │ ▸ 분석 과정 (접힘)                  │ │ ◌ 2-1 Explorer ⇄ 진행 │
 │ │ 요약 결론                          │ │ ○ 2-2 Retriever ⇄    │
@@ -147,6 +151,7 @@ Dribbble "Forge – AI Agent Code Workspace"(라이트) · "AI Knowledge Base Em
 | 답변 카드 (단순) | 결론 + 근거 표(내용·근거·위치·확인) + **복사 가능한 확인 쿼리**(읽기 전용, 사용자가 직접 실행) |
 | 상세 분석 요청 | 단순 응답에서 상세 분석이 권장되면(`detail_analysis_recommended`) "상세 분석 권장" 박스에 사유(`detail_analysis_reasons`, 노드 ID 포함)를 보여 주고, "상세 분석 요청" 버튼 한 번으로 사유를 `reanalysis` 후속 입력으로 보낸다 → 같은 세션이 복잡 요건으로 다시 돈다. 요청 후·분석 중에는 버튼을 막는다. `reanalysis` 는 입력창 유형 선택에는 없다 ([YJ_agent_design.md](YJ_agent_design.md) 1-1) |
 | Agent 진행 패널 | SSE 로 실시간 갱신. 단계별 대기/진행/완료/생략, 경과 시간, 한도 미터(도구 호출 n/20, Explorer ⇄ Retriever 왕복 n/3, 재계획 n/2, 한도 도달 시 경고색), 근거 목록(노드 ID · 파일 · 라인). `aria-live=polite` |
+| 실행 로그 | 진행 패널의 "실행 로그" 버튼 → 모달. 에이전트마다 받은 입력 → 동작 → 근거 → 결과를 라운드 누적으로 보여 주고, 분석 중이면 이어서 갱신 (`AgentLog`, 백엔드 `outputs/logs/<세션 8자>.log` 와 같은 내용) |
 | 후속 입력 | 유형 칩 `추가 질문 / 조회 결과 입력 / 현업 답변 입력 / 변경 분석 요청`, SM 파트 고정 표시. 분석 중에는 비활성 |
 
 - 끝난 세션은 진행 패널을 완료 상태로 그린다 (단순이면 Simulator·Verifier 생략).
@@ -216,7 +221,7 @@ Dribbble "Forge – AI Agent Code Workspace"(라이트) · "AI Knowledge Base Em
 - mock 사용자 3명 (사이드바에서 전환, localStorage 저장): 이세은(유저 · 상품), 권예지(유저 · DBM), 김관리(관리자 · 상품/DBM)
 - Neo4j 쓰기는 적재 파이프라인 전용. 프론트·Agent 는 읽기 API 만
 
-## 7. API (가안, `src/api/types.ts`)
+## 7. API (`src/api/types.ts`, 상세는 [api_design.md](api_design.md))
 
 `SmPart = 'prod' | 'dbm'` (백엔드 `product` / `marketing`, 탐색 영역 swing / tos)
 
@@ -237,7 +242,9 @@ Dribbble "Forge – AI Agent Code Workspace"(라이트) · "AI Knowledge Base Em
 | `GET/POST/PATCH /api/admin/users` | 사용자 목록·추가·수정 |
 | `GET /api/admin/reload-requests`, `POST …/:id/approve\|reject` | 재적재 승인·반려 |
 | `GET /api/admin/audit-logs` | 감사 로그 |
-| `GET /api/kpi/records` | → `KpiRecord[]` (세션별 KPI 기록, 최근 순). 필드는 백엔드 `KpiOutput` 과 같은 이름(`metrics`·`reanalyzed`·`judgement_notes`·`missed_nodes`…) + 세션 정보·합산용 `counts{tp, fn, fp, critical_missed, critical_total}` |
+| `GET /api/sessions/:id/logs` | → 상세 실행 로그 (라운드 누적) |
+| `GET /api/auth/me` | → 현재 사용자 + 권한 |
+| `GET /api/kpi/records` | → `KpiRecord[]` (세션별 KPI 기록, 최근 순). 필드는 백엔드 `KpiOutput` 과 같은 이름(`metrics`·`reanalyzed`·`judgement_notes`·`missed_nodes`…) + 세션 정보·합산용 `counts{tp, fn, fp, critical_missed, critical_total, change_tp, change_fp, change_hit, change_total}` |
 | `DELETE /api/kpi/records` | KPI 기록 전체 초기화 → `{ deleted }` (세션·분석 결과는 지우지 않음) |
 
 ### 백엔드 API 실행 (FastAPI, `src/impact_agent/api`)
@@ -255,7 +262,7 @@ cd frontend && npm run dev                                           # Vite 프�
 - Supervisor·Planner 코드는 고치지 않는다. 진행 SSE 는 API 가 각 에이전트를 감싸(`runner.ProgressAgent`) 실행 시작·완료 때 이벤트를 만든다. Supervisor 하나를 공유하므로 분석은 한 번에 하나씩 순서대로 돈다.
 - 요청 문장이 정답셋(`eval/ground_truth/*.json`)의 `request_text` 와 같으면 정답을 붙여 KPI 품질·판정 지표까지 쌓인다 (같은 시나리오 반복 테스트용).
 - 세션·분석 결과는 메모리(서버 재시작 시 사라짐), KPI 기록은 `outputs/kpi/records.json` (git 제외).
-- UI 입력 유형 → 후속 입력: `answer`→business_answer, `query_result`→query_result, `change`·`chat`→change_analysis (chat 은 가안), `reanalysis`→reanalysis. 체크리스트 답변은 항목 owner 에 따라 business_answer / developer_opinion.
+- UI 입력 유형 → 후속 입력: `answer`→business_answer, `query_result`→query_result, `change`·`chat`→change_analysis (추가 질문은 대응하는 후속 유형이 없어 변경 분석으로 처리), `reanalysis`→reanalysis. 체크리스트 답변은 항목 owner 에 따라 business_answer / developer_opinion.
 - 테스트: `pytest tests/test_api.py` (가짜 Planner·Explorer·Retriever, LLM·Neo4j 없음).
 
 - SSE: `VITE_USE_MOCK=false` 면 `EventSource`, 아니면 같은 이벤트 순서를 타이머로 재생하고 끝나면 mock 저장소에 답변을 붙인다 (`src/api/stream.ts`).
@@ -265,9 +272,10 @@ cd frontend && npm run dev                                           # Vite 프�
 
 | 데이터 | 출처 |
 |---|---|
-| 세션 3건 (SC-001 복잡, SC-006 단순, H-1 상품) | 목업 시나리오 정답셋을 바탕으로 작성한 예시 결과 (`src/mocks/fixtures/scenarios.ts`) |
+| 세션 4건 (DBM: SC-001 복잡 · SC-006 단순, 상품: L-1 단순 · H-1 복잡) | 목업 시나리오 정답셋을 바탕으로 작성한 예시 결과 (`src/mocks/fixtures/scenarios.ts`) |
 | 그래프 샘플 | 실제 적재 그래프(`data/graph`)의 tos·swing 노드·엣지, **소스 원문 제외** (`python scripts/export_ui_graph_sample.py`) |
 | 품질 점검 수치 | 위 그래프에서 계산 (예: dbm 고립 노드 4개) |
+| KPI 기록 | 위 세션 4건의 예시 수치 (KPI 화면에 "목업 예시 데이터" 배지) |
 | master 대비·적재 이력·사용자·재적재 요청·감사 로그 | 가상 값 |
 
 mock 저장소는 메모리라 새로고침하면 초기화된다.
