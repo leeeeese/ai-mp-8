@@ -166,12 +166,13 @@ Neo4j 가입이나 별도 설치는 필요 없습니다. `docker compose up` 시
 
 | 묶음 | 패키지 | 용도 |
 |---|---|---|
-| (기본) | pydantic, jinja2, python-dotenv | 스키마, 흐름 제어, 템플릿, .env 로드 |
+| (기본) | pydantic, jinja2, python-dotenv, langgraph | 스키마, 흐름 제어(Supervisor), 템플릿, .env 로드 |
 | `llm` | openai | 에이전트 LLM 호출 (OpenAI) |
 | `graph` | neo4j | 2-1 Explorer: 의존 그래프 |
-| `report` | markdown, weasyprint | 4 Composer: PDF 저장 |
+| `report` | markdown, weasyprint | 3 Composer: PDF 저장 |
+| `api` | fastapi, uvicorn | 웹 UI 백엔드 API (`src/impact_agent/api`) |
 | `dev` | pytest, ruff | 테스트, 린트 |
-| `all` | llm + graph + report | 전체 런타임 |
+| `all` | llm + graph + report + api | 전체 런타임 |
 
 필요한 묶음만 설치할 수도 있습니다. 예: `pip install -e ".[llm,graph,dev]"`
 
