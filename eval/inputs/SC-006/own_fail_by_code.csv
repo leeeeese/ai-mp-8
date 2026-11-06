@@ -1,0 +1,6 @@
+# 자사: TCH_MMS_SND_TGT (CMPN_ID='C260900301', SND_STAT_CD='90') × TCP_CMM_CD(CD_CAMP_ERR_01)
+FAIL_CD,CD_NM,CNT
+E301,결과 리포트 연동 에러,138
+E205,permission 없음,55
+E201,결번,3
+E102,수신번호 형식 오류,2

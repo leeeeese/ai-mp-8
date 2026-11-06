@@ -1,0 +1,204 @@
+{
+  "req_id": "H-1",
+  "title": "유선+무선 결합상품 A를 무선+무선만으로도 결합 가능하도록 변경",
+  "difficulty": "Major",
+  "complexity": "complex",
+  "sm_part": "product",
+  "request_text": "현재 결합상품 A(요즘가족결합)는 유선서비스 + 무선서비스 합산 5회선 이하에 한해 가입이 가능합니다. 무선서비스 + 무선서비스 5회선 이하 또는 유선서비스 + 무선서비스 5회선 이하 모두 가입 가능하도록 변경하고, 유선서비스가 없는 경우 상품명을 B로 노출해 주세요.",
+  "expected": {
+    "feasibility": "feasible",
+    "start_keywords": [
+      "결합상품",
+      "요즘가족결합",
+      "유선서비스",
+      "무선서비스",
+      "5회선"
+    ],
+    "start_nodes": [
+      "MOD:CombScrbSvc.validateCombMbr",
+      "SCR:ZCMBSS0100010"
+    ],
+    "areas": {
+      "screen": "modify",
+      "db": "modify",
+      "interface": "none",
+      "batch": "modify"
+    },
+    "impacted": [
+      {
+        "node_id": "MOD:CombScrbSvc.validateCombMbr",
+        "area": "db",
+        "impact_type": "modify",
+        "reason": "COMB_YOZM_FAM 분기의 '유선 1회선 이상(CMB0001)' 조건 제거, 무선만일 때 최소 회선 수(2) 검증",
+        "must_find": true
+      },
+      {
+        "node_id": "TP:CombScrbSvc.joinComb",
+        "area": "db",
+        "impact_type": "modify",
+        "reason": "유선 없음 → 상품 B 로 결합그룹 생성(또는 표시명 B), 대표회선 기준(현재 유선 회선 우선) 재정의",
+        "must_find": true
+      },
+      {
+        "node_id": "SCR:ZCMBSS0100010",
+        "area": "screen",
+        "impact_type": "modify",
+        "reason": "화면 사전검증 '유선서비스를 1회선 이상 선택하세요' 제거, 유선 미선택 시 상품명 B 안내 / lblCombProdNm 에 유선 선택 여부에 따라 A/B 표시 / 회선 체크 변경 시 상품명 A/B 동적 전환",
+        "detail": [
+          "event btnJoin_onClick",
+          "event grdSvc_onCheck"
+        ],
+        "must_find": true
+      },
+      {
+        "node_id": "MOD:CombDcBatch.calcDcAmt",
+        "area": "batch",
+        "impact_type": "modify",
+        "reason": "상품 B(무선 결합) 할인 규칙 추가. 미반영 시 B 구성 회선 할인액 0",
+        "must_find": true
+      },
+      {
+        "node_id": "TBL:TB_PROD",
+        "area": "db",
+        "impact_type": "modify",
+        "reason": "상품 B (예: NC00000102 요즘가족결합(무선)) 상품 데이터 등록",
+        "must_find": true
+      },
+      {
+        "node_id": "TP:CombScrbSvc.termComb",
+        "area": "db",
+        "impact_type": "modify",
+        "reason": "A 그룹에서 마지막 유선 회선 탈퇴 시 현재는 검증 실패 → 그룹 전체 해지. To-Be 에서는 B 로 전환되어야 하는지 정책 반영",
+        "must_find": false
+      }
+    ],
+    "paths": [
+      {
+        "path_id": "P1",
+        "nodes": [
+          "SCR:ZCMBSS0100010",
+          "TP:CombScrbSvc.joinComb",
+          "MOD:CombScrbSvc.validateCombMbr"
+        ],
+        "critical": true,
+        "status": "confirmed",
+        "note": "유선 1회선 필수 조건 제거, 무선+무선 ≤5 허용"
+      },
+      {
+        "path_id": "P2",
+        "nodes": [
+          "SCR:ZCMBSS0100010",
+          "TP:CombScrbSvc.joinComb",
+          "DBIO:CombSql.insertCombGrp",
+          "TBL:TB_COMB_GRP",
+          "COL:TB_COMB_GRP.COMB_PROD_ID"
+        ],
+        "critical": true,
+        "status": "confirmed",
+        "note": "유선 없음 → 상품 B 로 결합그룹 생성"
+      },
+      {
+        "path_id": "P3",
+        "nodes": [
+          "BAT:ZDOCBB0100040",
+          "TP:CombScrbSvc.joinComb",
+          "MOD:CombScrbSvc.validateCombMbr"
+        ],
+        "critical": true,
+        "status": "confirmed",
+        "note": "구비서류 가족결합 자동처리도 같은 검증을 탐"
+      },
+      {
+        "path_id": "P4",
+        "nodes": [
+          "BAT:ZCMBBB0100010",
+          "MOD:CombDcBatch.calcDcAmt"
+        ],
+        "critical": true,
+        "status": "confirmed",
+        "note": "상품 B 할인 규칙 추가 (미반영 시 할인 0원)"
+      },
+      {
+        "path_id": "P5",
+        "nodes": [
+          "SCR:ZCMBSS0100010",
+          "TP:ProdInfoSvc.getSaleProdList",
+          "DBIO:ProdSql.selectSaleProdList",
+          "TBL:TB_PROD"
+        ],
+        "critical": false,
+        "status": "confirmed",
+        "note": "상품 B 상품 데이터 등록·노출"
+      },
+      {
+        "path_id": "P6",
+        "nodes": [
+          "SCR:ZCMBSS0200010",
+          "TP:CombScrbSvc.termComb",
+          "MOD:CombScrbSvc.validateCombMbr"
+        ],
+        "critical": true,
+        "status": "pending",
+        "note": "A 에서 유선 탈퇴 시 B 전환 vs 해지 정책 미확정"
+      }
+    ],
+    "new": [
+      {
+        "suggested_id": "TBL:TB_PROD (데이터 NC00000102)",
+        "area": "db",
+        "reason": "상품 B(요즘가족결합 무선) 신규 상품 데이터"
+      }
+    ],
+    "reference_only": [
+      "MOD:SvcInfoSvc.isWireless",
+      "MOD:SvcInfoSvc.countSvcByWlCl",
+      "TBL:TB_COMB_GRP",
+      "TBL:TB_COMB_MBR",
+      "DBIO:CombSql.insertCombGrp",
+      "DBIO:CombSql.insertCombMbr",
+      "BAT:ZDOCBB0100040",
+      "SCR:ZCMBSS0200010",
+      "SCR:ZPLNSS0100010",
+      "COL:TB_SVC.SVC_CL_CD",
+      "TP:CombScrbSvc.getCombTrgtSvcList",
+      "COL:TB_COMB_MBR.SVC_CL_CD",
+      "COL:TB_COMB_GRP.COMB_PROD_ID"
+    ],
+    "open_items": [
+      {
+        "owner": "business",
+        "question": "B 를 별도 상품코드로 관리할지, A 상품을 유지하고 표시명만 B 로 바꿀지 (결합그룹 COMB_PROD_ID, 할인 정책, 통계에 영향)"
+      },
+      {
+        "owner": "business",
+        "question": "B 의 할인 정책 (A 와 동일한지, 회선 수 구간별 금액)"
+      },
+      {
+        "owner": "business",
+        "question": "A 에서 유선 해지/탈퇴 시 B 로 자동 전환 / B 에 유선 추가 시 A 로 전환 여부"
+      },
+      {
+        "owner": "business",
+        "question": "무선+무선 최소 회선 수(2회선)와 대표회선 지정 기준"
+      },
+      {
+        "owner": "developer",
+        "question": "결합 조건·할인 규칙이 CombScrbSvc / CombDcBatch / 화면에 각각 하드코딩되어 있음. 3곳 동시 수정 또는 규칙 테이블화 검토"
+      },
+      {
+        "owner": "developer",
+        "question": "가족결합 구비서류 자동처리(ZDOCBB0100040)도 joinComb 을 타므로 함께 영향받음 (테스트 범위)"
+      }
+    ]
+  },
+  "distractors": [
+    {
+      "node_id": "BAT:ZCMBBB0100010",
+      "why_confusing": "할인 재산정 Job 정의. 변경은 calcDcAmt 로직이며 Job 주기/정의는 그대로"
+    },
+    {
+      "node_id": "MOD:CustGradeSvc.getLongCustBenefit",
+      "why_confusing": "결합 할인과 이름이 비슷한 장기고객 혜택. 무관"
+    }
+  ]
+}

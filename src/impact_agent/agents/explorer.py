@@ -1,14 +1,703 @@
-"""Explorer: 시작 노드 선정 후 그래프 1~2 hop 확장 (search_graph_nodes, expand_graph, get_node_detail)."""
+"""Explorer: Planner 탐색 명세(items)의 언급 표현을 노드로 매칭하고, 목표 역할까지 경로를 탐색한다.
 
-from ..schemas import ExplorerOutput
+- 시작 노드: 확정 매핑(confirmed_node) → 노드명·설명·컬럼 코멘트 검색 (search_graph_nodes, 같은 표현·라벨 검색은 한 번만)
+- tool 호출: 규칙 단계·재탐색은 Retriever 원문 읽기 1회, ReAct 는 RESERVED_FOR_RETRIEVER 를 남긴다
+- 탐색 (traverse_graph): direction 에 따라
+    forward               목표 역할보다 진입 쪽 시작 노드에서 정방향
+    reverse               목표 역할보다 DB 쪽 시작 노드에서 역방향
+    forward_then_reverse  정방향으로 목표(수정 대상)를 찾고, 그 대상(언급된 컬럼이 있으면 그 컬럼)에서 진입점까지 역방향
+- 재탐색: Retriever 의 reexplore_request 를 받아 이전 결과에 이어 붙인다 (hop 상한으로 끊긴 경로는 이어서 하나로 합침)
+- out_of_graph·매칭 실패·신규 후보는 unresolved(문장)와 unresolved_items(종류 포함)로 넘긴다
+- 경로 정리 (_arrange_paths, 규칙 단계·ReAct·재탐색 뒤마다): 같은 처리에서 컬럼만 다른 경로는 언급·선택된 컬럼만 남기고 테이블까지로 합치고,
+  다른 경로 안에 그대로 들어 있는 짧은 경로는 뺀다. 매칭 근거 없이 추가된 출발 노드(ReAct·재탐색이 고른 노드)에서 언급 노드를 하나도
+  지나지 않는 경로는 출발 노드당 UNSUPPORTED_PER_START 개까지만 둔다 (화면 하나가 부르는 모든 처리로 퍼지는 것 방지).
+  Retriever 가 원문 근거로 재탐색을 요청한 노드는 근거가 있으므로 상한에서 뺀다 (v6-3 SC-006: 근거 컬럼 경로가 잘림).
+  정렬은 언급 노드를 많이 지나는 경로 → 보완(ReAct·재탐색) 경로 → 진입점에서 시작 → 목표 도달 순으로 항목을 번갈아 둔다.
+  뒤 단계(Retriever 읽기 상한, Simulator 입력 경로 수 상한)는 앞쪽 경로부터 쓰므로 순서가 곧 전달 우선순위다.
+- 공통코드: 값(Column) 언급 표현 자체가 문구·사유·코드값·설정값을 말하면 공통코드 테이블을 시작 노드로 더하고, 그 테이블을 읽는 처리까지
+  역방향으로 확인한다 (화면이 공통코드를 새로 쓰는 경우 그래프에 엣지가 없어 탐색으로는 닿지 않음. 직접 찾은 공통 데이터라 공통 제외 안 함).
+  동의어는 보지 않는다 (v6-2: 동의어 "공통코드" 로 단순 요건 13건에서 켜져 오탐 증가)
+- 컬럼 끝 이어 붙이기 (_extend_to_columns, 경로 정리 때): 데이터 접근·테이블에서 끝난 경로가 요건 언급으로 매칭된 컬럼의 테이블을
+  읽거나 쓰면 그 테이블·컬럼까지 잇는다 (목표 역할이 DataAccess 인 항목은 정답 경로 끝의 컬럼까지 가지 않음)
+- ReAct 보완 (Yao et al. 2023, LLM 이 있을 때 첫 라운드만): 규칙 탐색 결과를 Observation 으로 주고,
+  LLM 이 Thought → Action(search_graph_nodes / traverse_graph / get_node_detail / finish) 을 골라 매칭 실패·끊긴 경로를 보완한다.
+  규칙 결과에서 점검 신호(매칭 실패·목표 미도달·진입점 없음·언급 값의 컬럼 없음·공통 제외)를 먼저 계산해,
+  신호가 없으면 ReAct 를 생략하고 있으면 그 신호만 입력에 표시한다. 단계 수는 EXPLORER_MAX_REACT_STEPS 까지.
+  결과는 같은 출력에 합치고 단계 기록은 react_trace 에 남긴다.
+요건 유형 판단은 하지 않는다.
+"""
+
+import re
+import time
+from typing import Literal
+
+from pydantic import BaseModel, Field
+
+from .. import config
+from ..llm import LLMClient, Usage, react_llm
+from ..rules import EXPLORER_MAX_REACT_STEPS, MENTION_LABELS, RESERVED_FOR_RETRIEVER, ROLE_RANK, RULE_SEARCH_BUDGET
+from ..schemas import (
+    Direction,
+    ExploreItem,
+    ExplorePath,
+    ExplorerOutput,
+    GetNodeDetailInput,
+    ItemExploreResult,
+    MatchSource,
+    MentionKind,
+    NodeRole,
+    PlannerOutput,
+    ReexploreMode,
+    ReexploreRequest,
+    SearchGraphNodesInput,
+    StartNodeChoice,
+    StopReason,
+    TraverseGraphInput,
+    TraverseGraphOutput,
+    UnresolvedItem,
+)
 from ..state import AgentState
+from ..tools import GraphStore, get_graph_store, get_node_detail, search_graph_nodes, traverse_graph
+from ..tools.graph import term_score
+from ..trace import clip, trace
 from .base import BaseAgent
+from .react import InvalidAction, run_react
+
+MIN_SCORE = 0.5  # 이보다 낮은 후보는 시작 노드로 쓰지 않음 (로그의 채택·탈락 기준)
+RELATIVE_SCORE = 0.8  # 1등 점수 대비 이 비율 이상인 후보까지 시작 노드로 채택
+MAX_START_PER_MENTION = 3
+MAX_CONTEXT_PATHS = 40  # ReAct 입력에 보여 줄 경로 수
+ENTRY_HOPS = 4  # 진입점 없이 시작한 경로의 첫 노드에서 호출 관계를 거슬러 진입점(화면·배치)을 찾는 최대 단계
+CALLER_EDGES = ("CALLS", "INVOKES", "EXECUTES")  # 호출하는 쪽 → 호출되는 쪽
+EXTEND_WRITES = True  # 쓰기 접근에서 끝난 경로를 쓰는 테이블까지 (_extend_writes_to_tables)
+UNSUPPORTED_PER_START = 2  # 매칭 근거 없는 출발 노드에서 언급 노드를 지나지 않는 경로 상한 (v6-1: 정답 경로 재현율 손실 없이 줄어듦)
+CODE_VALUE = re.compile(r"문구|사유|코드값|코드 값|설정값|공통코드")  # 공통코드에 담기는 값 (Column 언급)
+CODE_TABLE_TERMS = ["공통코드", "공통 코드"]
+CODE_TABLE_HOPS = 3  # 공통코드 테이블 → 조회 SQL·DBIO → 처리 진입
+VALUE_MENTIONS = {MentionKind.COLUMN, MentionKind.TERM}
+FOCUS_COLUMN_SCORE = 1.0  # 경로 정리 때 남길 컬럼: 언급 표현(동의어 포함)이 이름·설명에 통째로 들어 있음 (2글자 일치는 "여부" 같은 흔한 말에 걸림)  # 값·여부·코드·사유를 말하는 언급 (컬럼까지 확인 대상)
+
+
+class ExplorerDecision(BaseModel):
+    """ReAct 한 단계 (Structured Output: 기본값 없이 모든 필드 명시)."""
+
+    thought: str = Field(description="지금까지의 조회 결과에서 무엇이 부족한지, 다음 행동을 왜 고르는지")
+    action: Literal["search_graph_nodes", "traverse_graph", "get_node_detail", "finish"]
+    item_id: int | None = Field(description="대상 탐색 명세 항목 (traverse_graph 필수)")
+    terms: list[str] | None = Field(description="search_graph_nodes: 찾을 표현 (요건 표현·동의어·시스템 용어)")
+    labels: list[str] | None = Field(description="search_graph_nodes: 노드 유형 제한 (예: Screen, Column). 제한 없으면 null")
+    node_ids: list[str] | None = Field(description="traverse_graph: 시작 노드 / get_node_detail: 노드 1개. 조회 결과에 나온 ID 만")
+    direction: Literal["forward", "reverse"] | None = Field(description="traverse_graph 방향")
+    target_role: NodeRole | None = Field(description="traverse_graph 목표 역할. null 이면 항목의 목표 역할")
+
+
+class ToolBudgetExceeded(Exception):
+    pass
 
 
 class ExplorerAgent(BaseAgent[ExplorerOutput]):
     name = "explorer"
     output_model = ExplorerOutput
 
+    def __init__(self, store: GraphStore | None = None, llm: LLMClient | None = None) -> None:
+        self._store = store
+        self._llm = llm
+        self._llm_checked = llm is not None
+        self.last_usage: Usage | None = None
+        self._section = "동작"  # 실행 로그 섹션 (run 이 단계마다 바꿈)
+        self._evidence_starts: set[str] = set()  # Retriever 가 원문 근거로 재탐색을 요청한 노드 (경로 상한에서 매칭 노드로 봄)
+
+    @property
+    def llm(self) -> LLMClient | None:
+        """ReAct 단계 LLM. 주입하지 않았으면 .env 설정으로 한 번 만든다 (키가 없으면 None → 규칙 단계만)."""
+        if not self._llm_checked:
+            self._llm, self._llm_checked = react_llm(), True
+        return self._llm
+
+    @property
+    def store(self) -> GraphStore:
+        if self._store is None:
+            self._store = get_graph_store()
+        return self._store
+
     def run(self, state: AgentState) -> ExplorerOutput:
-        # TODO: LLM 호출 + structured output(ExplorerOutput) 구현
-        raise NotImplementedError
+        plan = state.planner
+        self._calls = 0
+        self.last_usage = None  # 재탐색 라운드는 LLM 을 쓰지 않으므로 이전 라운드 사용량이 다시 기록되지 않게 비움
+        self._budget = state.tools_left()
+        self._reserve = 1  # 규칙 단계·재탐색도 Retriever 원문 읽기 1회는 남긴다
+        self._searches: dict[tuple, list] = {}  # 같은 검색(표현·라벨)은 항목이 달라도 한 번만 호출
+        requests = state.retriever.reexplore_request if state.retriever else []
+        if state.explorer is None:
+            self._evidence_starts = set()
+        if state.explorer is not None and requests:
+            self._evidence_starts |= {n for r in requests for n in r.node_ids}
+            self._section = "동작 · 재탐색"
+            trace(f"요청 {len(requests)}건 · tool 최대 {self._budget - self._reserve}회", section=self._section, label="범위")
+            out = state.explorer.model_copy(deep=True)
+            before = len(out.paths)
+            for req in requests:
+                self._guard(out, lambda: self._reexplore(req, plan, out))
+            self._arrange_paths(plan, out, supplements=out.paths[before:])
+        else:
+            self._section = "동작 · 규칙 탐색"
+            trace(f"항목 {len(plan.items)}개 · tool 최대 {self._budget - self._reserve}회", section=self._section, label="범위")
+            out = ExplorerOutput(start_nodes=[], nodes=[], edges=[])
+            self._search_quota = max(2, RULE_SEARCH_BUDGET // max(len(plan.items), 1))  # 항목당 언급 검색 상한
+            for item in plan.items:
+                self._guard(out, lambda: self._explore_item(item, plan, out))
+            self._arrange_paths(plan, out)
+            signals = self._signals(plan, out)
+            trace(f"경로 {len(out.paths)} · tool {self._calls}회", section=self._section, label="결과")
+            self._section = "동작 · ReAct 보완"
+            for s in signals:
+                trace(s, section="동작 · 점검 신호 (코드 계산, 있을 때만 ReAct)", label="신호")
+            if self.llm is not None and signals and self._budget - self._calls > RESERVED_FOR_RETRIEVER:
+                self._reserve = RESERVED_FOR_RETRIEVER
+                before = len(out.paths)
+                self._guard(out, lambda: self._react(plan, out, signals))
+                self._arrange_paths(plan, out, supplements=out.paths[before:])
+                trace(f"경로 {before} → {len(out.paths)} · tool 누적 {self._calls}회", section=self._section, label="끝")
+            else:
+                trace("LLM 없음" if self.llm is None else "점검 신호 없음" if not signals else "남은 tool 부족", section=self._section, label="생략")
+        out.tool_call_count = self._calls
+        out.hops_used = max((r.hops_used for r in out.item_results), default=0)
+        return out
+
+    # --- tool 호출 (호출 수 관리) -----------------------------------------------
+
+    def _guard(self, out: ExplorerOutput, fn) -> None:
+        try:
+            fn()
+        except ToolBudgetExceeded:
+            note = f"tool 호출 상한({config.MAX_TOOL_CALLS}) 도달 - 이후 탐색 생략"
+            if note not in out.unresolved:
+                _unresolved(out, None, "tool_limit", note)
+                trace(f"{self._calls}회 사용 · Retriever 몫 {self._reserve}회 예약 → 이후 탐색 생략", label="tool 한도")
+
+    def _tool(self, fn, params):
+        if self._calls >= self._budget - self._reserve:
+            raise ToolBudgetExceeded
+        self._calls += 1
+        start = time.perf_counter()
+        res = fn(params, self.store)
+        trace(f"{_tool_call(params)} → {_tool_result(res)} · {(time.perf_counter() - start) * 1000:.0f}ms", section=self._section,
+              label=f"tool {self._calls}")
+        return res
+
+    # --- 항목 탐색 ---------------------------------------------------------------
+
+    def _explore_item(self, item: ExploreItem, plan: PlannerOutput, out: ExplorerOutput) -> None:
+        result = ItemExploreResult(item_id=item.item_id, target_role=item.target_role, direction=item.direction, reached=False)
+        out.item_results.append(result)
+        for area in item.out_of_graph:
+            _unresolved(out, item.item_id, "out_of_graph", f"[항목 {item.item_id}] 그래프 밖: {area}")
+
+        trace(f"목표 {item.target_role.value} · {item.direction.value} · hop {item.hop_cap} | {item.text}", section=self._section,
+              label=f"항목 {item.item_id}")
+        starts = self._match_starts(item, plan, out, result)
+        if not starts:
+            trace("시작 노드 없음 → 경로 탐색 생략", section=self._section, label="  판단")
+            return
+        target = ROLE_RANK[item.target_role]
+        rank = {nid: ROLE_RANK[self.store.node(nid).role] for nid in starts}
+        low = [n for n in starts if rank[n] < target]
+        high = [n for n in starts if rank[n] > target]
+        at = [n for n in starts if rank[n] == target]
+        columns = [n for n in starts if self.store.node(n).label == "Column"]
+        exclude = plan.exclude.is_common
+        trace(f"목표보다 진입 쪽 {low or '-'} / 목표 역할 {at or '-'} / DB 쪽 {high or '-'} → {item.direction.value} 탐색",
+              section=self._section, label="  시작 분류")
+
+        codes = [n for n in starts if any(s.node_id == n and s.reason.startswith("공통코드") for s in out.start_nodes)]
+        if codes:  # 공통코드 테이블을 읽는 처리까지 (공통 제외 안 함)
+            self._traverse(out, item.item_id, codes, "reverse", NodeRole.ENTRY_HANDLER, CODE_TABLE_HOPS, False, [])
+            starts = [n for n in starts if n not in codes]
+            low, high, at = ([n for n in group if n not in codes] for group in (low, high, at))
+
+        for n in at:
+            self._add_paths(out, item.item_id, Direction.FORWARD,
+                            TraverseGraphOutput(nodes=[self.store.node(n)], edges=[], paths=[
+                                {"nodes": [n], "reached_role": item.target_role, "stop_reason": StopReason.TARGET_REACHED}]))
+
+        if item.direction is Direction.FORWARD and low:
+            self._traverse(out, item.item_id, low, "forward", item.target_role, item.hop_cap, exclude, columns)
+        elif item.direction is Direction.REVERSE:
+            if high:
+                self._traverse(out, item.item_id, high, "reverse", item.target_role, item.hop_cap, exclude, columns)
+            entries = [n for n in at + low if self.store.node(n).role is NodeRole.ENTRY]
+            if entries:  # 언급으로 찾은 진입점(예: 연계 배치)이 언급 컬럼의 테이블에 닿는지 정방향으로 확인
+                self._traverse(out, item.item_id, entries, "forward", NodeRole.COLUMN if columns else NodeRole.TABLE,
+                               item.hop_cap, exclude, columns)
+        elif item.direction is Direction.FORWARD_THEN_REVERSE:
+            fwd = self._traverse(out, item.item_id, low, "forward", item.target_role, item.hop_cap, exclude, columns) if low else None
+            reached = [p.nodes[-1] for p in fwd.paths if p.stop_reason is StopReason.TARGET_REACHED] if fwd else []
+            reached += at
+            # 언급된 컬럼이 있으면 그 컬럼에서, 없으면 도달한 테이블·언급된 테이블에서 진입점까지
+            rev_from = columns or list(dict.fromkeys(reached + high))
+            remaining = max(item.hop_cap - (fwd.hops_used if fwd else 0), 1)
+            if rev_from:
+                self._traverse(out, item.item_id, rev_from, "reverse", NodeRole.ENTRY, remaining, exclude, [],
+                               writes_only=True)
+        self._update_result(out, result)
+
+    def _match_starts(self, item: ExploreItem, plan: PlannerOutput, out: ExplorerOutput,
+                      result: ItemExploreResult) -> list[str]:
+        starts: list[str] = []
+        searched = 0
+        for m in item.mentions:
+            if m.confirmed_node and self.store.node(m.confirmed_node):
+                starts.append(m.confirmed_node)
+                out.start_nodes.append(StartNodeChoice(item_id=item.item_id, node_id=m.confirmed_node, matched_keyword=m.phrase,
+                                                       match_source=MatchSource.CONFIRMED, score=1.0, reason="사용자 확정 매핑"))
+                continue
+            key = (m.phrase, *m.synonyms, "|", *(MENTION_LABELS[m.kind] or []))
+            if key not in self._searches:
+                if searched >= getattr(self, "_search_quota", len(item.mentions)):  # 언급이 많아도 탐색·Retriever 몫을 남긴다
+                    trace(f"'{m.phrase}' → 검색 생략 (항목당 언급 검색 {self._search_quota}회 상한, 앞 언급 우선)",
+                          section=self._section, label=f"  {m.kind.value}")
+                    _unresolved(out, item.item_id, "tool_limit", f"[항목 {item.item_id}] 검색 생략 (언급 검색 상한): {m.phrase}")
+                    continue
+                searched += 1
+                self._searches[key] = self._tool(search_graph_nodes, SearchGraphNodesInput(
+                    terms=[m.phrase, *m.synonyms], domains=plan.domains, labels=MENTION_LABELS[m.kind], top_k=5))
+            hits = self._searches[key]
+            good = [h for h in hits if h.score >= MIN_SCORE]
+            chosen = [h for h in good if h.score >= good[0].score * RELATIVE_SCORE][:MAX_START_PER_MENTION] if good else []
+            trace(f"'{m.phrase}'" + (f" (+동의어 {len(m.synonyms)})" if m.synonyms else "") + " → 채택 "
+                  + (", ".join(f"{h.node_id} '{h.name}' {h.score:g}" for h in chosen) or "없음")
+                  + (" / 탈락 " + ", ".join(f"{h.node_id} {h.score:g}" for h in hits if h not in chosen) if len(hits) > len(chosen) else ""),
+                  section=self._section, label=f"  {m.kind.value}")
+            if not good:
+                result.unmatched_mentions.append(m.phrase)
+                kind = "신규 후보" if m.maybe_new else "매칭 실패"
+                _unresolved(out, item.item_id, "new_candidate" if m.maybe_new else "unmatched",
+                            f"[항목 {item.item_id}] {kind}: {m.phrase} ({m.kind.value})")
+                continue
+            for h in chosen:
+                starts.append(h.node_id)
+                out.start_nodes.append(StartNodeChoice(
+                    item_id=item.item_id, node_id=h.node_id, matched_keyword=h.matched_term or m.phrase,
+                    match_source=h.match_source, score=h.score,
+                    reason=f"'{h.matched_term}' ≈ {h.name} ({h.label}, {h.match_source.value} 점수 {h.score:g})"))
+        starts += self._code_table_starts(item, plan, out)
+        starts = list(dict.fromkeys(starts))
+        result.start_node_ids = starts
+        return starts
+
+    def _code_table_starts(self, item: ExploreItem, plan: PlannerOutput, out: ExplorerOutput) -> list[str]:
+        """값(Column) 언급 표현이 공통코드에 담기는 값(문구·사유·코드값)이면 공통코드 테이블을 시작 노드로 더한다 (동의어는 보지 않음)."""
+        cues = [m.phrase for m in item.mentions if m.kind is MentionKind.COLUMN and CODE_VALUE.search(m.phrase)]
+        if not cues:
+            return []
+        key = (*CODE_TABLE_TERMS, "|", "Table")
+        if key not in self._searches:
+            self._searches[key] = self._tool(search_graph_nodes, SearchGraphNodesInput(
+                terms=CODE_TABLE_TERMS, domains=plan.domains, labels=["Table"], top_k=3))
+        tables = [h for h in self._searches[key] if h.score >= MIN_SCORE]
+        for h in tables:
+            out.start_nodes.append(StartNodeChoice(
+                item_id=item.item_id, node_id=h.node_id, matched_keyword=cues[0], match_source=h.match_source, score=h.score,
+                reason=f"공통코드: '{cues[0]}' 는 문구·코드값이라 공통코드에 둘 수 있음 ({h.name})"))
+        trace(f"'{cues[0]}' → " + (", ".join(h.node_id for h in tables) or "공통코드 테이블 없음"), section=self._section, label="  공통코드")
+        return [h.node_id for h in tables]
+
+    def _traverse(self, out, item_id, start_ids, direction, target, hop_cap, exclude, focus, writes_only=False,
+                  join=False) -> TraverseGraphOutput:
+        res = self._tool(traverse_graph, TraverseGraphInput(
+            start_ids=start_ids, direction=direction, target_role=target, hop_cap=hop_cap, exclude_common=exclude,
+            focus_ids=focus, writes_only=writes_only))
+        for p in res.paths:
+            trace(f"{p.stop_reason.value}: {' > '.join(p.nodes)}", section=self._section, label="    경로")
+        if res.excluded_common:
+            trace(f"공통이라 확장 안 함: {', '.join(res.excluded_common)}", section=self._section, label="    공통 제외")
+        self._add_paths(out, item_id, Direction(direction), res, join_from=start_ids if join else None)
+        return res
+
+    # --- 결과 합치기 ---------------------------------------------------------------
+
+    def _add_paths(self, out: ExplorerOutput, item_id: int, direction: Direction, res: TraverseGraphOutput,
+                   join_from: list[str] | None = None) -> None:
+        known = {n.node_id for n in out.nodes}
+        out.nodes += [n for n in res.nodes if n.node_id not in known]
+        known_e = {(e.from_id, e.to_id, e.type) for e in out.edges}
+        out.edges += [e for e in res.edges if (e.from_id, e.to_id, e.type) not in known_e]
+        out.excluded_common = sorted(set(out.excluded_common) | set(res.excluded_common))
+
+        # 재탐색(continue): hop 상한으로 끊긴 이전 경로를 빼고, 새 경로 앞(역방향이면 뒤)에 이어 붙인다
+        cut = []
+        if join_from:
+            cut = [o for o in out.paths if o.item_id == item_id and o.stop_reason is StopReason.HOP_CAP
+                   and _end(o) in set(join_from)]
+            out.paths = [o for o in out.paths if o not in cut]
+        for p in res.paths:
+            nodes = list(p.nodes)
+            for old in cut:
+                if direction is Direction.FORWARD and old.nodes[-1] == nodes[0]:
+                    nodes = old.nodes[:-1] + nodes
+                    break
+                if direction is Direction.REVERSE and old.nodes[0] == nodes[-1]:
+                    nodes = nodes[:-1] + old.nodes
+                    break
+            if any(o.item_id == item_id and o.nodes == nodes for o in out.paths):
+                continue
+            out.paths.append(ExplorePath(item_id=item_id, nodes=nodes, direction=direction,
+                                         reached_role=p.reached_role, stop_reason=p.stop_reason))
+
+    def _entry_chain(self, node_id: str) -> list[str] | None:
+        """node_id 를 호출하는 가장 가까운 진입점(화면·배치)까지의 노드 [진입점, …, node_id]. 공통 노드는 거치지 않고, 같은 거리면 ID 순."""
+        prev: dict[str, str] = {node_id: ""}
+        frontier = [node_id]
+        for _ in range(ENTRY_HOPS):
+            nxt = []
+            for nid in frontier:
+                for e in sorted(self.store.in_edges(nid), key=lambda x: x.from_id):
+                    src = self.store.node(e.from_id)
+                    if e.type not in CALLER_EDGES or e.from_id in prev or src is None or src.properties.get("is_common"):
+                        continue
+                    prev[e.from_id] = nid
+                    if src.role is NodeRole.ENTRY:
+                        chain = [e.from_id]
+                        while chain[-1] != node_id:
+                            chain.append(prev[chain[-1]])
+                        return chain
+                    nxt.append(e.from_id)
+            frontier = nxt
+        return None
+
+    def _extend_to_entries(self, out: ExplorerOutput) -> None:
+        """진입점 없이 처리(EntryHandler·Logic·DataAccess)에서 시작한 경로 앞에 그 처리를 부르는 가장 가까운 진입점을 잇는다.
+        경로는 지우거나 늘리지 않고 앞만 붙인다 (Simulator 영역 배정·진입점 수 신호가 진입 노드를 쓰기 때문, 파트너 요청 6-1)."""
+        chains: dict[str, list[str] | None] = {}
+        known_n, known_e = {n.node_id for n in out.nodes}, {(e.from_id, e.to_id, e.type) for e in out.edges}
+        codes = {x.node_id for x in out.start_nodes if x.reason.startswith("공통코드")}
+        extended = 0
+        for i, p in enumerate(out.paths):
+            first = self.store.node(p.nodes[0])
+            if first is None or first.role not in (NodeRole.ENTRY_HANDLER, NodeRole.LOGIC, NodeRole.DATA_ACCESS):
+                continue
+            if first.properties.get("is_common") or codes & set(p.nodes):  # 공통 처리는 부르는 곳이 많아 한 곳을 고르면 틀린 진입점이 됨
+                continue
+            if p.nodes[0] not in chains:
+                chains[p.nodes[0]] = self._entry_chain(p.nodes[0])
+            chain = chains[p.nodes[0]]
+            if not chain or any(n in p.nodes for n in chain[:-1]):
+                continue
+            for a, b in zip(chain, chain[1:]):
+                for e in self.store.out_edges(a):
+                    if e.to_id == b and e.type in CALLER_EDGES and (e.from_id, e.to_id, e.type) not in known_e:
+                        out.edges.append(e)
+                        known_e.add((e.from_id, e.to_id, e.type))
+            for n in chain[:-1]:
+                if n not in known_n and (node := self.store.node(n)):
+                    out.nodes.append(node)
+                    known_n.add(n)
+            out.paths[i] = p.model_copy(update={"nodes": [*chain[:-1], *p.nodes]})
+            extended += 1
+        if extended:
+            trace(f"진입점 없이 시작한 경로 {extended}개 앞에 진입점 연결 ({', '.join(sorted({c[0] for c in chains.values() if c}))})",
+                  section=self._section, label="경로 정리")
+
+    def _extend_writes_to_tables(self, out: ExplorerOutput) -> None:
+        """데이터 접근에서 끝난 경로가 테이블 하나에 쓰면(WRITES) 그 테이블까지 잇는다. 목표가 Logic·DataAccess 인 항목도
+        갱신되는 데이터는 영향 범위라서 (읽기만 하는 접근은 잇지 않음)."""
+        known_n, known_e = {n.node_id for n in out.nodes}, {(e.from_id, e.to_id, e.type) for e in out.edges}
+        extended = 0
+        for i, p in enumerate(out.paths):
+            last = self.store.node(p.nodes[-1])
+            if last is None or last.role is not NodeRole.DATA_ACCESS:
+                continue
+            writes = [e for e in self.store.out_edges(p.nodes[-1]) if e.type == "WRITES"]
+            if len(writes) != 1 or writes[0].to_id in p.nodes:
+                continue
+            e = writes[0]
+            if e.to_id not in known_n and (node := self.store.node(e.to_id)):
+                out.nodes.append(node)
+                known_n.add(e.to_id)
+            if (e.from_id, e.to_id, e.type) not in known_e:
+                out.edges.append(e)
+                known_e.add((e.from_id, e.to_id, e.type))
+            out.paths[i] = p.model_copy(update={"nodes": [*p.nodes, e.to_id], "reached_role": NodeRole.TABLE})
+            extended += 1
+        if extended:
+            trace(f"쓰기 접근에서 끝난 경로 {extended}개를 쓰는 테이블까지 연결", section=self._section, label="경로 정리")
+
+    def _extend_to_columns(self, out: ExplorerOutput) -> None:
+        """데이터 접근·테이블에서 끝난 경로가 언급 매칭 컬럼의 테이블을 읽거나 쓰면 테이블·컬럼까지 잇는다 (같은 항목의 언급만)."""
+        cols: dict[int, dict[str, str]] = {}  # 항목 → 테이블 → 컬럼
+        for s in out.start_nodes:
+            node = self.store.node(s.node_id)
+            if s.score and node is not None and node.label == "Column":
+                table = next((e.from_id for e in self.store.in_edges(s.node_id) if e.type == "HAS_COLUMN"), None)
+                if table:
+                    cols.setdefault(s.item_id, {})[table] = s.node_id
+        if not cols:
+            return
+        known_n, known_e = {n.node_id for n in out.nodes}, {(e.from_id, e.to_id, e.type) for e in out.edges}
+        extended = 0
+        for i, p in enumerate(out.paths):
+            want, last = cols.get(p.item_id, {}), self.store.node(p.nodes[-1])
+            if not want or last is None or p.nodes[-1] in want.values():
+                continue
+            if last.label == "Table" and p.nodes[-1] in want:
+                tail, edges = [want[p.nodes[-1]]], []
+            elif last.role is NodeRole.DATA_ACCESS:
+                hit = next((e for e in self.store.out_edges(p.nodes[-1]) if e.type in ("READS", "WRITES") and e.to_id in want), None)
+                if hit is None:
+                    continue
+                tail, edges = [hit.to_id, want[hit.to_id]], [hit]
+            else:
+                continue
+            edges += [e for e in self.store.out_edges(tail[-2] if len(tail) == 2 else p.nodes[-1]) if e.type == "HAS_COLUMN" and e.to_id == tail[-1]]
+            for n in tail:
+                if n not in known_n and (node := self.store.node(n)):
+                    out.nodes.append(node)
+                    known_n.add(n)
+            for e in edges:
+                if (e.from_id, e.to_id, e.type) not in known_e:
+                    out.edges.append(e)
+                    known_e.add((e.from_id, e.to_id, e.type))
+            out.paths[i] = p.model_copy(update={"nodes": [*p.nodes, *tail], "reached_role": NodeRole.COLUMN})
+            extended += 1
+        if extended:
+            trace(f"언급 컬럼까지 이어 붙인 경로 {extended}개", section=self._section, label="경로 정리")
+
+    def _arrange_paths(self, plan: PlannerOutput, out: ExplorerOutput, supplements: list[ExplorePath] = ()) -> None:
+        self._extend_to_columns(out)
+        if EXTEND_WRITES:
+            self._extend_writes_to_tables(out)
+        focus = {s.node_id for s in out.start_nodes}  # 언급으로 찾았거나 ReAct·재탐색이 고른 노드
+        # 언급 검색으로 매칭된 노드 + Retriever 가 원문 근거로 재탐색을 요청한 노드 (ReAct 가 고른 노드는 점수 없음)
+        matched = {s.node_id for s in out.start_nodes if s.score} | self._evidence_starts
+        boosted = {(p.item_id, tuple(p.nodes)) for p in supplements}
+        terms = {it.item_id: [t for m in it.mentions for t in (m.phrase, *m.synonyms)] for it in plan.items}
+
+        def mentioned(item_id: int, node_id: str) -> bool:
+            """시작 노드이거나, 요건 언급(동의어 포함)이 이름·설명(컬럼 코멘트 포함)에 통째로 들어 있는 노드."""
+            node = self.store.node(node_id)
+            text = (node.properties.get("search_text") or node.name) if node else ""
+            return node_id in focus or any(term_score(t, text) >= FOCUS_COLUMN_SCORE for t in terms.get(item_id, []))
+
+        # 1) 같은 처리(마지막 컬럼만 다름)에서 갈라진 컬럼 경로: 고른 컬럼만 남기고, 고른 것이 없으면 테이블까지 한 경로로
+        groups: dict[tuple, list[ExplorePath]] = {}
+        for p in out.paths:
+            if len(p.nodes) > 1 and (n := self.store.node(p.nodes[-1])) and n.label == "Column":
+                groups.setdefault((p.item_id, tuple(p.nodes[:-1])), []).append(p)
+        merged: list[ExplorePath] = []
+        for p in out.paths:
+            key = (p.item_id, tuple(p.nodes[:-1]))
+            group = groups.get(key) if len(p.nodes) > 1 else None
+            if not group or len(group) == 1 or mentioned(p.item_id, p.nodes[-1]):
+                merged.append(p)
+            elif (p is next((g for g in group if not mentioned(g.item_id, g.nodes[-1])), None)
+                  and not any(mentioned(g.item_id, g.nodes[-1]) for g in group)):
+                merged.append(p.model_copy(update={"nodes": p.nodes[:-1], "reached_role": NodeRole.TABLE}))
+                if (p.item_id, tuple(p.nodes)) in boosted:
+                    boosted.add((p.item_id, tuple(p.nodes[:-1])))
+
+        # 2) 같은 항목의 다른 경로 안에 연속으로 그대로 들어 있는 경로·중복 경로는 뺀다
+        def inside(a: list[str], b: list[str]) -> bool:
+            return len(a) < len(b) and any(b[i:i + len(a)] == a for i in range(len(b) - len(a) + 1))
+        kept, seen = [], set()
+        for p in merged:
+            key = (p.item_id, tuple(p.nodes))
+            if key in seen or any(q.item_id == p.item_id and inside(p.nodes, q.nodes) for q in merged):
+                continue
+            seen.add(key)
+            kept.append(p)
+
+        # 2-1) 진입점 없이 시작한 경로 앞에 진입점 (컬럼 합치기·포함 경로 정리가 끝난 뒤 앞만 붙임, 같아진 경로는 하나만)
+        out.paths = kept
+        self._extend_to_entries(out)
+        kept, seen = [], set()
+        for p in out.paths:
+            if (p.item_id, tuple(p.nodes)) not in seen:
+                seen.add((p.item_id, tuple(p.nodes)))
+                kept.append(p)
+
+        # 3) 매칭 근거 없는 출발 노드에서 언급 노드를 하나도 지나지 않는 경로는 출발 노드당 UNSUPPORTED_PER_START 개까지
+        def support(p: ExplorePath) -> int:  # 언급 검색으로 매칭됐거나 요건 표현이 들어 있는 노드 수 (출발 노드 포함)
+            return sum(n in matched or (n not in focus and mentioned(p.item_id, n)) for n in p.nodes)
+        count: dict[str, int] = {}
+        capped = []
+        for p in kept:
+            if len(p.nodes) > 1 and p.nodes[0] not in matched and support(p) == 0:
+                count[p.nodes[0]] = count.get(p.nodes[0], 0) + 1
+                if count[p.nodes[0]] > UNSUPPORTED_PER_START:
+                    continue
+            capped.append(p)
+        if len(capped) < len(kept):
+            trace(f"매칭 근거 없는 출발 노드의 무관 경로 {len(kept) - len(capped)}개 제외 (출발 노드당 {UNSUPPORTED_PER_START}개까지)",
+                  section=self._section, label="경로 정리")
+        kept = capped
+
+        # 4) 항목마다 우선순위로 정렬하고 항목을 번갈아 배치
+        def rank(p: ExplorePath) -> tuple:  # 언급 노드를 많이 지남 → 보완 경로 → 진입점에서 시작 → 목표 도달 → 긴 경로
+            entry = (n := self.store.node(p.nodes[0])) is not None and n.role is NodeRole.ENTRY
+            return (-support(p), (p.item_id, tuple(p.nodes)) not in boosted, not entry,
+                    p.stop_reason is not StopReason.TARGET_REACHED, -len(p.nodes))
+        by_item: dict[int, list[ExplorePath]] = {}
+        for p in kept:
+            by_item.setdefault(p.item_id, []).append(p)
+        queues = [sorted(ps, key=rank) for _, ps in sorted(by_item.items())]
+        out.paths = [q[i] for i in range(max(map(len, queues), default=0)) for q in queues if i < len(q)]
+
+    def _update_result(self, out: ExplorerOutput, result: ItemExploreResult) -> None:
+        mine = [p for p in out.paths if p.item_id == result.item_id]
+        result.reached = any(p.stop_reason is StopReason.TARGET_REACHED for p in mine)
+        result.frontier = sorted({_end(p) for p in mine if p.stop_reason is StopReason.HOP_CAP})
+        roles = lambda path: [self.store.node(n).role for n in path]  # noqa: E731
+        result.hops_used = max((sum(a is not b for a, b in zip(roles(p.nodes), roles(p.nodes)[1:])) for p in mine), default=0)
+
+    # --- 재탐색 -------------------------------------------------------------------
+
+    def _reexplore(self, req: ReexploreRequest, plan: PlannerOutput, out: ExplorerOutput) -> None:
+        item = next((i for i in plan.items if i.item_id == req.item_id), None)
+        item_id = req.item_id if req.item_id is not None else 0
+        if req.direction is not None:
+            direction = req.direction
+        elif req.mode is ReexploreMode.REVERSE:
+            direction = Direction.REVERSE
+        elif item is not None and req.mode is ReexploreMode.CONTINUE:
+            direction = Direction.REVERSE if item.direction is Direction.REVERSE else Direction.FORWARD
+        else:
+            direction = Direction.FORWARD
+        target = req.target_role or (NodeRole.ENTRY if direction is Direction.REVERSE else
+                                     item.target_role if item else NodeRole.TABLE)
+        cap = item.hop_cap if item else config.MAX_HOPS_FORWARD
+        columns = [n for n in req.node_ids if (node := self.store.node(n)) and node.label == "Column"]
+        self._traverse(out, item_id, req.node_ids, direction.value, target, cap, plan.exclude.is_common, columns,
+                       join=req.mode is ReexploreMode.CONTINUE)
+        result = next((r for r in out.item_results if r.item_id == item_id), None)
+        if result is None:
+            result = ItemExploreResult(item_id=item_id, target_role=target, direction=direction, reached=False)
+            out.item_results.append(result)
+        self._update_result(out, result)
+
+
+    # --- ReAct 보완 ------------------------------------------------------------------
+
+    def _signals(self, plan: PlannerOutput, out: ExplorerOutput) -> list[str]:
+        """규칙 결과에서 ReAct 로 보완할 신호 (프롬프트 점검 항목 번호와 맞춤). 없으면 ReAct 를 생략한다."""
+        signals = []
+        for it in plan.items:
+            r = next((x for x in out.item_results if x.item_id == it.item_id), None)
+            if r is None:
+                continue
+            mine = [p for p in out.paths if p.item_id == it.item_id]
+            nodes = [self.store.node(n) for p in mine for n in p.nodes]
+            if r.unmatched_mentions:
+                signals.append(f"① 항목 {it.item_id}: 매칭 실패 {r.unmatched_mentions}")
+            if not r.reached:
+                signals.append(f"② 항목 {it.item_id}: 목표 역할({it.target_role.value}) 미도달")
+            if mine and not any(self.store.node(p.nodes[0]).role is NodeRole.ENTRY for p in mine):
+                signals.append(f"④ 항목 {it.item_id}: 경로에 진입점(화면·배치) 없음")
+            if any(m.kind in VALUE_MENTIONS for m in it.mentions) and not any(n and n.label == "Column" for n in nodes):
+                signals.append(f"⑤ 항목 {it.item_id}: 요건이 말한 값의 컬럼이 경로에 없음")
+        if out.excluded_common:
+            signals.append(f"⑥ 공통이라 확장 안 한 노드 {len(out.excluded_common)}개 (요건 대상인지 확인)")
+        return signals
+
+    def _react(self, plan: PlannerOutput, out: ExplorerOutput, signals: list[str]) -> None:
+        context = self._react_context(plan, out) + "\n[점검 신호] (규칙 결과에서 계산. 이 항목만 확인)\n" + "\n".join(
+            f"- {s}" for s in signals)
+        steps, self.last_usage = run_react(
+            self.llm, self.system_prompt, context, ExplorerDecision,
+            lambda d: self._react_execute(d, plan, out),
+            budget=lambda: self._budget - self._calls - self._reserve, max_steps=EXPLORER_MAX_REACT_STEPS)
+        out.react_trace = steps
+
+    def _react_context(self, plan: PlannerOutput, out: ExplorerOutput) -> str:
+        lines = [f"[탐색 영역] {[d.value for d in plan.domains]} / 공통 제외 {plan.exclude.is_common}", "[탐색 명세]"]
+        for it in plan.items:
+            mentions = "; ".join(f"{m.kind.value}:{m.phrase}" + (f" (동의어 {', '.join(m.synonyms)})" if m.synonyms else "")
+                                 + (" [신규 가능]" if m.maybe_new else "") for m in it.mentions)
+            lines.append(f"- 항목 {it.item_id} {it.change_type.value} → 목표 {it.target_role.value}, {it.direction.value}, "
+                         f"hop {it.hop_cap} | {it.text} | {mentions}")
+        lines.append("[규칙 탐색 결과 - 시작 노드]")
+        lines += [f"- [{s.item_id}] {s.node_id} ({s.reason})" for s in out.start_nodes] or ["- 없음"]
+        lines.append("[규칙 탐색 결과 - 경로] (진입 → DB)")
+        lines += [f"- [{p.item_id}] {p.stop_reason.value}: {' > '.join(p.nodes)}" for p in out.paths[:MAX_CONTEXT_PATHS]] or ["- 없음"]
+        if len(out.paths) > MAX_CONTEXT_PATHS:
+            lines.append(f"- ... 외 {len(out.paths) - MAX_CONTEXT_PATHS}개")
+        lines.append("[항목별 결과]")
+        lines += [f"- 항목 {r.item_id}: 목표 도달 {r.reached}, hop {r.hops_used}, 끊긴 노드 {r.frontier or '-'}, "
+                  f"매칭 실패 {r.unmatched_mentions or '-'}" for r in out.item_results]
+        if out.unresolved:
+            lines += ["[미해결]"] + [f"- {u}" for u in out.unresolved]
+        if out.excluded_common:
+            lines.append(f"[공통이라 확장 안 함] {out.excluded_common}")
+        return "\n".join(lines)
+
+    def _react_execute(self, d: ExplorerDecision, plan: PlannerOutput, out: ExplorerOutput) -> str:
+        if d.action == "search_graph_nodes":
+            if not d.terms:
+                raise InvalidAction("search_graph_nodes 에는 terms 가 필요합니다")
+            hits = self._tool(search_graph_nodes, SearchGraphNodesInput(
+                terms=d.terms, domains=plan.domains, labels=d.labels or None, top_k=8))
+            return "\n".join(f"{h.node_id} | {h.label}({h.role.value}) | {h.name} | 점수 {h.score:g}" for h in hits) or "결과 없음"
+
+        if d.action == "get_node_detail":
+            if not d.node_ids:
+                raise InvalidAction("get_node_detail 에는 node_ids[0] 이 필요합니다")
+            node = self._tool(get_node_detail, GetNodeDetailInput(node_id=d.node_ids[0]))
+            if node is None:
+                return f"{d.node_ids[0]} 노드 없음"
+            p = node.properties
+            desc = p.get("desc") or p.get("comment") or p.get("program_name") or ""
+            outs = [f"{e.type}→{e.to_id}" for e in self.store.out_edges(node.node_id)][:12]
+            ins = [f"{e.from_id}→{e.type}" for e in self.store.in_edges(node.node_id)][:12]
+            return (f"{node.node_id} | {node.label}({node.role.value if node.role else '-'}) | {node.name} | "
+                    f"{node.source_file}:{node.source_line} | 공통 {p.get('is_common', False)} | {desc}\n"
+                    f"나가는 엣지: {outs or '-'}\n들어오는 엣지: {ins or '-'}")
+
+        # traverse_graph
+        item = next((i for i in plan.items if i.item_id == d.item_id), None)
+        if item is None:
+            raise InvalidAction(f"item_id {d.item_id} 항목이 없습니다")
+        ids = [n for n in d.node_ids or [] if self.store.node(n)]
+        if not ids:
+            raise InvalidAction("traverse_graph 에는 그래프에 있는 node_ids 가 필요합니다 (search_graph_nodes 결과의 ID)")
+        before = len(out.paths)
+        known = {(s.item_id, s.node_id) for s in out.start_nodes}
+        for n in ids:
+            if (item.item_id, n) not in known:
+                out.start_nodes.append(StartNodeChoice(item_id=item.item_id, node_id=n, matched_keyword=n,
+                                                       match_source=MatchSource.TEXT, reason=f"ReAct: {d.thought[:120]}"))
+        columns = [n for n in ids if self.store.node(n).label == "Column"]
+        self._traverse(out, item.item_id, ids, d.direction or "forward", d.target_role or item.target_role, item.hop_cap,
+                       plan.exclude.is_common, columns)
+        result = next(r for r in out.item_results if r.item_id == item.item_id)
+        result.start_node_ids = list(dict.fromkeys(result.start_node_ids + ids))
+        self._update_result(out, result)
+        new = out.paths[before:]
+        return "\n".join(f"{p.stop_reason.value}: {' > '.join(p.nodes)}" for p in new) or "새 경로 없음"
+
+
+def _unresolved(out: ExplorerOutput, item_id: int | None, kind: str, text: str) -> None:
+    """미해결을 문장(unresolved, 기존 호환)과 종류 포함 항목(unresolved_items) 두 곳에 같이 남긴다."""
+    out.unresolved.append(text)
+    out.unresolved_items.append(UnresolvedItem(item_id=item_id, kind=kind, text=text))
+
+
+def _tool_call(params) -> str:
+    if isinstance(params, SearchGraphNodesInput):
+        more = f" 외 {len(params.terms) - 1}" if len(params.terms) > 1 else ""
+        return f"검색 '{clip(params.terms[0], 30)}'{more}" + (f" [{','.join(params.labels)}]" if params.labels else "")
+    if isinstance(params, TraverseGraphInput):
+        return f"탐색 {clip(params.start_ids[0], 40)}" + (f" 외 {len(params.start_ids) - 1}" if len(params.start_ids) > 1 else "") \
+            + f" {params.direction} → {params.target_role.value}"
+    return f"노드 상세 {params.node_id}"
+
+
+def _tool_result(res) -> str:
+    if isinstance(res, TraverseGraphOutput):
+        return f"경로 {len(res.paths)} · 노드 {len(res.nodes)}" + (f" · 공통 제외 {len(res.excluded_common)}" if res.excluded_common else "")
+    if isinstance(res, list):
+        return f"후보 {len(res)}" + (f" · 1위 {res[0].node_id}({res[0].score:g})" if res else "")
+    return res.node_id if res is not None else "없음"
+
+
+def _end(path: ExplorePath) -> str:
+    """탐색이 멈춘 쪽 끝 노드 (정방향은 마지막, 역방향은 첫 노드)."""
+    return path.nodes[-1] if path.direction is Direction.FORWARD else path.nodes[0]

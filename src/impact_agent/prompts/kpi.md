@@ -1,26 +1,64 @@
 # KPI Agent
 
 ## 역할
-분석 결과의 품질 지표와 실행 성능 지표를 측정한다. 규칙 기반으로 계산하며 LLM 은 쓰지 않는다.
-단순 흐름에서는 Retriever 다음, 복잡 흐름에서는 Verifier 다음에 실행하고, 결과를 Composer 에 넘긴다.
+PoC 평가용 에이전트. **Composer 이후** 실행하며, 결과는 Composer(사용자 결과물)에 반영하지 않는다.
+규칙 기반으로 계산하며 LLM 은 쓰지 않는다. 설계: `docs/SE_kpi-agent-design.md`
 
-## 품질 지표 (quality)
+## 입력
+- 정답 노드 목록: `AnswerKey` (`eval/ground_truth/<요건ID>.json` → `load_answer_key`)
+  - `answer_nodes`: `impacted` 중 `must_find=true` (유형은 노드 ID 접두어, 단계는 정답 경로로 산출, `severity` 는 선택 필드·기본 Major)
+  - `excluded_nodes` (평가 제외): `must_find=false` · `reference_only` · 정답 경로 위 노드(impacted 아님) · 미확정(pending) 경로 노드
+  - `eval_target_labels`: 평가할 노드 유형 (선택, 비우면 전체)
+- 실행 로그: `AgentState.agent_runs` (Supervisor 가 기록)
+- Agent 출력 노드(`final_nodes`, 중복 제거). Composer 산출물 문장은 쓰지 않는다.
+  - 복잡 (Retriever → Simulator → Verifier → Composer): Simulator 영향 경로의 노드 (재계획이 있었으면 마지막 라운드)
+  - 단순 (Retriever → Composer): Composer 단순 응답 경로(`composer.simple_answer.impact_paths`)의 노드 (사용자에게 보이는 경로, [변경]/[참조] 표시와 같은 출처)
+  - 결과가 없으면 평가 불가(`evaluable=false`, `skip_reason`)
+
+## 노드 판정
+| 판정 | 조건 |
+|---|---|
+| detected (탐지, TP) | 정답 노드가 `final_nodes` 에 있음 |
+| missed (미탐, FN) | 정답 노드가 `final_nodes` 에 없음 |
+| false_positive (오탐, FP) | 출력 노드가 정답·제외 목록에 없고, 유형이 `eval_target_labels` 안 |
+| excluded (평가 제외) | `excluded_nodes` (출력돼도 오탐 아님, 분모·분자 제외, 건수 공개) |
+| out_of_scope (범위 밖) | 유형이 `eval_target_labels` 에 없는 정답·출력 노드 (건수 공개) |
+
+`judgements` 에 노드별 판정표, `by_type` / `by_stage` 에 노드 유형·단계별 탐지 성능을 남긴다.
+
+## 핵심 KPI (quality, 이 순서)
 | 지표 | 계산 | 기준 |
 |---|---|---|
-| evidence_coverage | (탐색 노드 − 근거 없는 노드) / 탐색 노드 | ≥ KPI_MIN_EVIDENCE_COVERAGE |
-| confirmed_ratio | confirmed hop / 전체 hop (복잡만) | ≥ KPI_MIN_CONFIRMED_RATIO |
-| area_coverage | 판정한 영역 수 / 4 (복잡만) | - |
-| unverified_segments | 확인하지 못한 구간 수 (복잡만) | - |
-| verify_passed | Verifier 결과 pass = 1 (복잡만) | = 1 |
+| change_node_precision ([변경] 노드 정밀도, 정밀도 주 지표) | [변경] 으로 표시한 노드 중 TP / (TP + FP) | ≥ KPI_MIN_PRECISION |
+| change_node_recall ([변경] 재현율) | 정답 변경 노드 중 [변경] 으로 맞힌 수 / 정답 변경 노드 수 | - (측정만, 운영 문의 `input_type=ops_inquiry` 는 제외) |
+| node_recall (노드 탐지율) | TP / (TP + FN) | ≥ KPI_MIN_RECALL |
 
-## 성능 지표 (performance)
+## 보조 지표 (quality)
 | 지표 | 계산 | 기준 |
 |---|---|---|
-| latency_ms | 에이전트별 실행 시간 합 | - |
-| tool_calls | tool 호출 합 | ≤ MAX_TOOL_CALLS |
-| explore_loops | Explorer⇄Retriever 반복 횟수 | - |
+| node_miss_rate (노드 미탐률) | FN / (TP + FN) | - |
+| critical_miss_rate (Critical 미탐률) | Critical 정답 중 FN / Critical 정답 | 권장 0 (측정만) |
+| node_precision (노드 정밀도, 참고) | TP / (TP + FP) | - (측정만, 검토 부담 참고) |
+| excluded_nodes / out_of_scope_nodes | 판정별 건수 | - |
+
+분모가 0 이면 해당 지표를 생략한다 (해당 없음). 비율은 0~1 로 저장한다.
+노드 정밀도는 결과 경로 위 노드 전체가 분모라 지나가기만 하는 [참조] 노드도 오탐이 되고, 값은 경로 수(상류)가 정한다. 그래서 정밀도 하한은 에이전트가 고친다고 한 노드의 정확도인 [변경] 노드 정밀도에 적용하고, 노드 정밀도는 측정만 한다.
+
+## 판정 품질 (judgement, 측정만)
+정답셋의 복잡도·난이도·가능 여부·영역 영향 유형·변경/참조 노드·오답 경로와 실행 결과의 판정을 비교한다. 기준값(threshold)이 없어 `all_passed` 에 영향을 주지 않는다.
+비교값이 없거나 해당 flow 가 아니면 생략한다 (단순: complexity_match · detail_recommended / 복잡: 그 밖). 불일치는 `judgement_notes`, 재분석 여부는 `reanalyzed`.
+지표 정의는 `docs/SE_kpi-agent-design.md` 1-4 "판정 품질 KPI".
+
+## 성능 지표 (performance, 실행 로그)
+| 지표 | 계산 | 기준 |
+|---|---|---|
+| latency_ms (시간) | 에이전트별 실행 시간 합 | - |
+| tool_calls | 분석 라운드(Planner 실행)별 tool 호출 합의 최댓값 (한도는 라운드마다 새로 줌) | ≤ MAX_TOOL_CALLS |
+| tool_calls_total | tool 호출 합 (재계획 라운드 포함) | - |
+| explore_loops | Explorer⇄Retriever 왕복 수 = Retriever 실행 수 합 (재계획 라운드 포함) | - |
 | replans | 재계획 횟수 | - |
 | total_tokens | 입력과 출력 토큰 합 (기록된 경우만) | - |
 
 ## 출력
-`KpiOutput`. 기준에 못 미친 지표는 `warnings` 에 넣고, Composer 가 이를 분석 한계에 반영한다.
+`KpiOutput`. `Supervisor.last_state.kpi` 로 조회한다.
+여러 사례의 배치 평가·집계(시스템 · SM 파트 · flow · 노드 유형 · 단계)는 `scripts/eval_kpi.py`.

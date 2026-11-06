@@ -1,0 +1,96 @@
+node {
+  diameter: 40px;
+  color: #A5ABB6;
+  border-color: #9AA1AC;
+  border-width: 2px;
+  text-color-internal: #FFFFFF;
+  font-size: 9px;
+  caption: "{name}";
+}
+
+relationship {
+  color: #A5ABB6;
+  shaft-width: 1px;
+  font-size: 8px;
+  padding: 3px;
+  text-color-external: #000000;
+  text-color-internal: #FFFFFF;
+  caption: "<type>";
+}
+
+node.Node {
+  caption: "{name}";
+}
+
+node.Screen {
+  color: #E8743B;
+  border-color: #C25A24;
+  diameter: 55px;
+}
+
+node.Controller {
+  color: #F2B134;
+  border-color: #C98F1E;
+  diameter: 45px;
+}
+
+node.TP {
+  color: #F2B134;
+  border-color: #C98F1E;
+  diameter: 45px;
+}
+
+node.Batch {
+  color: #D9A400;
+  border-color: #A67D00;
+  diameter: 55px;
+}
+
+node.Service {
+  color: #7B74D6;
+  border-color: #5A53B0;
+  diameter: 45px;
+}
+
+node.Module {
+  color: #7B74D6;
+  border-color: #5A53B0;
+  diameter: 45px;
+}
+
+node.SQL {
+  color: #4F8FD1;
+  border-color: #326FAE;
+  diameter: 40px;
+}
+
+node.DBIO {
+  color: #2BA3B8;
+  border-color: #1D7F90;
+  diameter: 40px;
+}
+
+node.Table {
+  color: #3F9D86;
+  border-color: #2A7562;
+  diameter: 50px;
+}
+
+node.Column {
+  color: #9CCB6B;
+  border-color: #6FA142;
+  diameter: 25px;
+  caption: "{name}";
+}
+
+relationship.OPENS {
+  color: #E8743B;
+}
+
+relationship.WRITES {
+  color: #D9534F;
+}
+
+relationship.READS {
+  color: #3F9D86;
+}

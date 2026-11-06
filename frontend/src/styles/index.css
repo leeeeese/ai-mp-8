@@ -1,0 +1,144 @@
+@import '@fontsource/inter/400.css';
+@import '@fontsource/inter/500.css';
+@import '@fontsource/inter/600.css';
+@import '@fontsource/noto-sans-kr/400.css';
+@import '@fontsource/noto-sans-kr/500.css';
+@import '@fontsource/noto-sans-kr/700.css';
+@import '@fontsource/jetbrains-mono/400.css';
+@import '@fontsource/jetbrains-mono/600.css';
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* 테마 토큰: 청록 한 계열로 라이트·다크를 잇는다 */
+:root,
+:root[data-theme='light'] {
+  --bg: #ffffff;
+  --surface: rgba(255, 255, 255, 0.85);
+  --surface-2: #f7f8fa;
+  --border: #e6e8ec;
+  --text: #16181d;
+  --muted: #5f6573;
+  --accent: #0b7a87;
+  --accent-fg: #ffffff;
+  --accent-soft: rgba(11, 122, 135, 0.08);
+  --accent-glow: 0 4px 12px rgba(11, 122, 135, 0.25);
+  --aurora-1: rgba(120, 225, 215, 0.55);
+  --aurora-2: rgba(170, 230, 250, 0.35);
+  --ok: #1e7a46;
+  --est: #8a5a00;
+  --warn: #b4441f;
+  color-scheme: light;
+}
+
+:root[data-theme='dark'] {
+  --bg: #050608;
+  --surface: rgba(22, 24, 30, 0.72);
+  --surface-2: rgba(255, 255, 255, 0.04);
+  --border: rgba(255, 255, 255, 0.09);
+  --text: #eceef4;
+  --muted: #959aab;
+  --accent: #7fe3ec;
+  --accent-fg: #04151a;
+  --accent-soft: rgba(127, 227, 236, 0.1);
+  --accent-glow: 0 0 14px rgba(127, 227, 236, 0.55);
+  --aurora-1: rgba(40, 170, 180, 0.45);
+  --aurora-2: rgba(30, 90, 130, 0.25);
+  --ok: #6ee7a8;
+  --est: #f5c451;
+  --warn: #ffb27a;
+  color-scheme: dark;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+body {
+  @apply bg-bg font-sans text-text antialiased;
+}
+
+h1,
+h2,
+h3,
+.title {
+  @apply font-mono tracking-tight;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+@layer components {
+  /* 글라스 카드 */
+  .glass {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    backdrop-filter: blur(16px) saturate(140%);
+    -webkit-backdrop-filter: blur(16px) saturate(140%);
+    @apply rounded-card;
+  }
+  .chip {
+    @apply inline-flex min-h-[32px] items-center gap-1.5 rounded-chip border border-border bg-surface-2 px-2.5 text-[13px] text-text;
+  }
+  .btn {
+    @apply inline-flex min-h-[40px] items-center justify-center gap-2 rounded-full border border-border bg-surface px-4 text-sm font-medium text-text transition-colors hover:bg-surface-2 disabled:cursor-not-allowed disabled:opacity-45;
+  }
+  .btn-primary {
+    @apply btn border-transparent bg-accent text-accent-fg shadow-glow hover:bg-accent hover:brightness-110;
+  }
+  .icon-btn {
+    @apply inline-flex h-10 w-10 items-center justify-center rounded-full text-muted transition-colors hover:bg-surface-2 hover:text-text;
+  }
+  .input {
+    @apply w-full rounded-chip border border-border bg-surface-2 px-3 py-2 text-sm text-text placeholder:text-muted;
+  }
+  .table-base {
+    @apply w-full border-collapse text-left text-sm;
+  }
+  .table-base th {
+    @apply whitespace-nowrap border-b border-border px-3 py-2 text-xs font-medium uppercase tracking-wide text-muted;
+  }
+  .table-base td {
+    @apply border-b border-border px-3 py-2.5 align-top;
+  }
+  .node-id {
+    @apply font-mono text-[12px];
+  }
+}
+
+/* 바닥에서 올라오는 오로라 */
+.aurora {
+  position: fixed;
+  inset: auto 0 -30vh 0;
+  height: 70vh;
+  pointer-events: none;
+  z-index: 0;
+  background: radial-gradient(60% 55% at 35% 70%, var(--aurora-1), transparent 70%),
+    radial-gradient(55% 50% at 70% 75%, var(--aurora-2), transparent 70%);
+  filter: blur(60px);
+  opacity: 0.9;
+}
+
+@keyframes pulse-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
+  50% {
+    box-shadow: var(--accent-glow);
+  }
+}
+.running-glow {
+  animation: pulse-glow 1.6s ease-in-out infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .running-glow {
+    animation: none;
+  }
+}

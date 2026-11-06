@@ -1,0 +1,170 @@
+{
+  "req_id": "M-2",
+  "title": "휴대폰결제 이용동의 해지 시 휴대폰결제 안심통보 자동해지 로직 개발",
+  "difficulty": "Medium",
+  "complexity": "complex",
+  "sm_part": "product",
+  "request_text": "휴대폰결제 이용동의 해지 후 재가입하는 고객의 경우 과거 가입한 휴대폰결제 안심통보의 보호자 정보가 업데이트되지 않아 민원이 발생하고 있습니다. 휴대폰결제 이용동의(NA00004184) 해지 시 휴대폰결제 안심통보(NA00005872)를 자동 해지하여, 재가입 시 업데이트된 보호자 정보로 안심통보에 가입할 수 있도록 해주세요.",
+  "expected": {
+    "feasibility": "feasible",
+    "start_keywords": [
+      "휴대폰결제",
+      "이용동의",
+      "안심통보",
+      "NA00004184",
+      "NA00005872",
+      "자동해지"
+    ],
+    "start_nodes": [
+      "TP:PayAgreeSvc.termPayAgree",
+      "TP:PaySafeNotiSvc.termSafeNoti"
+    ],
+    "areas": {
+      "screen": "modify",
+      "db": "modify",
+      "interface": "reference_only",
+      "batch": "none"
+    },
+    "impacted": [
+      {
+        "node_id": "TP:PayAgreeSvc.termPayAgree",
+        "area": "screen",
+        "impact_type": "modify",
+        "reason": "이용동의 해지 후 안심통보 가입중이면 PaySafeNotiSvc.termSafeNoti 호출 (보호자 정보 종료 + IF_PAY_0020 해지 통보 포함)",
+        "must_find": true
+      },
+      {
+        "node_id": "TP:ProdScrbSvc.termProd",
+        "area": "db",
+        "impact_type": "modify",
+        "reason": "부가상품 화면(ZPRDSS0200010)에서 NA00004184 를 직접 해지하면 PayAgreeSvc 를 거치지 않음 → 공통 해지 경로에서도 연동해지 필요",
+        "must_find": true
+      },
+      {
+        "node_id": "TBL:TB_PROD_RELN",
+        "area": "db",
+        "impact_type": "modify",
+        "reason": "(설계안) 하드코딩 대신 연동해지 관계유형 추가 후 termProd 에서 규칙 기반 처리",
+        "must_find": false
+      },
+      {
+        "node_id": "COL:TB_PROD_RELN.RELN_TYP_CD",
+        "area": "db",
+        "impact_type": "modify",
+        "reason": "(설계안) 'TLNK 연동해지' 관계유형 코드 추가",
+        "must_find": false
+      },
+      {
+        "node_id": "COL:TB_SVC_PROD.TERM_RSN_CD",
+        "area": "db",
+        "impact_type": "modify",
+        "reason": "자동해지 사유코드(예: S003 연관상품 해지) 추가 필요 여부",
+        "must_find": false
+      },
+      {
+        "node_id": "SCR:ZPAYSS0100010",
+        "area": "screen",
+        "impact_type": "modify",
+        "reason": "해지 확인 메시지에 '안심통보도 함께 해지됩니다' 안내 추가",
+        "detail": [
+          "event btnAgreeTerm_onClick"
+        ],
+        "must_find": false
+      }
+    ],
+    "paths": [
+      {
+        "path_id": "P1",
+        "nodes": [
+          "SCR:ZPAYSS0100010",
+          "TP:PayAgreeSvc.termPayAgree",
+          "TP:ProdScrbSvc.termProd",
+          "DBIO:SvcProdSql.updateSvcProdTerm",
+          "TBL:TB_SVC_PROD"
+        ],
+        "critical": true,
+        "status": "confirmed",
+        "note": "이용동의 해지 시 안심통보 상품 연동 해지"
+      },
+      {
+        "path_id": "P2",
+        "nodes": [
+          "SCR:ZPRDSS0200010",
+          "TP:ProdScrbSvc.termProd",
+          "DBIO:SvcProdSql.updateSvcProdTerm",
+          "TBL:TB_SVC_PROD"
+        ],
+        "critical": true,
+        "status": "confirmed",
+        "note": "부가상품 화면에서 이용동의 직접 해지하는 우회 경로"
+      },
+      {
+        "path_id": "P3",
+        "nodes": [
+          "SCR:ZPAYSS0100010",
+          "TP:PaySafeNotiSvc.termSafeNoti",
+          "DBIO:PaySql.updateSafeNotiEnd",
+          "TBL:TB_PAY_SAFE_NOTI",
+          "COL:TB_PAY_SAFE_NOTI.END_DT"
+        ],
+        "critical": false,
+        "status": "confirmed",
+        "note": "안심통보 해지 로직(보호자 정보 종료·IF_PAY_0020) 재사용"
+      },
+      {
+        "path_id": "P4",
+        "nodes": [
+          "SCR:ZPRDSS0200010",
+          "TP:ProdScrbSvc.scrbProd",
+          "MOD:ProdScrbSvc.checkScrbAvail",
+          "MOD:ProdScrbSvc.checkProdReln",
+          "DBIO:ProdSql.selectProdRelnList",
+          "TBL:TB_PROD_RELN",
+          "COL:TB_PROD_RELN.RELN_TYP_CD"
+        ],
+        "critical": false,
+        "status": "pending",
+        "note": "(설계안) 연동해지 관계유형으로 규칙화할지 미확정"
+      }
+    ],
+    "new": [],
+    "reference_only": [
+      "TP:PaySafeNotiSvc.termSafeNoti",
+      "TP:PaySafeNotiSvc.scrbSafeNoti",
+      "DBIO:PaySql.updateSafeNotiEnd",
+      "TBL:TB_PAY_SAFE_NOTI",
+      "SCR:ZPRDSS0200010",
+      "MOD:ProdScrbSvc.checkProdReln",
+      "TP:ProdInfoSvc.hasActiveProd",
+      "COL:TB_PAY_SAFE_NOTI.END_DT"
+    ],
+    "open_items": [
+      {
+        "owner": "developer",
+        "question": "해지 경로가 2개(휴대폰결제 관리 화면 → PayAgreeSvc, 부가상품 화면 → ProdScrbSvc.termProd 직접). 후자는 IF_PAY_0010 통보도 누락되는 기존 문제가 있음. 공통 경로에서 처리할지 결정"
+      },
+      {
+        "owner": "developer",
+        "question": "안심통보 해지(IF_PAY_0020) 실패 시 이용동의 해지까지 롤백할지, 이용동의만 해지하고 재처리할지"
+      },
+      {
+        "owner": "business",
+        "question": "이미 이용동의는 해지됐는데 안심통보만 남아 있는 기존 회선 데이터 일괄 정비 필요 여부"
+      },
+      {
+        "owner": "business",
+        "question": "자동해지 시 고객/보호자 안내(SMS) 필요 여부 및 해지사유 코드"
+      }
+    ]
+  },
+  "distractors": [
+    {
+      "node_id": "TP:PayLmtSvc.changeLmt",
+      "why_confusing": "휴대폰결제 한도 변경. '휴대폰결제', NA00004184 참조가 있으나 해지와 무관"
+    },
+    {
+      "node_id": "TBL:TB_PAY_LMT",
+      "why_confusing": "휴대폰결제 한도 테이블"
+    }
+  ]
+}

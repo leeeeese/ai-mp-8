@@ -4,15 +4,22 @@ from impact_agent import config
 from impact_agent.agents import Supervisor
 from impact_agent.schemas import (
     AgentName,
+    AnswerKey,
+    AnswerNode,
+    ChangeType,
     Complexity,
     ComposerOutput,
+    Direction,
+    ExploreItem,
     ExplorerOutput,
     KpiOutput,
+    NodeRole,
     PlannerOutput,
     PlanStep,
     ReexploreRequest,
     RequestType,
     RetrieverOutput,
+    SimpleAnswer,
     SimulationOutput,
     SmPart,
     StructuredRequest,
@@ -32,7 +39,11 @@ class Fake:
         return self.fn(state)
 
 
-def make_supervisor(complexity, reexplore=False, verify=VerifyResult.PASS):
+ITEM = ExploreItem(item_id=1, text="t", change_type=ChangeType.SCREEN_CHANGE, mentions=[],
+                   target_role=NodeRole.ENTRY_HANDLER, direction=Direction.FORWARD, hop_cap=5)
+
+
+def make_supervisor(complexity, reexplore=False, verify=VerifyResult.PASS, items=(ITEM,)):
     agents = [AgentName.EXPLORER, AgentName.RETRIEVER]
     if complexity is Complexity.COMPLEX:
         agents += [AgentName.SIMULATOR, AgentName.VERIFIER]
@@ -41,6 +52,8 @@ def make_supervisor(complexity, reexplore=False, verify=VerifyResult.PASS):
         structured_request=StructuredRequest(target="t", action="a", request_type=RequestType.CHANGE),
         complexity=complexity,
         complexity_reason="test",
+        domains=[],
+        items=list(items),
         plan=[PlanStep(agent=a, purpose="p") for a in agents],
     ))
     sup.explorer = Fake(lambda s: ExplorerOutput(start_nodes=[], nodes=[], edges=[], hops_used=1))
@@ -50,7 +63,9 @@ def make_supervisor(complexity, reexplore=False, verify=VerifyResult.PASS):
     sup.simulator = Fake(lambda s: SimulationOutput(area_impacts=[]))
     sup.verifier = Fake(lambda s: VerifierOutput(result=verify, checks=[], reason="r"))
     sup.seen_kpi = []
-    sup.composer = Fake(lambda s: (sup.seen_kpi.append(s.kpi), ComposerOutput(complexity=complexity, markdown="ok"))[1])
+    simple = SimpleAnswer(conclusion_lines=["a", "b", "c"], evidence_table=[]) if complexity is Complexity.SIMPLE else None
+    sup.composer = Fake(lambda s: (sup.seen_kpi.append(s.kpi),
+                                   ComposerOutput(complexity=complexity, markdown="ok", simple_answer=simple))[1])
     return sup
 
 
@@ -77,12 +92,74 @@ def test_replan_is_bounded():
     assert sup.composer.calls == 1
 
 
-def test_kpi_runs_before_composer():
+def test_kpi_runs_after_composer():
     for complexity in Complexity:
         sup = make_supervisor(complexity)
         run(sup)
-        (kpi,) = sup.seen_kpi
+        assert sup.seen_kpi == [None]  # Composer 는 KPI 결과를 보지 않는다
+        kpi = sup.last_state.kpi
         assert isinstance(kpi, KpiOutput)
         assert kpi.complexity is complexity
         agents = [r.agent for r in kpi.agent_runs]
-        assert "composer" not in agents and agents[0] == "planner"
+        assert agents[0] == "planner" and agents[-1] == "composer"
+
+
+def test_answer_key_reaches_kpi():
+    sup = make_supervisor(Complexity.SIMPLE)
+    sup.run(UserInput(request_text="요청", sm_part=SmPart.PRODUCT), AnswerKey(req_id="L-1", answer_nodes=[AnswerNode(node_id="TBL:n", type="Table")]))
+    assert sup.last_state.kpi.req_id == "L-1"
+    assert sup.last_state.kpi.missed_nodes == ["TBL:n"]
+
+
+def test_no_items_skips_to_composer():
+    # 분석 대상이 없는 입력(항목 0개)은 탐색·시뮬레이션 없이 Composer 로 바로 간다
+    sup = make_supervisor(Complexity.COMPLEX, items=())
+    run(sup)
+    assert (sup.explorer.calls, sup.retriever.calls, sup.simulator.calls, sup.composer.calls) == (0, 0, 0, 1)
+
+
+def test_reexplore_needs_budget_left():
+    # 남은 tool 호출이 MIN_CALLS_FOR_REEXPLORE 미만이면 재탐색 요청이 있어도 Explorer 로 돌아가지 않는다
+    from impact_agent.rules import MIN_CALLS_FOR_REEXPLORE
+
+    sup = make_supervisor(Complexity.SIMPLE, reexplore=True)
+    sup.explorer = Fake(lambda s: ExplorerOutput(start_nodes=[], nodes=[], edges=[],
+                                                 tool_call_count=config.MAX_TOOL_CALLS - MIN_CALLS_FOR_REEXPLORE + 1))
+    run(sup)
+    assert sup.explorer.calls == 1
+
+
+def test_reanalysis_followup_runs_detail_analysis():
+    # simple 결과 → 사용자 상세 분석 요청(reanalysis) → Planner complex 강제 → Simulator·Verifier → 복잡 결과물
+    from impact_agent.agents import PlannerAgent
+    from impact_agent.schemas import FollowupInput, FollowupType
+    from test_planner import FakeLLM
+
+    sup = make_supervisor(Complexity.SIMPLE)
+    sup.planner = PlannerAgent(llm=FakeLLM(Complexity.SIMPLE))
+    seen = []
+    sup.composer = Fake(lambda s: (seen.append((s.planner.complexity, s.simulation is not None)),
+                                   ComposerOutput(complexity=s.planner.complexity, markdown="ok"))[1])
+    state = sup.analyze(UserInput(request_text="요청", sm_part=SmPart.PRODUCT))
+    assert state.planner.complexity is Complexity.SIMPLE and sup.simulator.calls == 0
+    state = sup.followup(sup.last_session_id, FollowupInput(type=FollowupType.REANALYSIS, content="여러 진입점에서 호출"))
+    assert state.planner.complexity is Complexity.COMPLEX
+    assert sup.simulator.calls == 1 and sup.verifier.calls == 1 and sup.explorer.calls == 2  # 재분석은 탐색부터 다시
+    assert seen == [(Complexity.SIMPLE, False), (Complexity.COMPLEX, True)]
+    assert state.composer.complexity is Complexity.COMPLEX
+
+
+def test_each_planner_round_gets_fresh_tool_budget():
+    # 첫 분석에서 한도를 다 써도 재분석 라운드의 Explorer 는 한도를 새로 받는다
+    from impact_agent.agents import PlannerAgent
+    from impact_agent.schemas import FollowupInput, FollowupType
+    from test_planner import FakeLLM
+
+    sup = make_supervisor(Complexity.SIMPLE)
+    sup.planner = PlannerAgent(llm=FakeLLM(Complexity.SIMPLE))
+    left = []
+    sup.explorer = Fake(lambda s: (left.append(s.tools_left()),
+                                   ExplorerOutput(start_nodes=[], nodes=[], edges=[], tool_call_count=config.MAX_TOOL_CALLS))[1])
+    sup.analyze(UserInput(request_text="요청", sm_part=SmPart.PRODUCT))
+    sup.followup(sup.last_session_id, FollowupInput(type=FollowupType.REANALYSIS, content="r"))
+    assert left == [config.MAX_TOOL_CALLS, config.MAX_TOOL_CALLS]

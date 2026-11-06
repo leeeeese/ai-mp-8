@@ -6,5 +6,24 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+# outputs: 실행 산출물(실행 기록·상태 JSON·KPI 결과)은 모두 로컬에만 둔다 (저장소에 올리지 않음)
 outputs/
 data/
+mock_dev/
+
+# 로컬 전용 _ YJ
+ignore_file/
+
+# frontend
+frontend/node_modules/
+frontend/dist/
+
+# macOS
+.DS_Store
+
+# editor
+.vscode/
+
+# local env (Vite .env.local 등)
+.env.*
+!.env.example

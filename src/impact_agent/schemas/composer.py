@@ -5,7 +5,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from .enums import Area, ChecklistOwner, ChecklistStatus, Complexity, Confidence, Difficulty, Feasibility
-from .simulator import ImpactPath
+from .simulator import DroppedPath, ImpactPath
 
 
 # --- complex ---------------------------------------------------------------
@@ -36,6 +36,7 @@ class ComplexReport(BaseModel):
     schedule_factors: list[str]
     path_details: list[ImpactPath]
     analysis_limits: list[str]
+    dropped_paths: list[DroppedPath] = Field(default_factory=list, description="검토 제외 경로 (Simulator 가 요건과 무관하다고 본 경로)")
     checklist: list[ChecklistItem]
     stage: Literal["initial", "updated", "final_for_dev"] = "initial"
 
@@ -61,11 +62,20 @@ class QueryResultSummary(BaseModel):
 
 class SimpleAnswer(BaseModel):
     conclusion_lines: list[str] = Field(min_length=3, max_length=5)
+    impact_paths: list[ImpactPath] = Field(default_factory=list, description="영향 경로 (A→…→끝)")
     evidence_table: list[SimpleEvidenceRow]
     check_queries: list[GuidanceQuery] = Field(default_factory=list)
     inquiry_contacts: list[str] = Field(default_factory=list)
     analysis_limits: list[str] = Field(default_factory=list)
-    detail_analysis_recommended: bool = Field(default=False, description="변경 요소가 보이면 True")
+    detail_analysis_recommended: bool = Field(default=False, description="강한 탐색 신호가 있으면 True")
+    detail_analysis_reasons: list[str] = Field(
+        default_factory=list,
+        description="상세 분석 권장 사유 = 강한 신호 (노드 ID 를 그대로 포함. 사용자가 재분석을 요청하면 이 문장이 reanalysis 후속 입력이 된다)",
+    )
+    detail_analysis_notes: list[str] = Field(
+        default_factory=list,
+        description="참고 신호 = 약한 신호 (권장하지 않음, 노드 ID 포함. 재분석 요청 때 사유와 함께 reanalysis 후속 입력에 넣는다)",
+    )
     query_result_summary: QueryResultSummary | None = None
 
 

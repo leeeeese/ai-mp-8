@@ -1,0 +1,185 @@
+{
+  "req_id": "SC-004",
+  "title": "AI 캠페인 기획 채널 초기화 후 채널 재조회 불가 문의",
+  "difficulty": "Medium",
+  "complexity": "complex",
+  "sm_part": "marketing",
+  "domain": "tos",
+  "input_type": "ops_inquiry",
+  "request_text": "안녕하세요, 마케팅팀입니다. 바쁘신 중에 문의드려 죄송합니다. AI 캠페인 기획 화면에서 'AI 요금제 상향 추천 10월'(C261000001) 캠페인을 준비하고 있는데요, 예전에 등록해서 승인까지 받은 채널(CH26090012)이 채널 조회 팝업에서 보이지 않습니다. 확인 부탁드려도 될까요? 감사합니다.",
+  "expected": {
+    "feasibility": "feasible",
+    "start_keywords": [
+      "AI 캠페인 기획",
+      "채널 조회",
+      "승인",
+      "C261000001",
+      "CH26090012"
+    ],
+    "start_nodes": [
+      "SCR:TOSCP0300M",
+      "SCR:TOSCP0301P"
+    ],
+    "areas": {
+      "screen": "modify",
+      "db": "modify",
+      "interface": "none",
+      "batch": "none"
+    },
+    "impacted": [
+      {
+        "node_id": "SCR:TOSCP0300M",
+        "area": "screen",
+        "impact_type": "modify",
+        "reason": "fn_selectDtl 에서 기존(연동) 채널 ID(res.cmpn.linkChnlId)를 hidden(hdnExstChnlId)으로 유지, fn_srchChnl 팝업 파라미터에 exstChnlId 추가",
+        "must_find": true,
+        "detail": [
+          "fn_selectDtl",
+          "fn_srchChnl"
+        ],
+        "detail_exclude": [
+          "fn_changeTgtGrp - 화면 채널 값만 지움 (알림 문구와 달리 서버 호출 없음), 변경 대상 아님"
+        ]
+      },
+      {
+        "node_id": "SCR:TOSCP0301P",
+        "area": "screen",
+        "impact_type": "modify",
+        "reason": "부모에서 받은 exstChnlId 를 조회 폼(frmSrch) hidden 으로 전달",
+        "must_find": true,
+        "detail": [
+          "frmSrch"
+        ]
+      },
+      {
+        "node_id": "SQL:CampMapper.selectAiChnlList",
+        "area": "db",
+        "impact_type": "modify",
+        "reason": "(CMPN_ID IS NULL <if exstChnlId> OR CHNL_ID = #{exstChnlId}</if>) 조건 추가. ChnlVO 에 exstChnlId 필드 추가",
+        "must_find": true
+      },
+      {
+        "node_id": "SQL:CampMapper.updateChnlLink",
+        "area": "db",
+        "impact_type": "reference_only",
+        "reason": "원인: 임시저장 시 TCP_CHNL.CMPN_ID 에 캠페인 연동 → 대상군 변경 후에도 DB 연동이 남음",
+        "must_find": true
+      }
+    ],
+    "paths": [
+      {
+        "path_id": "P1",
+        "nodes": [
+          "SCR:TOSCP0300M",
+          "CTL:CampController.saveAiCmpnTmp",
+          "SVC:CampService.saveAiCmpnTmp",
+          "SQL:CampMapper.updateChnlLink",
+          "TBL:TCP_CHNL",
+          "COL:TCP_CHNL.CMPN_ID"
+        ],
+        "critical": true,
+        "status": "confirmed",
+        "note": "원인: 임시저장이 채널을 캠페인에 연동 (데이터 불일치의 시작)"
+      },
+      {
+        "path_id": "P2",
+        "nodes": [
+          "SCR:TOSCP0300M"
+        ],
+        "critical": false,
+        "status": "confirmed",
+        "note": "확인(변경 없음): 대상군 변경은 화면의 채널 값만 지움"
+      },
+      {
+        "path_id": "P3",
+        "nodes": [
+          "SCR:TOSCP0300M",
+          "SCR:TOSCP0301P",
+          "CTL:CampController.selectChnlList",
+          "SVC:CampService.selectChnlList",
+          "SQL:CampMapper.selectAiChnlList"
+        ],
+        "critical": true,
+        "status": "confirmed",
+        "note": "수정 경로: 기존 채널 ID 유지·전달, AI 채널 조회 SQL 조건 추가"
+      }
+    ],
+    "new": [],
+    "reference_only": [
+      "CTL:CampController.saveAiCmpnTmp",
+      "SVC:CampService.saveAiCmpnTmp",
+      "COL:TCP_CHNL.CMPN_ID",
+      "CTL:CampController.selectChnlList",
+      "SVC:CampService.selectChnlList",
+      "CTL:CampController.selectAiCmpnDtl",
+      "SQL:CmpnMapper.selectCmpn"
+    ],
+    "open_items": [
+      {
+        "owner": "business",
+        "question": "같은 상태인 다른 캠페인(C260900230) 데이터 조치 여부"
+      },
+      {
+        "owner": "business",
+        "question": "임시저장 없이 대상군을 바꾼 경우 (연동 전이라 문제 없음) 확인"
+      },
+      {
+        "owner": "business",
+        "question": "대상군 변경 후 다른 채널을 고르면 기존 채널의 CMPN_ID 처리 (연동 해제 / 유지)"
+      },
+      {
+        "owner": "business",
+        "question": "캠페인 등록 화면(TOSCP0110M, 일반 캠페인)에도 같은 개선 적용 여부"
+      },
+      {
+        "owner": "developer",
+        "question": "exstChnlId 미전달 시 selectAiChnlList·selectChnlList 결과가 기존과 동일한지"
+      },
+      {
+        "owner": "developer",
+        "question": "ChnlVO 에 exstChnlId 필드 추가"
+      }
+    ]
+  },
+  "distractors": [
+    {
+      "node_id": "SQL:CampMapper.selectChnlList",
+      "why_confusing": "조건이 거의 같은 일반 캠페인용 SQL. AI 캠페인 화면(aiYn=Y)은 selectAiChnlList 사용"
+    },
+    {
+      "node_id": "SCR:TOSCP0110M",
+      "why_confusing": "같은 팝업을 재사용하는 일반 캠페인 등록 화면. exstChnlId 가 없으면 기존과 똑같이 동작해야 함"
+    },
+    {
+      "node_id": "SVC:CampService.deleteAiCmpn",
+      "why_confusing": "연동 해제(releaseChnl)는 캠페인 삭제에서만 호출. 대상군 변경과 무관"
+    }
+  ],
+  "wrong_paths": [],
+  "wrong_impacts": [
+    {
+      "node_id": "SVC:CampService.releaseChnl",
+      "impact_type": "modify",
+      "why_wrong": "대상군 변경 시 연동 해제를 추가하는 것은 요청보다 범위가 크고 승인 채널 처리에 영향"
+    }
+  ],
+  "conclusion": {
+    "correct": "임시저장으로 CH26090012.CMPN_ID 에 C261000001 이 연동된 뒤 대상군 변경이 화면의 채널만 초기화해서, 승인채널 조회(CMPN_ID IS NULL)에서 같은 캠페인의 채널도 빠진다. 팝업 호출 시 기존(연동) 채널 ID 를 넘기고 selectAiChnlList 에 <if> 로 해당 채널 ID 도 포함한다. 승인 상태·테이블 구조 변경 없음.",
+    "wrong": "재승인 요청, 대상군 변경 시 DB 도 바뀐다고 판단, CMPN_ID 조건 제거, 데이터 조치만, 대상군 변경 시 연동 해제 추가"
+  },
+  "evidence": [
+    {
+      "kind": "data",
+      "file": "snapshot/tos/20261014/TCP_CHNL.csv",
+      "note": "CH26090012 승인(20), CMPN_ID = C261000001 (10/13 10:02 연동)"
+    },
+    {
+      "kind": "data",
+      "file": "snapshot/tos/20261014/TCP_CMPN_BAS.csv",
+      "note": "C261000001 CHNL_ID 비어 있음, 같은 상태 C260900230"
+    }
+  ],
+  "analysis_limits": [
+    "채널 승인 처리 화면·배치 소스는 적재 범위 밖"
+  ]
+}

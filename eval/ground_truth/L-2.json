@@ -1,0 +1,117 @@
+{
+  "req_id": "L-2",
+  "title": "대구공항 운영중단 대고객안내를 위한 계약서 이미지 교체 요청",
+  "difficulty": "Minor",
+  "complexity": "simple",
+  "sm_part": "product",
+  "request_text": "렌탈 유형 계약서의 영업장 안내에 '대구공항 로밍센터 운영중단일' 고지가 필요하여 계약서 이미지 교체를 요청합니다. 대상: 모뎀/휴대폰/바로박스 총 10종(렌탈계약서 이미지 10장). ZROMRR0700090 로밍 계약서 이미지 출력 - rom_ib_eqp_k/e/j/c.jpg, rom_ib_modem_k/e/j/c.jpg, rom_29_baro_k.jpg / ZROMRR0700340 O/B TMH 계약서 - rom_28_main_k00.jpg",
+  "expected": {
+    "feasibility": "feasible",
+    "start_keywords": [
+      "계약서",
+      "이미지",
+      "ZROMRR0700090",
+      "ZROMRR0700340",
+      "대구공항"
+    ],
+    "start_nodes": [
+      "SCR:ZROMRR0700090",
+      "SCR:ZROMRR0700340"
+    ],
+    "areas": {
+      "screen": "modify",
+      "db": "none",
+      "interface": "none",
+      "batch": "none"
+    },
+    "impacted": [
+      {
+        "node_id": "SCR:ZROMRR0700090",
+        "area": "screen",
+        "impact_type": "modify",
+        "reason": "출력 배경 이미지 9장 교체 (대구공항 운영중단일 고지)",
+        "detail": [
+          "images: rom_ib_eqp_k.jpg",
+          "images: rom_ib_eqp_e.jpg",
+          "images: rom_ib_eqp_j.jpg",
+          "images: rom_ib_eqp_c.jpg",
+          "images: rom_ib_modem_k.jpg",
+          "images: rom_ib_modem_e.jpg",
+          "images: rom_ib_modem_j.jpg",
+          "images: rom_ib_modem_c.jpg",
+          "images: rom_29_baro_k.jpg"
+        ],
+        "must_find": true,
+        "detail_exclude": [
+          "images: rom_ib_sim_k/e/j/c.jpg - SIM 렌탈 계약서는 대구공항 안내 없음"
+        ]
+      },
+      {
+        "node_id": "SCR:ZROMRR0700340",
+        "area": "screen",
+        "impact_type": "modify",
+        "reason": "O/B TMH 1페이지(영업장 안내) 이미지 교체",
+        "detail": [
+          "images: rom_28_main_k00.jpg"
+        ],
+        "must_find": true,
+        "detail_exclude": [
+          "images: rom_28_main_k01.jpg - 2페이지(약관), 영업장 안내 없음"
+        ]
+      }
+    ],
+    "paths": [
+      {
+        "path_id": "P1",
+        "nodes": [
+          "SCR:ZROMRR0700090"
+        ],
+        "critical": false,
+        "status": "confirmed",
+        "note": "I/B 계약서 배경 이미지 9장 교체"
+      },
+      {
+        "path_id": "P2",
+        "nodes": [
+          "SCR:ZROMRR0700340"
+        ],
+        "critical": false,
+        "status": "confirmed",
+        "note": "O/B TMH 계약서 1페이지 이미지 교체"
+      }
+    ],
+    "new": [],
+    "reference_only": [
+      "MOD:RomCntrtPrtSvc.getCntrtImg",
+      "COL:TB_ROM_RENT.ROM_TYP_CD"
+    ],
+    "open_items": [
+      {
+        "owner": "business",
+        "question": "교체할 이미지 10장(파일명 동일 유지) 제공 필요. 파일명을 바꾸면 RomCntrtPrtSvc.getCntrtImg 규칙 및 ROM_TYP_CD.ATTR1 수정이 필요해짐"
+      },
+      {
+        "owner": "business",
+        "question": "대구공항 로밍센터 운영중단일 이후 TB_ROM_SHOP(TAE1) 운영종료일 설정으로 수령/반납 영업장 콤보에서 제외할지 (이번 요청 범위 외, 별도 요청 여부)"
+      },
+      {
+        "owner": "business",
+        "question": "I/B SIM 렌탈(rom_ib_sim_*)과 O/B 2페이지(rom_28_main_k01)는 영업장 안내에 대구공항이 없어 대상에서 제외한 것이 맞는지"
+      }
+    ]
+  },
+  "distractors": [
+    {
+      "node_id": "TBL:TB_ROM_SHOP",
+      "why_confusing": "대구공항 로밍센터 영업장 데이터가 있으나 이번 요청은 계약서 이미지 교체만"
+    },
+    {
+      "node_id": "COL:TB_ROM_SHOP.OPER_END_DT",
+      "why_confusing": "대구공항 영업장 운영종료일 컬럼. 이번 요청은 이미지 교체만 (운영종료일 설정은 별도 요청 여부 확인 사항)"
+    },
+    {
+      "node_id": "TP:RomRentSvc.getShopList",
+      "why_confusing": "수령/반납 영업장 콤보 조회. 대구공항 키워드와 연결되지만 변경 대상 아님"
+    }
+  ]
+}

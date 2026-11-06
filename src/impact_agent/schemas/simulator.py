@@ -11,7 +11,7 @@ class PathHop(BaseModel):
     node: str
     relation: str
     impact: str
-    evidence_ref: str | None = Field(default=None, description="Evidence 식별 (file_path#symbol)")
+    evidence_ref: str | None = Field(default=None, description="Evidence 식별 (file_path#location, 예: java/A.java#L40-88)")
     confidence: Confidence
 
 
@@ -41,9 +41,17 @@ class AreaImpact(BaseModel):
     confidence: Confidence
 
 
+class DroppedPath(BaseModel):
+    """요건과 무관해 영향 경로에서 제외한 경로 (가드 규칙 통과분). 레포트 "검토 제외 경로"로 표시, KPI 평가에서 제외."""
+
+    path: ImpactPath
+    reason: str
+
+
 class SimulationOutput(BaseModel):
     area_impacts: list[AreaImpact]
     requested_vs_alternative: str | None = Field(default=None, description="요청안/대안 비교 요약")
     unverified_segments: list[str] = Field(
         default_factory=list, description="확인하지 못한 구간·파일 (분석 한계로 전달)"
     )
+    dropped_paths: list[DroppedPath] = Field(default_factory=list, description="요건과 무관해 제외한 경로 (사유 포함)")

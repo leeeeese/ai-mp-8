@@ -1,0 +1,85 @@
+{
+  "req_id": "L-4",
+  "title": "TB끼리 TV플러스 가입연수 관련 안내 문구 추가 요청",
+  "difficulty": "Minor",
+  "complexity": "simple",
+  "sm_part": "product",
+  "request_text": "TV플러스 해지 관련 고객 VOC가 지속 발생하여 상담 단계에서 필수 안내가 가능하도록 문구 노출을 요청합니다. 노출 위치: Swing [결합상품 > TV플러스 선택 시] 유선서비스 영역 우측 상단. 문구: \"20.11.12 이전 결합고객, 결합 해지시 가입연수 제외기간 확인 및 안내 필수\"",
+  "expected": {
+    "feasibility": "feasible",
+    "start_keywords": [
+      "결합상품",
+      "TV플러스",
+      "유선서비스",
+      "안내 문구"
+    ],
+    "start_nodes": [
+      "SCR:ZCMBSS0100010"
+    ],
+    "areas": {
+      "screen": "modify",
+      "db": "none",
+      "interface": "none",
+      "batch": "none"
+    },
+    "impacted": [
+      {
+        "node_id": "SCR:ZCMBSS0100010",
+        "area": "screen",
+        "impact_type": "modify",
+        "reason": "areaWd(유선서비스) 우측 상단에 안내 LABEL 추가 / cboCombProd == 'NC00000201'(TB끼리 TV플러스) 일 때만 안내 문구 visible",
+        "detail": [
+          "event cboCombProd_onChange"
+        ],
+        "must_find": true
+      }
+    ],
+    "paths": [
+      {
+        "path_id": "P1",
+        "nodes": [
+          "SCR:ZCMBSS0100010"
+        ],
+        "critical": false,
+        "status": "confirmed",
+        "note": "TV플러스 선택 시 유선서비스 영역 안내 문구"
+      }
+    ],
+    "new": [],
+    "reference_only": [
+      "COL:TB_SVC.SVC_CL_CD"
+    ],
+    "open_items": [
+      {
+        "owner": "developer",
+        "question": "유선서비스 영역 우측 상단(TOP_RIGHT)에 이미 '선택 N회선' 라벨(lblWdCnt)이 있음. 배치 위치 조정 필요"
+      },
+      {
+        "owner": "business",
+        "question": "문구가 '결합 해지 시' 안내인데, 결합 조회/해지 화면(ZCMBSS0200010)에도 노출이 필요한지"
+      },
+      {
+        "owner": "business",
+        "question": "문구 고정 하드코딩 vs 공통코드 관리(향후 문구 변경 대응) 선택"
+      }
+    ]
+  },
+  "distractors": [
+    {
+      "node_id": "MOD:CustGradeSvc.calcScrbYears",
+      "why_confusing": "'가입연수', '제외기간', '2020.11.12' 키워드가 모두 등장하는 계산 로직. 요청은 안내 문구 노출뿐이라 로직 변경 대상 아님"
+    },
+    {
+      "node_id": "MOD:CustGradeSvc.getLongCustBenefit",
+      "why_confusing": "장기고객 혜택/가입연수 서비스. 변경 불필요"
+    },
+    {
+      "node_id": "SCR:ZCMBSS0200010",
+      "why_confusing": "결합 해지 화면. 요청 노출 위치는 결합상품 가입 화면의 TV플러스 선택 시"
+    },
+    {
+      "node_id": "MOD:CombScrbSvc.validateCombMbr",
+      "why_confusing": "TV플러스 분기(NC00000201)가 있는 서버 검증 로직. 문구 노출과 무관"
+    }
+  ]
+}
