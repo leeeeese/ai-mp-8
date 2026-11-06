@@ -1,6 +1,6 @@
 """시나리오 E2E 실행 기록 + 정답셋 평가. UI 와 같은 전체 흐름 (Planner → … → Composer → KPI Agent).
 
-흐름 (docs/planner_detail_analysis_to-be.md 의 사용자 확인을 평가용으로 가정):
+흐름 (docs/YJ_agent_design.md 1-1 의 사용자 확인을 평가용으로 가정):
     1차 판정 complex                    → 그대로 끝까지 (정답이 simple 이어도 2-3 Simulator · 2-4 Verifier · Composer)
     1차 판정 simple, 정답 complex       → "상세 분석 요청"을 눌렀다고 가정: reanalysis 후속 입력
                                          (내용 = Composer 권장 사유 + "참고: " 참고 신호, UI 와 같은 형식. 둘 다 없으면 "상세 분석 요청")

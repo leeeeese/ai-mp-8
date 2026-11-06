@@ -374,7 +374,7 @@ def safe_queries(queries: list[DraftQuery]) -> list[GuidanceQuery]:
 
 
 def detail_reasons(state: AgentState, paths: list[ImpactPath]) -> tuple[list[str], list[str]]:
-    """단순 응답의 상세 분석 권장 사유(강한 신호)와 참고 사항(약한 신호) (설계서 3-1, planner_detail_analysis_to-be.md).
+    """단순 응답의 상세 분석 권장 사유(강한 신호)와 참고 사항(약한 신호) (설계서 3-1).
 
     강한 신호가 있을 때만 권장하고, 약한 신호는 참고 신호(detail_analysis_notes)로 남긴다. 공통 모듈·여러 진입점 신호는
     [변경] 노드에서만 센다 ([참조] 노드는 거쳐 가기만 하므로 신호가 아님). 신호마다 노드 ID 를 그대로 넣는다: 사용자가

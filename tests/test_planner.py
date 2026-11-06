@@ -1,4 +1,4 @@
-"""Planner 테스트 (가짜 LLM): 사용자 상세 분석 요청(reanalysis)이면 complex 강제 (docs/planner_detail_analysis_to-be.md)."""
+"""Planner 테스트 (가짜 LLM): 사용자 상세 분석 요청(reanalysis)이면 complex 강제 (docs/YJ_agent_design.md 1-1)."""
 
 from impact_agent.agents.planner import REANALYSIS_REASON, DraftItem, DraftMention, PlannerAgent, PlannerDraft
 from impact_agent.llm import Usage

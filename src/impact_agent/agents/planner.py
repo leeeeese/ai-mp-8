@@ -9,7 +9,7 @@ LLM 은 요건 항목 분리·변경 유형·언급 표현(동의어·의미 힌
 노드 ID 는 정하지 않는다 (그래프를 모르는 상태에서 판단). 복잡도는 요건 문장에서 확인되는 것만으로 판정한다.
 
 사용자 상세 분석 요청: 마지막 후속 입력이 reanalysis(결과 화면의 상세 분석 권장을 사용자가 확인)면
-LLM 판정과 관계없이 complex 로 정하고 실행 계획에 Simulator·Verifier 를 넣는다 (코드 규칙, docs/planner_detail_analysis_to-be.md).
+LLM 판정과 관계없이 complex 로 정하고 실행 계획에 Simulator·Verifier 를 넣는다 (코드 규칙, docs/YJ_agent_design.md 1-1).
 Verifier 재계획 라운드(이전 판정 complex + replan_feedback)도 complex 를 유지한다 (복잡 흐름 도중 단순 응답으로 빠지지 않게).
 """
 

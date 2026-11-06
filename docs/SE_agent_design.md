@@ -144,7 +144,7 @@ Simulator·Verifier·Composer 가 같은 함수(`rules.path_areas`)를 쓴다.
 | Batch 단독 (나가는 엣지 없음) | SC-006 참고 `BAT:TBCH1020`·`TBCH4020` | batch (+ interface) |
 | EntryHandler 에서 시작 | SC-003 `CTL:CmmCdController.selectCdList → SQL:… → TBL:TCP_CMM_CD` | screen 으로 본다 |
 | Table 에서 시작 | SC-002·SC-006 `TBL:… → COL:…` | db 만 |
-| Logic 만 (진입 노드 없음, 시작 노드가 곧 목표 역할) | H-1·H-2 `MOD:ProdScrbSvc.checkProdReln` (1노드) | (1) 경로 첫 노드를 호출하는 노드(Explorer 엣지)의 영역 → (2) 그래프 역방향 호출 진입점(Screen·Batch, 호출 엣지 `CALLS`·`INVOKES`·`EXECUTES`·`OPENS`, 4 hop) 의 영역 → (3) 둘 다 없거나 그래프 조회 실패면 screen. 분석 한계에 "영역 추정" 과 근거(진입점 ID)를 남김 (`simulator.assign_orphan_areas`, `entry_areas_in_graph`). 근본 해결은 Explorer 진입점 역추적 ([planner_detail_analysis_to-be.md](planner_detail_analysis_to-be.md) 6-1). 영역이 없으면 어느 영역 경로에도 안 들어가 결과·레포트·KPI 에서 기록 없이 빠졌음 (v1 H-2 `MOD:ProdScrbSvc.checkScrbAvail` 미탐) |
+| Logic 만 (진입 노드 없음, 시작 노드가 곧 목표 역할) | H-1·H-2 `MOD:ProdScrbSvc.checkProdReln` (1노드) | (1) 경로 첫 노드를 호출하는 노드(Explorer 엣지)의 영역 → (2) 그래프 역방향 호출 진입점(Screen·Batch, 호출 엣지 `CALLS`·`INVOKES`·`EXECUTES`·`OPENS`, 4 hop) 의 영역 → (3) 둘 다 없거나 그래프 조회 실패면 screen. 분석 한계에 "영역 추정" 과 근거(진입점 ID)를 남김 (`simulator.assign_orphan_areas`, `entry_areas_in_graph`). 근본 해결은 Explorer 진입점 역추적 ([YJ_agent_design.md](YJ_agent_design.md) 3-4 진입점 연결, v6-5 반영). 영역이 없으면 어느 영역 경로에도 안 들어가 결과·레포트·KPI 에서 기록 없이 빠졌음 (v1 H-2 `MOD:ProdScrbSvc.checkScrbAvail` 미탐) |
 
 ### 1-2. 난이도 판단 기준
 
@@ -170,7 +170,7 @@ Simulator·Verifier·Composer 가 같은 함수(`rules.path_areas`)를 쓴다.
 | L-3 그리드 항목 추가 | Minor | Medium | Minor | 기존 컬럼 조회 추가, 영역마다 단일 노드 |
 | M-3 판촉품 지급 체크 | Medium | Major | Medium | 기존 테이블 nullable 컬럼 추가 |
 | M-4 결합상품 개선 | Medium | Major | Medium | 같음 |
-| SC-002 권한 만료 장애 | Major | Medium | Medium | **미해결** (9장) |
+| SC-002 권한 만료 장애 | Major | Medium | Medium | **미해결** |
 
 나머지 11건은 두 기준 모두 일치한다.
 
@@ -223,7 +223,7 @@ Simulator 는 시스템을 나눠 판단하지 않는다. **역할 → 변경 �
 
 ### 1-4. 재분석으로 들어온 요건 (Simulator 쪽 반영됨, Planner·UI 연동 예정)
 
-[planner_detail_analysis_to-be.md](planner_detail_analysis_to-be.md) 에 따라 complex flow 는 두 경로로 들어온다: Planner 가 처음부터 complex 로 판정한 요건, 그리고 단순 응답의 "상세 분석 권장"(`detail_analysis_reasons`)을 보고 사용자가 요청한 재분석(`FollowupInput(type=reanalysis)` → Planner 가 complex). Simulator 는 두 경우를 같은 방식으로 판정하고, 재분석일 때만 아래를 더한다. 어느 경우든 복잡도는 읽지 않는다.
+[YJ_agent_design.md](YJ_agent_design.md) 1-1 에 따라 complex flow 는 두 경로로 들어온다: Planner 가 처음부터 complex 로 판정한 요건, 그리고 단순 응답의 "상세 분석 권장"(`detail_analysis_reasons`)을 보고 사용자가 요청한 재분석(`FollowupInput(type=reanalysis)` → Planner 가 complex). Simulator 는 두 경우를 같은 방식으로 판정하고, 재분석일 때만 아래를 더한다. 어느 경우든 복잡도는 읽지 않는다.
 
 | 항목 | 내용 |
 |---|---|
@@ -313,7 +313,7 @@ Simulator 는 시스템을 나눠 판단하지 않는다. **역할 → 변경 �
 | `evidence_table` | 코드. Evidence 마다 `claim`(LLM 요약 또는 노드 설명) · `evidence` · `location` · `confidence`. `claim` 은 원문으로 확인한 조건·코드값·컬럼, LLM 은 `[변경]` 노드·결론 노드 근거만 10개 이내. `[변경]` 노드 근거 → `[변경]` 경로 위 노드 근거 → 나머지 순. MD 는 경로 5개·근거 10행만 펼치고 나머지는 개수만 |
 | `check_queries` | LLM. 운영 문의일 때 확인용 SQL. **Oracle 문법의 읽기 전용 SELECT 한 문장**(`SELECT`/`WITH`, 세미콜론·PL/SQL 블록·`FOR UPDATE` 없음), 실데이터 대신 바인드 변수(`:svc_mgmt_no`), 건수 제한은 `FETCH FIRST n ROWS ONLY`/`ROWNUM`, 테이블·컬럼은 입력 경로·근거에 있는 것만. **코드에서 SELECT 단일 문장만 통과**. 코드값 해석은 Column `code_values`(swing) / `TCP_CMM_CD` 조회(tos) (SC-006) |
 | `analysis_limits` | 코드. `explorer.unresolved`, `nodes_without_evidence` |
-| `detail_analysis_recommended` · `detail_analysis_reasons` · `detail_analysis_notes` | 규칙 (2026-11-02 개정). `detail_reasons` 가 신호를 강/약으로 나눠 **강한 신호가 있을 때만 권장**하고 사유(`detail_analysis_reasons`)에 넣는다. 약한 신호는 참고 신호(`detail_analysis_notes`, 권장 안 함). 공통 모듈·여러 진입점 신호는 `[변경]` 노드에서만 센다. 강: `[변경]` 노드가 공통 모듈·여러 진입점, 요건 항목 2개 이상이 2개 영역 이상 변경, 구조 변경 유형 요건의 신규 후보·그래프 밖 연계 (신규 후보·그래프 밖은 `explorer.unresolved_items[].kind` 로 가름 — `new_candidate`·`out_of_graph`. 종류가 없는 이전 저장 상태만 `unresolved` 문구로, `unresolved_signals`). 약: 구조 변경 유형만, 탐색 제외 공통 모듈, 구조 변경이 아닌 요건의 신규 후보·그래프 밖, LLM 판단만(`SimpleDraft.detail_analysis_recommended`), LLM 응답 없음(`[변경]` 표시 없음 → "권장 판단 제한"). 문장에 노드 ID 를 그대로 넣어 재분석 시 Simulator·Verifier 가 확인 대상으로 쓴다 (재분석 입력 = 사유 + "참고: " 참고 신호). 각 최대 5개. 신호 표는 [planner_detail_analysis_to-be.md](planner_detail_analysis_to-be.md) 3장 |
+| `detail_analysis_recommended` · `detail_analysis_reasons` · `detail_analysis_notes` | 규칙 (2026-11-02 개정). `detail_reasons` 가 신호를 강/약으로 나눠 **강한 신호가 있을 때만 권장**하고 사유(`detail_analysis_reasons`)에 넣는다. 약한 신호는 참고 신호(`detail_analysis_notes`, 권장 안 함). 공통 모듈·여러 진입점 신호는 `[변경]` 노드에서만 센다. 강: `[변경]` 노드가 공통 모듈·여러 진입점, 요건 항목 2개 이상이 2개 영역 이상 변경, 구조 변경 유형 요건의 신규 후보·그래프 밖 연계 (신규 후보·그래프 밖은 `explorer.unresolved_items[].kind` 로 가름 — `new_candidate`·`out_of_graph`. 종류가 없는 이전 저장 상태만 `unresolved` 문구로, `unresolved_signals`). 약: 구조 변경 유형만, 탐색 제외 공통 모듈, 구조 변경이 아닌 요건의 신규 후보·그래프 밖, LLM 판단만(`SimpleDraft.detail_analysis_recommended`), LLM 응답 없음(`[변경]` 표시 없음 → "권장 판단 제한"). 문장에 노드 ID 를 그대로 넣어 재분석 시 Simulator·Verifier 가 확인 대상으로 쓴다 (재분석 입력 = 사유 + "참고: " 참고 신호). 각 최대 5개. 결정 사항은 [YJ_agent_design.md](YJ_agent_design.md) 1-1 |
 
 ### 3-2. 복잡 요건 결과물 (`ComplexReport`)
 
@@ -492,19 +492,3 @@ pytest (LLM·Neo4j 불필요, 가짜 LLM `Fixed` 또는 LLM 없음, tos·swing �
 | `analysis_limits` | Composer 분석 한계 |
 
 위 표에서 `expected.areas`·`feasibility`·`difficulty`·`reference_only`·`wrong_paths` 와 정답 `complexity` 는 KPI 판정 품질 지표로 자동 비교한다 ([SE_kpi-agent-design.md](SE_kpi-agent-design.md) 1-4). `expected.new`·`conclusion`·`open_items`·`analysis_limits` 는 자동 비교하지 않는다.
-
-## 9. 남은 과제
-
-1. `new_elements` 반영: 스키마(`NewElement`) → Simulator 보정 → Verifier `evidence_missing` 예외 → Composer "신규 개발 요소" 절·체크리스트 → 프론트 목업
-2. Simulator 재분석 연동 (1-4): Simulator 쪽은 모두 반영됨 (`shared_nodes` 이동, `[재분석 요청]` 입력·프롬프트, 경로 제외 가드, 사유 노드 미탐색 분석 한계). Planner 재분석 규칙·UI 는 [planner_detail_analysis_to-be.md](planner_detail_analysis_to-be.md) Planner·UI 쪽 To-Be([planner_detail_analysis_to-be.md](planner_detail_analysis_to-be.md))와 같이 진행
-   Simulator 일반화 (1-3) 남은 것: 고립 노드·swing REFERENCES 분석 한계. 프롬프트(역할별 원문 표·변경 지점 유형·공유 노드·swing 형 예시 4), 영향 범위 보정, `[노드 메타]`·`[공유 노드]` 입력은 반영됨
-3. Verifier: 고립 노드 재계획 제외 (화면·배치 공유 노드는 Simulator 가드·보정으로 처리, 2장)
-4. 난이도 기준 검증: 조정안은 손 대조 결과라 16건 실행 후 재확인. **SC-002(운영 장애, 정답 Major)는 기준표로 설명이 안 됨** → 운영 장애·권한 요건 가중 여부 결정
-5. 공통 노드 처리: 정답셋이 공통 노드를 `reference_only`·경로 시작으로 쓰는 경우(H-2·L-1·SC-003)와 Explorer 공통 제외 규칙을 맞출지 (파트너 합의)
-6. 자동 재분석: 지금은 사용자 확인 후 `reanalysis` 후속 입력. 자동화가 필요하면 Supervisor 에 `reanalysis_request` 라우팅 추가 (파트너 합의)
-7. 두 시스템에 걸친 요건: Planner 탐색 영역이 SM 선택 하나로 고정. 필요하면 `SM_PART_DOMAINS` 확장 (파트너 합의)
-8. `hard`·대안 사례 검증: 정답셋 16건 모두 feasible. 정답셋은 그대로 두고 `tests/` 가상 노드 fixture 로 검증
-9. swing 정의서 채움률: 데이터는 그대로 두고 LLM 이 `code` 본문으로 판단. 설명 없는 노드가 판정 품질에 주는 영향을 실행 결과로 확인
-10. LLM 입력 길이 상한 (노드당 원문, 전체 상한, 요약 여부), PDF 변환(weasyprint 한글 폰트·사내 설치 가능 여부)
-11. `new_elements` KPI 일치 기준: `new_elements` 가 구현되면 KPI 판정 품질에 추가 (지금은 KPI 설계서 1-4 "자동 비교하지 않는 정답 필드")
-12. 검증: `run_scenarios.py` 를 Composer 까지 돌려 `state.json` 저장 → `eval_kpi.py` 로 KPI, 1-2 난이도 대조표를 실행 결과로 갱신

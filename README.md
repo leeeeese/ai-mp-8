@@ -51,31 +51,53 @@
 ├── src/impact_agent/
 │   ├── __main__.py           # CLI 진입점
 │   ├── config.py             # constants (MAX_EXPLORE_LOOP 등)를 schemas.json에서 로드
+│   ├── rules.py              # 코드 판단 기준표 (변경 유형 → 목표 역할·방향·hop, SM → 영역, tool 한도 배분)
+│   ├── llm.py                # OpenAI / Azure 호출 (Structured Outputs, seed 고정)
 │   ├── state.py              # 에이전트 간 공유 상태(AgentState)
+│   ├── trace.py              # 실행 로그 (받은 입력 → 동작 → 근거 → 결과)
 │   ├── schemas/              # $defs → Pydantic 모델 (담당 에이전트별 분리)
 │   │   ├── enums.py          #   Area, Difficulty, Feasibility, ... (enum 전체)
 │   │   ├── inputs.py         #   UserInput, InputMeta, FollowupInput
 │   │   ├── planner.py        #   StructuredRequest, OpenItem, PlanStep, PlannerOutput, ReplanFeedback
-│   │   ├── explorer.py       #   GraphNode, GraphEdge, StartNodeChoice, ExplorerOutput
+│   │   ├── explorer.py       #   GraphNode, GraphEdge, StartNodeChoice, UnresolvedItem, ExplorerOutput
 │   │   ├── retriever.py      #   Evidence, ReexploreRequest, RetrieverOutput
 │   │   ├── simulator.py      #   PathHop, ImpactPath, Alternative, AreaImpact, SimulationOutput
 │   │   ├── verifier.py       #   VerifyCheck, VerifierOutput
 │   │   ├── kpi.py            #   KpiMetric, AgentRunRecord, AnswerKey, KpiOutput
 │   │   ├── composer.py       #   SimpleAnswer, ComplexReport, ChecklistItem, MailDraft, ComposerOutput, ...
 │   │   └── tools.py          #   tool 입출력 (SearchGraphNodes*, TraverseGraph*, ReadSource*, SaveReport*)
-│   ├── agents/               # 에이전트 구현 (supervisor = 흐름 제어, kpi = PoC 평가)
+│   ├── agents/               # supervisor · planner · explorer · retriever · react(ReAct 루프) · simulator · verifier · composer · kpi
 │   ├── api/                  # UI 백엔드 API (FastAPI: 세션·SSE·KPI·적재 현황·권한·상세 로그)
-│   ├── tools/                # tool 구현 + TOOL_REGISTRY
-│   ├── prompts/              # 에이전트별 시스템 프롬프트 (*.md)
+│   ├── tools/                # graph(Neo4j/CSV) · source(원문 조회) · report(저장) + TOOL_REGISTRY
+│   ├── prompts/              # 에이전트별 시스템 프롬프트 (*.md, _common.md 는 공통 머리말)
 │   └── templates/            # Composer markdown 템플릿 (Jinja2)
-├── tests/                    # 스키마 동기화 · Supervisor 루프 · KPI · 템플릿 테스트
+├── frontend/                 # 웹 UI (React 18 + TypeScript + Vite, MSW 목업)
+├── eval/
+│   ├── ground_truth/         # 정답셋 16건 (<요건ID>.json, AnswerKey)
+│   └── inputs/               # 정답셋 첨부 입력 (SC-006 조회 결과 CSV)
+├── tests/                    # 스키마 동기화 · 에이전트별 · Supervisor 루프 · KPI · API · 템플릿 테스트
 ├── scripts/
 │   ├── setup.sh / setup.ps1  # 가상환경 + 패키지 일괄 설치
-│   └── export_schema.py      # Pydantic 모델 → JSON Schema 재생성 (비교용)
+│   ├── build_graph.py        # data/source → data/graph 생성 (+ --load Neo4j 적재). 파서는 graph/
+│   ├── check_ground_truth.py # 정답셋 노드가 그래프에 있는지 검사
+│   ├── eval_kpi.py           # 저장된 *.state.json 배치 KPI 평가
+│   ├── export_schema.py      # Pydantic 모델 → JSON Schema 재생성 (비교용)
+│   ├── export_ui_graph_sample.py  # 프론트 목업용 그래프 샘플
+│   ├── YJ/                   # E2E 1회 실행·report (run_all.sh, run_scenarios.py), 가드레일 테스트
+│   └── SE/                   # E2E 반복 실험·상류 고정 비교 (run_experiment.py, run_scenarios.py, replay_run.py)
+├── docs/                     # 설계서 (아래 문서 목록)
 ├── requirements.txt          # pip install -r requirements.txt (= .[all,dev])
-├── docker-compose.yml        # 로컬 Neo4j (2-1 Explorer)
-└── docs/architecture.md
+└── docker-compose.yml        # 로컬 Neo4j (2-1 Explorer)
 ```
+
+| 문서 | 내용 |
+|---|---|
+| [docs/YJ_agent_design.md](docs/YJ_agent_design.md) | Agent 설계서: Supervisor · Planner · Explorer · Retriever, E2E 평가 결과 |
+| [docs/SE_agent_design.md](docs/SE_agent_design.md) | Agent 설계서: Simulator · Verifier · Composer |
+| [docs/SE_kpi-agent-design.md](docs/SE_kpi-agent-design.md) | KPI Agent 설계서 (지표 정의) |
+| [docs/architecture.md](docs/architecture.md) | 상수 · 단계별 데이터 흐름 · 분기 규칙 · enum 요약 |
+| [docs/ui_design.md](docs/ui_design.md) · [docs/api_design.md](docs/api_design.md) | 화면 설계서 · API 설계서 |
+| [docs/mock_data.md](docs/mock_data.md) · [docs/neo4j_guide.md](docs/neo4j_guide.md) | 목업 소스·그래프 구조 · Neo4j 적재·조회 |
 
 ## 시작하기
 
@@ -160,16 +182,16 @@ source .venv/bin/activate
 pytest                                    # 테스트
 docker compose up -d                      # Neo4j 실행
 ruff check src tests                      # 린트
-python -m impact_agent "요청 문장" --sm-part product   # 실행 (Composer 구현 후)
+python -m impact_agent "요청 문장" --sm-part product   # 실행
 python -m impact_agent --case SC-001 --until retriever  # 정답셋 요청으로 Planner→Explorer→Retriever 까지 (설계: docs/YJ_agent_design.md)
 python -m impact_agent --case L-1 --answer-key eval/ground_truth/L-1.json   # + KPI 평가 (PoC)
-python scripts/eval_kpi.py outputs/runs/YJ/<run_id>   # 저장된 *.state.json 배치 KPI 평가
+python scripts/eval_kpi.py <state.json 폴더>   # 저장된 *.state.json 배치 KPI 평가 (예: E2E 실행 결과 폴더)
 ```
 
 ## 웹 UI 실행 (Neo4j → 백엔드 → 프론트)
 
 `frontend/` (React 18 + TypeScript + Vite) + 백엔드 API `src/impact_agent/api/` (FastAPI).
-화면 설계서: [docs/ui_design.md](docs/ui_design.md), API 설계서: [docs/api_design.md](docs/api_design.md), API 통합 테스트: [docs/api_integration_test.md](docs/api_integration_test.md), Agent 설계서: [docs/YJ_agent_design.md](docs/YJ_agent_design.md)
+화면 설계서: [docs/ui_design.md](docs/ui_design.md), API 설계서: [docs/api_design.md](docs/api_design.md), Agent 설계서: [docs/YJ_agent_design.md](docs/YJ_agent_design.md)
 
 | 모드 | 필요한 것 | 용도 |
 |---|---|---|
@@ -190,12 +212,12 @@ python scripts/eval_kpi.py outputs/runs/YJ/<run_id>   # 저장된 *.state.json �
 
 | 방법 | 설정 |
 |---|---|
-| 1. Python 경로를 직접 지정 | 패키지가 설치된 Python 경로를 `PY` 로 둔다. 예: 시스템 Python 3.11 `PY=/Library/Frameworks/Python.framework/Versions/3.11/bin/python3` |
+| 1. Python 경로를 직접 지정 | 패키지가 설치된 Python 경로를 `PY` 로 둔다 (`.venv` 를 쓰면 `PY=.venv/bin/python`) |
 | 2. conda 환경 사용 | `conda activate <환경>` 후 (처음 한 번) `pip install -r requirements.txt`, 그리고 `PY=python` |
 
 ```bash
 # 1. 경로 직접 지정
-PY=/Library/Frameworks/Python.framework/Versions/3.11/bin/python3
+PY=<패키지가 설치된 python3 경로>
 
 # 2. conda 환경
 conda activate <환경>
@@ -205,19 +227,18 @@ PY=python
 $PY -c "import fastapi, uvicorn, neo4j, openai; print('ok')"   # ok 가 나오면 준비 완료
 ```
 
-아래 명령의 `$PY` 는 위에서 정한 Python 이다 (터미널을 새로 열면 다시 정한다).
+아래 명령은 모두 **저장소 루트**에서 실행하고, `$PY` 는 위에서 정한 Python 이다 (터미널을 새로 열면 다시 정한다).
 
 **프론트 패키지**
 
 ```bash
-cd ~/Desktop/impact-agent/frontend
+cd frontend
 npm install
 ```
 
 ### 1. Neo4j 띄우기 + 그래프 적재 (터미널 1)
 
 ```bash
-cd ~/Desktop/impact-agent
 docker compose up -d                       # 이미 떠 있으면 그대로
 docker ps --filter name=neo4j              # STATUS 가 Up 이면 OK
 docker compose logs -f neo4j               # 처음 띄울 때 "Started." 확인 후 Ctrl+C
@@ -235,14 +256,7 @@ $PY scripts/build_graph.py --load          # data/source → data/graph 생성 +
 ### 2. 백엔드 띄우기 (터미널 2)
 
 ```bash
-cd ~/Desktop/impact-agent
 PYTHONPATH=src PYTHONWARNINGS=ignore $PY -m uvicorn impact_agent.api.app:app --app-dir src --port 8000
-```
-
-`$PY` 를 매번 정하기 번거로우면 경로를 직접 넣은 한 줄로 실행한다 (경로는 각자 패키지가 설치된 Python 으로 바꿔서 수행).
-
-```bash
-cd ~/Desktop/impact-agent && PYTHONPATH=src PYTHONWARNINGS=ignore /Library/Frameworks/Python.framework/Versions/3.11/bin/python3 -m uvicorn impact_agent.api.app:app --app-dir src --port 8000
 ```
 
 - `Uvicorn running on http://127.0.0.1:8000` 이 나오면 준비 완료. `.env` 는 앱이 직접 읽는다.
@@ -274,7 +288,7 @@ cd ~/Desktop/impact-agent && PYTHONPATH=src PYTHONWARNINGS=ignore /Library/Frame
 ### 3. 프론트 띄우기 (터미널 3)
 
 ```bash
-cd ~/Desktop/impact-agent/frontend
+cd frontend
 VITE_USE_MOCK=false npm run dev            # 실제 API 모드 (Vite 프록시가 /api 를 :8000 으로)
 ```
 
@@ -290,8 +304,10 @@ VITE_USE_MOCK=false npm run dev            # 실제 API 모드 (Vite 프록시�
 
 | 시나리오 | SM | 흐름 | 소요 |
 |---|---|---|---|
-| tos `SC-003` | DBM | 단순 응답 → "상세 분석 권장" 의 **상세 분석 요청** 클릭 → 복잡 재분석 → 레포트·체크리스트 | 약 9분 |
-| swing `L-4` | 상품 | 단순 응답 (권장이 떠도 누르지 않음) | 약 2분 |
+| tos `SC-003` | DBM | 복잡 → 레포트·체크리스트 | 약 3분 |
+| swing `L-4` | 상품 | 단순 응답 | 약 1분 |
+
+단순 응답에 "상세 분석 권장" 이 뜨면 **상세 분석 요청** 을 눌러 같은 세션을 복잡 요건으로 다시 분석할 수 있다 (재분석 흐름).
 
 요청 문장 꺼내기:
 ```bash
@@ -323,29 +339,6 @@ $PY -c "import json; print(json.load(open('eval/ground_truth/SC-003.json'))['req
 | 공통 | `MMS`, `발송` 등 단어 일부 | 이름·설명에 포함된 노드 목록 |
 | 공통 | 다른 SM 노드 (예: DBM 에서 `joinComb`) | 결과 없음 (SM 별 영역만 검색) |
 
-### 정답셋 16건 E2E 테스트 (터미널)
-
-화면 없이 정답셋 16건을 UI 와 같은 전체 흐름(Planner → … → Composer → KPI)으로 돌린다. **Neo4j 만 떠 있으면 된다** (백엔드·프론트 불필요). Python 은 스크립트가 패키지가 있는 것을 찾는다.
-
-```bash
-cd ~/Desktop/impact-agent && VERBOSE=1 zsh scripts/YJ/run_all.sh <실행 폴더> <기준 실행>   # 예: v6/v6-4 v6/v6-3 (약 40분). 터미널엔 에이전트 진행만, 상세는 <케이스>.log
-cd ~/Desktop/impact-agent && PYTHONPATH=src python3 scripts/YJ/run_scenarios.py --report <실행 폴더> --baseline <기준 실행>   # 실행 없이 report 만
-```
-
-- 버전 폴더 아래 `-1`, `-2`, … 순서로 쌓는다 (v6-1 = E2E 첫 기준선, v6-2 · v6-3 = 수정 후)
-- 결과: `outputs/runs/YJ/<실행 폴더>/` — `report.html`(기준 실행 대비 지표 · 케이스별 변화 산점도와 "이전 → 이후" 표 · 판정 흐름 · 단계별 정답 손실 · 시간·토큰·정밀도 · 개선 후보), `tos/` · `swing/` 아래 케이스별 `<케이스>.md` · `<케이스>.log`(실행 로그)와 영역별 `summary.md`
-- 개선 후보(report 5장)는 실행 폴더의 `findings.json` 에 적으면 그 내용으로, 없으면 자동 징후로 채운다
-- 테스트 방식 (report 맨 위 "테스트 방식"에도 같은 내용). 정답 복잡도는 "사용자가 상세 분석 요청을 눌렀을지"를 정하는 데만 쓰고 에이전트 입력에는 넣지 않는다
-
-  | 1차 판정 | 정답 | 평가에서 하는 일 | 채점 (`detail_flow`) |
-  |---|---|---|---|
-  | complex | - | 끝까지 (Verifier 재계획 라운드도 complex 유지) | - |
-  | simple | complex | 1차를 끝까지 돌린 뒤 **권장 여부와 관계없이 "상세 분석 요청" 클릭 가정** → reanalysis(권장 사유 줄 + "참고: " 줄, 없으면 "상세 분석 요청") → Planner complex 고정 → 탐색부터 끝까지 | 권장 → 상세 분석 가능 / 참고 신호만 / **신호 없음 (놓침)** |
-  | simple | simple | 단순 응답으로 끝 (권장이 붙어도 누르지 않음) | **불필요한 권장** / 정상 |
-
-  KPI Agent 의 `complexity_match` 는 재분석 후 값이라 1차 오판은 report 의 "1차 복잡도 일치"·판정 흐름에서 본다. 1차 KPI 는 `flow.first_kpi` 에 따로 저장
-- 끊겨도 같은 명령이면 끝난 케이스는 건너뛴다. 처음부터: `FRESH=1`
-
 ### 5. 종료
 
 | 대상 | 방법 |
@@ -372,20 +365,45 @@ cd ~/Desktop/impact-agent && PYTHONPATH=src python3 scripts/YJ/run_scenarios.py 
 PYTHONPATH=src $PY -m pytest tests/test_api.py tests/test_admin_api.py tests/test_graph_api.py -q
 ```
 
+## 정답셋 16건 E2E 평가 (터미널)
+
+화면 없이 정답셋 16건(`eval/ground_truth`)을 UI 와 같은 전체 흐름(Planner → … → Composer → KPI)으로 돌린다.
+
+**공통**
+- 준비: Neo4j 실행(`docker compose up -d`) + `.env`(LLM 키·Neo4j 계정) + `data/`. 백엔드·프론트는 필요 없다
+- 명령은 저장소 루트에서, 패키지가 설치된 Python 으로 실행한다 (`run_all.sh` 는 Python 을 자동으로 찾음)
+- 결과는 `outputs/runs/` 아래에 생기고 git 에는 올리지 않는다. 끊겨도 같은 명령이면 끝난 케이스는 건너뛴다
+- 실행 이름(`<이름>`)·실험 ID 는 자유롭게 정한다 (예: `main-check`, `before`, `after`)
+- 평가 방식은 모든 스크립트가 같다 (아래 "테스트 방식")
+
+**하고 싶은 것별 명령**
+
+| 하고 싶은 것 | 명령 | 결과 |
+|---|---|---|
+| 16건을 한 번 돌려 전체 상태 확인 (통합 테스트) | `VERBOSE=1 zsh scripts/YJ/run_all.sh <이름>` | `outputs/runs/YJ/<이름>/report.html` |
+| 일부 케이스만 빠르게 확인 | `PYTHONPATH=src python3 scripts/YJ/run_scenarios.py SC-003 L-4 --run-id <이름>` | `outputs/runs/YJ/<이름>/` |
+| 수정 전·후를 1회씩 비교 | 수정 전 `zsh scripts/YJ/run_all.sh before` → 수정 후 `zsh scripts/YJ/run_all.sh after before` | `outputs/runs/YJ/after/report.html` (before 대비 증감) |
+| LLM 응답 편차까지 보고 비교 (N회 평균·범위) | `PYTHONPATH=src python3 scripts/SE/run_experiment.py --e2e --repeat 3 --exp-id <ID> --label "<설명>"`, 비교는 다음 실험에 `--compare <이전 ID>` | `outputs/runs/SE/experiments/<ID>/experiment.html` |
+| Simulator·Verifier·Composer·KPI 만 바꿨을 때 상류(Planner·Explorer·Retriever) 고정 비교 | 상류 기록 `PYTHONPATH=src python3 scripts/SE/run_scenarios.py <케이스…> --run-id <상류>` → `PYTHONPATH=src python3 scripts/SE/run_experiment.py --from <상류> --repeat 3 --exp-id <ID>` | `outputs/runs/SE/experiments/<ID>/` |
+| 실행 없이 리포트만 다시 | 1회 실행: `PYTHONPATH=src python3 scripts/YJ/run_scenarios.py --report <이름> [--baseline <이전 이름>]` / 반복 실험: `… run_experiment.py --exp-id <ID> [--compare <이전 ID>] --report-only` | 같은 폴더 |
+
+- 1회 실행 결과(`outputs/runs/YJ/<이름>/`): `report.html`(지표 · 케이스별 변화 · 판정 흐름 · 단계별 정답 손실 · 개선 후보), `tos/` · `swing/` 아래 케이스별 `<케이스>.md` · `<케이스>.log` · `<케이스>.state.json`, 영역별 `summary.md`
+- 반복 실험 결과(`outputs/runs/SE/experiments/<ID>/`): 회차별 `r1 … rN/`, 지표 평균·범위와 케이스 안정성 `experiment.md` · `experiment.html`
+- 한 번 실행으로는 작은 변경 효과(±0.05 수준)가 LLM 응답 편차에 묻힐 수 있다. 결론을 낼 비교는 반복 실험으로 본다
+- 처음부터 다시: `run_all.sh` 는 `FRESH=1`, `run_scenarios.py` 는 `--fresh`
+
+**테스트 방식** (모든 스크립트 공통, report 맨 위에도 같은 내용). 정답 복잡도는 "사용자가 상세 분석 요청을 눌렀을지"를 정하는 데만 쓰고 에이전트 입력에는 넣지 않는다.
+
+| 1차 판정 | 정답 | 평가에서 하는 일 | 채점 (`detail_flow`) |
+|---|---|---|---|
+| complex | - | 끝까지 (Verifier 재계획 라운드도 complex 유지) | - |
+| simple | complex | 1차를 끝까지 돌린 뒤 **권장 여부와 관계없이 "상세 분석 요청" 클릭 가정** → reanalysis(권장 사유 줄 + "참고: " 줄, 없으면 "상세 분석 요청") → Planner complex 고정 → 탐색부터 끝까지 | 권장 → 상세 분석 가능 / 참고 신호만 / **신호 없음 (놓침)** |
+| simple | simple | 단순 응답으로 끝 (권장이 붙어도 누르지 않음) | **불필요한 권장** / 정상 |
+
+KPI Agent 의 `complexity_match` 는 재분석 후 값이라 1차 오판은 report 의 "1차 복잡도 일치"·판정 흐름에서 본다. 1차 KPI 는 `flow.first_kpi` 에 따로 저장.
+
 ## 스키마 변경 절차
 
 1. `schemas/schemas.json` 수정
 2. `src/impact_agent/schemas/` 의 해당 모델 수정
 3. `pytest tests/test_schema_sync.py` 로 두 정의가 일치하는지 확인
-
-## TODO
-
-완료 (2026-10-29 기준): 에이전트 LLM 호출 · Neo4j/소스 조회 연결 · 후속 입력(재분석 포함)·MEMORY_WINDOW_N 대화 메모리 · MAX_TOOL_CALLS 예산 · 회신 메일 초안/MD·PDF 저장(백엔드) · KPI Agent(토큰 포함) · UI 백엔드 API(세션·SSE·KPI·적재 현황) · API 통합 테스트 v0.1 ([docs/api_integration_test.md](docs/api_integration_test.md))
-
-- [ ] 에이전트 품질: 1차 복잡도 판정(SC-003 이 단순으로 판정됨), 미탐 노드, 정답 단순 요건의 과한 "상세 분석 권장"(L-4)
-- [ ] 실제 로그인 연동 (관리(권한) API · 권한 검증은 완료, 지금은 mock 사용자 전환, [docs/api_design.md](docs/api_design.md) 5장)
-- [ ] 회신 메일 초안 · PDF 저장을 UI 버튼과 연결하는 API
-- [ ] 결과물 버전(v2 현업 답변 반영 …) 조회 (`GET …/report?version=` 은 지금 v1 만)
-- [ ] 세션 영속 저장 (지금은 메모리, 서버 재시작 시 사라짐)
-- [ ] KPI 페이지 문구 다듬기 ("놓친 복잡 요건 붙잡음", "과한 권장" 등)
-- [ ] KPI 기준값(KPI_MIN_*) · MAX_HOPS_* 확정 (잠정값)

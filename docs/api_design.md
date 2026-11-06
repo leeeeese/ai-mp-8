@@ -8,6 +8,7 @@
 |---|---|
 | 2026-10-29 | 최초 작성. 전체 API 목록 · 응답 코드 규칙 · 엔드포인트 상세. 세션·KPI·적재 현황 구현, 관리(권한) 501 |
 | 2026-11-02 | 관리(권한) API 구현 (사용자·재적재 승인·감사 로그), 전 경로 로그인·권한 검증(401·403), `GET /api/auth/me`, 상세 실행 로그(`GET …/logs`, 터미널, `outputs/logs`). 501 제거 |
+| 2026-11-05 | KPI 기록 응답 현행화 (`counts` 의 [변경] 노드 합산 필드 등, KPI 설계서 v0.7) |
 
 ## 1. 개요
 
@@ -187,7 +188,7 @@ data: {"node": "retriever", "status": "done", ..., "evidence": [{"nodeId": "SCR:
 
 | API | 응답 |
 |---|---|
-| `GET /api/kpi/records` | `KpiRecord[]` (최근 순). 필드는 백엔드 `KpiOutput` 과 같은 snake_case + 세션 정보 + 합산용 `counts{tp, fn, fp, critical_missed, critical_total}` |
+| `GET /api/kpi/records` | `KpiRecord[]` (최근 순). 필드는 백엔드 `KpiOutput` 과 같은 snake_case + 세션 정보 + 합산용 `counts{tp, fn, fp, critical_missed, critical_total, change_tp, change_fp, change_hit, change_total}` (`change_*` = [변경] 노드 정밀도·[변경] 재현율 합산용, 운영 문의는 `change_total` 0) + `missed_nodes` · `false_positive_nodes` · `reanalyzed` · `judgement_notes` |
 | `DELETE /api/kpi/records` | `{ "deleted": n }`. 세션·분석 결과는 지우지 않음 |
 
 ### 4-4. 적재 현황 (`api/graph.py`)
@@ -280,7 +281,7 @@ data: {"node": "retriever", "status": "done", ..., "evidence": [{"nodeId": "SCR:
 | `tests/test_api.py` | 세션·결과물·체크리스트·SSE·KPI·상세 로그 (가짜 Planner·Explorer·Retriever, LLM·Neo4j 없음) |
 | `tests/test_admin_api.py` | 401·403, SM 파트 제한, SSE 사용자 구분, 사용자 추가·변경·검증, 마지막 관리자 보호, 재적재 승인·반려, 감사 로그 |
 | `tests/test_graph_api.py` | 적재 현황 (작은 CSV 그래프 + 임시 소스 루트): 집계·품질 점검·master 대비(변경·추가·삭제)·검색 순위·2 hop·404·재적재 요청·연결 끊김(200 + `connected:false`, 검색 503) |
-| 시나리오 | Neo4j + LLM 으로 UI 에서 tos SC-003 · swing L-4 실행 (결과: [api_integration_test.md](api_integration_test.md)) |
+| 시나리오 | Neo4j + LLM 으로 UI 에서 tos SC-003 · swing L-4 실행 (절차: README "웹 UI 실행 → 4. 화면에서 시나리오 실행") |
 
 ```bash
 PYTHONPATH=src pytest tests/test_api.py tests/test_admin_api.py tests/test_graph_api.py -q

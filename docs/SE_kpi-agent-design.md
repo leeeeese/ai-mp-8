@@ -1,7 +1,7 @@
 # Agent 설계서: KPI Agent (v0.7)
 
 > 담당: **KPI Agent** · Simulator · Verifier · Composer (SE, [SE_agent_design.md](SE_agent_design.md)) / Supervisor · Planner · Explorer · Retriever ([YJ_agent_design.md](YJ_agent_design.md))
-> 자연어 요건 기반 영향도 분석 AI Agent PoC 의 성능 측정용 평가 에이전트. 기준: [agent_workflow_diagram.png](agent_workflow_diagram.png), 노드 ID 규칙 [mock_data.md](mock_data.md). 기준일 2026-11-05. 남은 과제는 8장.
+> 자연어 요건 기반 영향도 분석 AI Agent PoC 의 성능 측정용 평가 에이전트. 기준: [agent_workflow_diagram.png](agent_workflow_diagram.png), 노드 ID 규칙 [mock_data.md](mock_data.md). 기준일 2026-11-05.
 
 ## 변경 이력
 
@@ -10,7 +10,7 @@
 | v0.1 | 최초 초안. 노드 목록 기반 탐지율·미탐률·정밀도 정의 |
 | v0.2 | 최신 Agent Workflow·Neo4j 노드 정의 반영. KPI Agent 를 Composer 이후 평가 분기(점선)로, 입력을 "정답 + 실행 로그"로. 평가 범위를 `eval_max_stage` → `eval_target_labels` 로 (DBIO 단계가 맥락에 따라 달라서). 집계 축에 SM 파트·노드 유형·flow 추가. 확장 KPI 후보 정리 |
 | v0.3 | 형식을 YJ 설계서와 통일 (에이전트 단위 역할·입력·처리·출력). 입력·출력을 구현 모델(`AnswerKey`, `AgentRunRecord`, `KpiOutput`)과 그래프 노드 ID(`<접두어>:<키>`)로 표기. 배치 평가(`scripts/eval_kpi.py`) 추가 |
-| v0.4 (2026-11-03) | [변경] 노드 정밀도 `change_node_precision` 추가 (측정만). 정답 노드가 1개인 요건은 노드 정밀도 하한 미적용. 근거: [planner_detail_analysis_to-be.md](planner_detail_analysis_to-be.md) 4장 #2·#3. 에이전트 출력과 정합: 단순 `final_nodes` 를 Composer 단순 응답 경로로, `tool_calls` 를 라운드별 최댓값으로 (`tool_calls_total` 추가), `explore_loops` 를 Retriever 실행 수 합계로 |
+| v0.4 (2026-11-03) | [변경] 노드 정밀도 `change_node_precision` 추가 (측정만). 정답 노드가 1개인 요건은 노드 정밀도 하한 미적용. 근거: v6 E2E 16건 (KPI 오탐 중 [참조]·표시 없음 노드 95.7~98.9%, SC-005 는 정답 노드 1개라 탐지율 1.00 인데 노드 정밀도 0.02~0.03). 에이전트 출력과 정합: 단순 `final_nodes` 를 Composer 단순 응답 경로로, `tool_calls` 를 라운드별 최댓값으로 (`tool_calls_total` 추가), `explore_loops` 를 Retriever 실행 수 합계로 |
 | v0.5 (2026-11-03) | 정밀도 주 지표를 [변경] 노드 정밀도로: `KPI_MIN_PRECISION` 하한을 `change_node_precision` 에 적용하고 `node_precision` 은 측정만 (정답 노드 1개 예외 규칙은 필요 없어져 삭제). 근거: 노드 정밀도는 결과 경로 수가 정해 SE 판정으로 움직이지 않음 (SE v3 기준 무관 경로를 모두 빼도 0.21 상한), [변경] 정밀도는 판정 정확도를 직접 보여 줌 (v1~v3 0.89~0.97) |
 | v0.6 (2026-11-05) | [변경] 재현율 `change_node_recall` 을 KPI Agent 정식 지표로 추가 (측정만, 이전에는 실험 스크립트·KPI 화면에서만 계산). 1-4 KPI 표를 **핵심 3지표**([변경] 노드 정밀도 → [변경] 재현율 → 노드 탐지율)와 **보조 지표**로 분리하고, KPI 화면·실험 리포트·배치 평가·실행 스크립트·에이전트 로그의 지표 순서를 같게 맞추고, 실험(`run_experiment.py`)의 노드 탐지율·정밀도를 케이스 평균에서 합산 비율로 바꿈 |
 | v0.7 (2026-11-05) | **운영 문의는 [변경] 재현율에서 제외**: 정답셋 `input_type=ops_inquiry`(SC-002·SC-004·SC-006)는 원인 확인 요청이라 [변경] 표시를 기대하지 않는다. 지표 생략·합산 분모 제외. 판별은 Planner 판정이 아니라 정답셋 값 (`AnswerKey.input_type`). [변경] 노드 정밀도·`change_tag_accuracy` 는 그대로 |
@@ -230,7 +230,7 @@ load_inputs → validate → extract → normalize → match → classify → ag
 | `verifier_unresolved` | 복잡 | 재계획 한도 안에 Verifier 보완 필요를 못 메움 | - |
 
 배치 집계(`summary.json` 의 `judgement`)에서는 일치율·평균(지표가 있는 사례만)과 건수 합계를 낸다. 상세 분석 권장은 둘로 나눈다:
-- `detail_catch_rate`: 정답 complex 인데 단순 처리된 사례 중 권장한 비율 (놓친 복잡 요건을 붙잡았는가, [planner_detail_analysis_to-be.md](planner_detail_analysis_to-be.md))
+- `detail_catch_rate`: 정답 complex 인데 단순 처리된 사례 중 권장한 비율 (놓친 복잡 요건을 붙잡았는가, [YJ_agent_design.md](YJ_agent_design.md) 1-1)
 - `detail_over_rate`: 정답 simple 이고 단순 처리된 사례 중 권장한 비율 (과한 권장)
 
 **자동 비교하지 않는 정답 필드** ([SE_agent_design.md](SE_agent_design.md) 8장 대조표 중)
@@ -362,18 +362,3 @@ PYTHONPATH=src python3 scripts/SE/run_experiment.py --e2e --repeat 3 --exp-id <e
 2. extract~aggregate 로직을 구현하고 CSV 를 출력한다. — ✅ (`agents/kpi.py`, `scripts/eval_kpi.py`)
 3. 평가 모드 토글과 리포트(md) 생성을 연결한다. — 리포트·버전 비교 ✅ (`report.md`, `--compare`)
 4. 사례를 시스템별 5~8건 이상으로 확대하고 (현재 swing 10 · tos 6), 버전 비교표와 참고 KPI 를 연동한다.
-
-## 8. 남은 과제
-
-1. **노드 ID 체계**: `<접두어>:<키>` 로 고정됨 (2026-10-25, [mock_data.md](mock_data.md)). tos/swing 간 이름 충돌 여부만 계속 확인
-2. **실행 로그 스키마**: `AgentRunRecord` 로 반영. Planner 설정·재계획 라운드별 기록 범위는 Supervisor 담당과 계속 합의
-3. **워크플로 다이어그램 표기**: KPI Agent 입력이 "정답 경로 목록"으로 되어 있어 "정답 노드 목록"으로 정정 필요 (YJ 설계서 0·5장 표기 포함)
-4. **DBIO 단계 기록 방식**: 지금은 정답 경로에서 자동 산출 (`stage_of`), 정답셋에 `stage` 가 있으면 우선. 경로에 없는 DBIO 는 단계 미상(`?`)
-5. **`eval_target_labels` 지정 규칙**: 요건 유형별 기본값을 둘지, 사례별로 지정할지 (현재 비우면 전체)
-6. **Critical 분류 기준**: 장애·과금 영향 사례 목록 사전 합의
-7. **정답셋 작성·승인 담당**: swing / tos 각각의 담당과 승인 절차
-8. **판정 품질 KPI 기준값**: 지금은 측정만 (threshold 없음). 실제 16건 실행 결과를 본 뒤 기준값을 둘지 결정. 목표 역할 일치는 정답셋 기대값이 없어 보류
-9. **엣지 정확도 측정 여부**: 현재 범위 밖. 필요 시 정답셋에 엣지 추가
-10. **swing Batch → DBIO, TP → DBIO 엣지 라벨**: 다이어그램에 라벨 미표기 (그래프는 `INVOKES`). 평가에는 영향 없음
-11. **구현 프레임워크·실행 환경**: KPI Agent 는 Supervisor(LangGraph) 노드로 구현됨. 배치 평가 실행 환경(주기·저장 위치)은 미정
-12. **자동 비교하지 않는 정답 필드**: `expected.new`(Simulator `new_elements` 미구현), `conclusion`·`open_items`·`analysis_limits`(문장) — 1-4 표

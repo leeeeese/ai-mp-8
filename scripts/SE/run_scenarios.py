@@ -3,7 +3,7 @@
 케이스마다 UI 와 같은 전체 흐름(Planner → … → Composer → KPI)으로 실행하고, KPI Agent 결과(state.kpi)를 그대로 기록한다.
 KPI 는 새로 계산하지 않는다 (KPI 설계서 그대로).
 
-흐름 (docs/planner_detail_analysis_to-be.md 의 사용자 확인을 평가용으로 가정, scripts/YJ/run_scenarios.py 와 같은 가정):
+흐름 (docs/YJ_agent_design.md 1-1 의 사용자 확인을 평가용으로 가정, scripts/YJ/run_scenarios.py 와 같은 가정):
     1차 판정 complex                → 그대로 끝까지 (정답이 simple 이어도)
     1차 판정 simple, 정답 complex   → 사용자가 상세 분석을 요청했다고 가정: reanalysis 후속 입력(내용 = Composer 권장 사유)
                                      → 2차 전체 흐름 (권장이 없었으면 "권장 없음 (놓침)" 으로 기록하고 평가용으로 진행)

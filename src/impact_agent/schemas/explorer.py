@@ -60,7 +60,7 @@ UnresolvedKind = Literal["new_candidate", "out_of_graph", "unmatched", "tool_lim
 
 
 class UnresolvedItem(BaseModel):
-    """미해결 항목 (종류 포함). Composer 가 문구 대신 kind 로 신호를 가르게 한다 (planner_detail_analysis_to-be.md 2-4)."""
+    """미해결 항목 (종류 포함). Composer 가 문구 대신 kind 로 신호를 가르게 한다."""
 
     item_id: int | None = Field(default=None, description="탐색 명세 항목. tool 한도처럼 항목과 무관하면 null")
     kind: UnresolvedKind = Field(description="new_candidate 신규 후보 / out_of_graph 그래프 밖 / unmatched 매칭 실패 / tool_limit tool 한도")

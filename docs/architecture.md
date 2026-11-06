@@ -10,25 +10,24 @@
 | MAX_HOPS_FORWARD | 5 | 단방향 탐색 hop 상한 (역할 단계 기준) |
 | MAX_HOPS_BIDIRECTIONAL | 10 | forward_then_reverse 탐색 hop 상한 |
 | MEMORY_WINDOW_N | 5 | 후속 대화에서 유지하는 최근 턴 수 |
-| KPI_MIN_RECALL | 0.8 | KPI: 재현율 하한 (잠정) |
+| KPI_MIN_RECALL | 0.8 | KPI: 노드 탐지율 하한 (잠정) |
 | KPI_MIN_PRECISION | 0.5 | KPI: [변경] 노드 정밀도 하한 (잠정. 노드 정밀도는 측정만) |
 
 ## 단계별 데이터 흐름
 
 | 단계 | 입력 (AgentState 필드) | 출력 |
 |---|---|---|
-| Planner | user_input, replan_feedback | PlannerOutput |
+| Planner | user_input, followups, replan_feedback | PlannerOutput |
 | Explorer | planner.items (탐색 명세), retriever.reexplore_request | ExplorerOutput |
 | Retriever | explorer.paths | RetrieverOutput (evidence[].content 원문) |
 | Simulator | explorer, retriever | SimulationOutput |
 | Verifier | simulation | VerifierOutput |
 | Composer | 분석 결과 전체 + followups | ComposerOutput |
-| KPI Agent (PoC 평가) | answer_key(정답 노드 목록), agent_runs(실행 로그), simulation(복잡) / retriever(단순) 의 final_nodes | KpiOutput |
+| KPI Agent (PoC 평가) | answer_key(정답 노드 목록), agent_runs(실행 로그), final_nodes = simulation 영향 경로 노드(복잡) / composer 단순 응답 경로 노드(단순) | KpiOutput |
 
 ## 분기 규칙
 
 Supervisor 는 LangGraph `StateGraph(AgentState)` 의 조건부 엣지로 구현한다 ([YJ_agent_design.md](YJ_agent_design.md) §0).
-
 
 - `complexity == simple` → Explorer/Retriever → Composer → `SimpleAnswer`
 - `complexity == complex` → Explorer/Retriever → Simulator → Verifier → Composer → `ComplexReport`
@@ -36,7 +35,7 @@ Supervisor 는 LangGraph `StateGraph(AgentState)` 의 조건부 엣지로 구현
   `AnswerKey`(`eval/ground_truth/<요건ID>.json`) 가 없으면 성능 지표(시간 등)만 계산한다. 노드 단위 판정 (설계: [SE_kpi-agent-design.md](SE_kpi-agent-design.md)).
 - `UserInput.output_options` 에 `mail_draft` / `pdf` 가 있으면 Composer 가 `mail_draft` / `report_file_path` 를 채운다.
 - `ComplexReport.stage`: `initial` → (후속 답변 반영) `updated` → `final_for_dev`
-- Composer 가 `reanalysis_request` 를 반환하면 Supervisor 가 재분석을 시작한다 (TODO)
+- 재분석: 단순 응답의 상세 분석 권장(`detail_analysis_reasons`)이나 Composer 의 `reanalysis_request` 를 사용자가 확인하면 UI 가 `FollowupInput(type=reanalysis)` 를 보내고, Supervisor 가 Planner 부터 다시 실행한다 (Planner 가 complex 로 판정 → Simulator). 다른 후속 입력(현업 답변·개발 의견·조회 결과)은 Composer 로 바로 간다 ([YJ_agent_design.md](YJ_agent_design.md) 1-1)
 
 ## Enum 요약
 

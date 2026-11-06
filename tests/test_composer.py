@@ -319,7 +319,7 @@ def test_schedule_factors_capped():
     assert len(r.schedule_factors) == 9 and r.schedule_factors[-1] == "외 4건 (영역별 판정 참고)"  # 전체 8개 + 안내
 
 
-# --- 상세 분석 권장 사유 (설계서 3-1, planner_detail_analysis_to-be.md) ---------------------------------
+# --- 상세 분석 권장 사유 (설계서 3-1) ---------------------------------
 
 
 def swing_simple_state(paths):

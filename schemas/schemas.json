@@ -1162,7 +1162,7 @@
       "type": "object"
     },
     "UnresolvedItem": {
-      "description": "미해결 항목 (종류 포함). Composer 가 문구 대신 kind 로 신호를 가르게 한다 (planner_detail_analysis_to-be.md 2-4).",
+      "description": "미해결 항목 (종류 포함). Composer 가 문구 대신 kind 로 신호를 가르게 한다.",
       "properties": {
         "item_id": {
           "anyOf": [
