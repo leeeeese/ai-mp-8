@@ -1,0 +1,272 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SE 반복 실험</title>
+<style>
+:root {
+  color-scheme: light;
+  --bg: #f4f4f2; --surface: #fcfcfb; --border: #e3e2de; --grid: #ecebe7;
+  --text-primary: #0b0b0b; --text-secondary: #52514e; --text-muted: #7a7974;
+  --accent: #2a78d6; --neutral-mark: #b9b8b2; --range: #d6d5d0;
+  --warn-bg: #fff4dc; --warn-border: #eda100;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #111110; --surface: #1a1a19; --border: #2e2e2c; --grid: #262624;
+    --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+    --accent: #3987e5; --neutral-mark: #6b6a64; --range: #3a3a37;
+    --warn-bg: #2a2210; --warn-border: #c98500;
+  }
+}
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #111110; --surface: #1a1a19; --border: #2e2e2c; --grid: #262624;
+  --text-primary: #f0efec; --text-secondary: #c3c2b7; --text-muted: #8f8e86;
+  --accent: #3987e5; --neutral-mark: #6b6a64; --range: #3a3a37;
+  --warn-bg: #2a2210; --warn-border: #c98500;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text-primary);
+  font: 14px/1.55 -apple-system, BlinkMacSystemFont, "Apple SD Gothic Neo", "Pretendard", "Segoe UI", sans-serif; }
+main { max-width: 1120px; margin: 0 auto; padding: 32px 16px 64px; }
+h1 { font-size: 24px; margin: 0 0 4px; letter-spacing: -0.01em; }
+h2 { font-size: 17px; margin: 0 0 4px; }
+h3 { font-size: 14px; margin: 16px 0 6px; color: var(--text-secondary); font-weight: 600; }
+.sub { color: var(--text-secondary); margin: 0 0 24px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 20px; margin-bottom: 20px; }
+.card .desc { color: var(--text-secondary); margin: 0 0 16px; font-size: 13px; }
+.tiles { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin-bottom: 20px; }
+.tile { background: var(--surface); border: 1px solid var(--border); border-radius: 12px; padding: 16px; }
+.tile .label { color: var(--text-secondary); font-size: 12px; }
+.tile .value { font-size: 28px; font-weight: 650; letter-spacing: -0.02em; margin: 2px 0; font-variant-numeric: tabular-nums; }
+.tile .note { color: var(--text-muted); font-size: 12px; }
+.findings { border-left: 4px solid var(--warn-border); background: var(--warn-bg); }
+.findings ol { margin: 8px 0 0; padding-left: 20px; }
+.findings li { margin-bottom: 8px; }
+.findings li:last-child { margin-bottom: 0; }
+.findings b { font-weight: 650; }
+code { font: 12px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; }
+.legend { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-bottom: 8px; font-size: 13px; color: var(--text-secondary); }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend svg { width: 14px; height: 14px; display: inline-block; flex: none; }
+svg { display: block; width: 100%; height: auto; overflow: visible; }
+svg text { fill: var(--text-secondary); font-size: 12px; }
+svg .axis { stroke: var(--grid); stroke-width: 1; }
+#tip { position: fixed; pointer-events: none; z-index: 10; background: var(--surface); color: var(--text-primary);
+  border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; font-size: 12px; box-shadow: 0 4px 16px rgba(0,0,0,.15);
+  max-width: 320px; display: none; }
+#tip b { font-weight: 650; }
+#tip .muted { color: var(--text-secondary); }
+.table-wrap { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: 12.5px; font-variant-numeric: tabular-nums; }
+th, td { padding: 6px 8px; border-bottom: 1px solid var(--grid); text-align: right; white-space: nowrap; }
+th { color: var(--text-secondary); font-weight: 600; background: var(--surface); }
+td:first-child, th:first-child, td.l, th.l { text-align: left; }
+td.var { font-weight: 700; }
+.badge { display: inline-block; font-size: 11px; padding: 0 6px; border-radius: 999px; border: 1px solid var(--border); color: var(--text-secondary); margin-left: 6px; }
+ul.plain { margin: 0; padding-left: 18px; }
+ul.plain li { margin-bottom: 3px; font-size: 13px; }
+.cols { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.foot { color: var(--text-muted); font-size: 12px; }
+@media (max-width: 760px) { .tiles { grid-template-columns: repeat(2, 1fr); } .cols { grid-template-columns: 1fr; } .tile .value { font-size: 22px; } }
+</style>
+</head>
+<body>
+<main>
+  <h1 id="title"></h1>
+  <p class="sub" id="sub"></p>
+  <div class="tiles" id="tiles"></div>
+  <section class="card findings"><h2>이번 실험에서 확인된 것</h2><ol id="findings"></ol></section>
+
+  <section class="card">
+    <h2>회차 간 편차</h2>
+    <p class="desc">지표마다 회차 값(회색 점)과 범위(옅은 막대), 평균(파란 세로선)입니다. 다음 실험에서 이 범위보다 작은 변화는 개선으로 보기 어렵습니다. 비율 지표는 0~1 같은 축입니다.</p>
+    <div class="legend"><span><svg width="14" height="14"><circle cx="7" cy="7" r="4.5" fill="var(--neutral-mark)"/></svg>회차 값</span>
+      <span><svg width="14" height="14"><rect x="0" y="4" width="14" height="6" rx="3" fill="var(--range)"/></svg>범위 (최소~최대)</span>
+      <span><svg width="14" height="14"><rect x="6" y="0" width="2.5" height="14" fill="var(--accent)"/></svg>평균</span></div>
+    <div id="spread"></div>
+    <div class="table-wrap" style="margin-top:12px"><table id="metricTbl"></table></div>
+  </section>
+
+  <section class="card" id="cmpSec" hidden>
+    <h2>이전 실험 대비</h2>
+    <p class="desc" id="cmpDesc"></p>
+    <div class="table-wrap"><table id="cmpTbl"></table></div>
+  </section>
+
+  <section class="card">
+    <h2>놓친 [변경] 노드</h2>
+    <p class="desc">정답 변경 노드(impacted 중 modify·add)가 [변경] 으로 표시되지 않은 이유. 막대 = 회차 평균, 숫자 = 회차별 값.</p>
+    <div id="miss"></div>
+    <div class="cols">
+      <div><h3 id="alwaysTitle"></h3><ul class="plain" id="always"></ul></div>
+      <div><h3>[변경] 오탐 (회차 수)</h3><ul class="plain" id="fps"></ul></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>케이스별 회차 값</h2>
+    <p class="desc">회차마다 값이 다른 칸은 굵게, 케이스 이름 옆에 "변동" 표시. [변경] 재현 = 맞힌 수/정답 변경 노드 수, 오탐 = [변경] 으로 표시했지만 정답이 아닌 노드 수.</p>
+    <div class="table-wrap"><table id="caseTbl"></table></div>
+  </section>
+
+  <p class="foot" id="foot"></p>
+</main>
+<div id="tip"></div>
+<script>
+const D = {"meta": {"exp_id": "20261109-e2e", "from": "e2e", "repeat": 3, "label": "e2e test", "commit": "c39c5be", "updated": "2026-11-09 13:18"}, "repeats": [{"repeat": 1, "cases": {"SC-001": {"complexity": "complex", "change_hit": 2, "change_total": 2, "tp": 4, "fn": 0, "fp": 34, "change_tp": 2, "change_fp": [], "node_recall": 1.0, "node_precision": 0.10526315789473684, "tag": 0.9333333333333333, "difficulty_match": 1.0, "area_match": 0.5, "se_seconds": 81.1, "se_tokens": 50728, "total_seconds": 165.1, "result_paths": 29, "missed_change": {}}, "SC-002": {"complexity": "complex", "change_hit": 0, "change_total": 0, "tp": 4, "fn": 1, "fp": 11, "change_tp": 0, "change_fp": [], "node_recall": 0.8, "node_precision": 0.26666666666666666, "tag": 0.8181818181818182, "difficulty_match": 0.0, "area_match": 0.5, "se_seconds": 52.3, "se_tokens": 27277, "total_seconds": 168.6, "result_paths": 10, "missed_change": {"TBL:TCM_USER_AUTH": "LLM 이 [참조] 판정", "TBL:TCM_USER_AUTH_HIST": "경로에 없음 (상류)", "BAT:TBHR2010": "LLM 이 [참조] 판정"}}, "SC-003": {"complexity": "complex", "change_hit": 1, "change_total": 2, "tp": 3, "fn": 0, "fp": 23, "change_tp": 1, "change_fp": [], "node_recall": 1.0, "node_precision": 0.11538461538461539, "tag": 0.875, "difficulty_match": 0.0, "area_match": 0.25, "se_seconds": 51.9, "se_tokens": 33639, "total_seconds": 140.1, "result_paths": 15, "missed_change": {"TBL:TCP_CMM_CD": "LLM 이 [참조] 판정"}}, "SC-004": {"complexity": "complex", "change_hit": 0, "change_total": 0, "tp": 4, "fn": 0, "fp": 27, "change_tp": 0, "change_fp": [], "node_recall": 1.0, "node_precision": 0.12903225806451613, "tag": 0.7272727272727273, "difficulty_match": 0.0, "area_match": 0.5, "se_seconds": 49.2, "se_tokens": 36720, "total_seconds": 170.2, "result_paths": 21, "missed_change": {"SCR:TOSCP0300M": "LLM 이 [참조] 판정", "SCR:TOSCP0301P": "LLM 이 [참조] 판정", "SQL:CampMapper.selectAiChnlList": "LLM 이 [참조] 판정"}}, "SC-005": {"complexity": "simple", "change_hit": 1, "change_total": 1, "tp": 1, "fn": 0, "fp": 23, "change_tp": 1, "change_fp": [], "node_recall": 1.0, "node_precision": 0.041666666666666664, "tag": 1.0, "difficulty_match": null, "area_match": null, "se_seconds": 15.2, "se_tokens": 7984, "total_seconds": 113.0, "result_paths": 21, "missed_change": {}}, "SC-006": {"complexity": "simple", "change_hit": 0, "change_total": 0, "tp": 2, "fn": 1, "fp": 42, "change_tp": 0, "change_fp": [], "node_recall": 0.6666666666666666, "node_precision": 0.045454545454545456, "tag": 1.0, "difficulty_match": null, "area_match": null, "se_seconds": 26.2, "se_tokens": 9269, "total_seconds": 110.5, "result_paths": 33, "missed_change": {}}, "L-1": {"complexity": "simple", "change_hit": 7, "change_total": 7, "tp": 7, "fn": 0, "fp": 42, "change_tp": 7, "change_fp": [], "node_recall": 1.0, "node_precision": 0.14285714285714285, "tag": 1.0, "difficulty_match": null, "area_match": null, "se_seconds": 25.1, "se_tokens": 10377, "total_seconds": 141.6, "result_paths": 42, "missed_change": {}}, "L-2": {"complexity": "simple", "change_hit": 2, "change_total": 2, "tp": 2, "fn": 0, "fp": 4, "change_tp": 2, "change_fp": [], "node_recall": 1.0, "node_precision": 0.3333333333333333, "tag": 1.0, "difficulty_match": null, "area_match": null, "se_seconds": 15.3, "se_tokens": 5853, "total_seconds": 104.6, "result_paths": 5, "missed_change": {}}, "L-3": {"complexity": "simple", "change_hit": 2, "change_total": 2, "tp": 2, "fn": 0, "fp": 3, "change_tp": 2, "change_fp": [], "node_recall": 1.0, "node_precision": 0.4, "tag": 1.0, "difficulty_match": null, "area_match": null, "se_seconds": 12.1, "se_tokens": 5448, "total_seconds": 58.3, "result_paths": 3, "missed_change": {}}, "L-4": {"complexity": "simple", "change_hit": 1, "change_total": 1, "tp": 1, "fn": 0, "fp": 16, "change_tp": 1, "change_fp": [], "node_recall": 1.0, "node_precision": 0.058823529411764705, "tag": 1.0, "difficulty_match": null, "area_match": null, "se_seconds": 11.0, "se_tokens": 5961, "total_seconds": 51.9, "result_paths": 11, "missed_change": {}}, "M-1": {"complexity": "complex", "change_hit": 2, "change_total": 2, "tp": 2, "fn": 0, "fp": 29, "change_tp": 2, "change_fp": [], "node_recall": 1.0, "node_precision": 0.06451612903225806, "tag": 1.0, "difficulty_match": 0.0, "area_match": 0.5, "se_seconds": 61.4, "se_tokens": 51700, "total_seconds": 174.0, "result_paths": 34, "missed_change": {}}, "M-2": {"complexity": "complex", "change_hit": 1, "change_total": 6, "tp": 2, "fn": 0, "fp": 22, "change_tp": 1, "change_fp": [], "node_recall": 1.0, "node_precision": 0.08333333333333333, "tag": 0.6666666666666666, "difficulty_match": 1.0, "area_match": 0.75, "se_seconds": 63.4, "se_tokens": 44939, "total_seconds": 183.2, "result_paths": 34, "missed_change": {"TP:ProdScrbSvc.termProd": "LLM 이 [참조] 판정", "TBL:TB_PROD_RELN": "경로에 없음 (상류)", "COL:TB_PROD_RELN.RELN_TYP_CD": "경로에 없음 (상류)", "COL:TB_SVC_PROD.TERM_RSN_CD": "경로에 없음 (상류)", "SCR:ZPAYSS0100010": "LLM 이 [참조] 판정"}}, "M-3": {"complexity": "complex", "change_hit": 9, "change_total": 9, "tp": 9, "fn": 0, "fp": 37, "change_tp": 9, "change_fp": [], "node_recall": 1.0, "node_precision": 0.1956521739130435, "tag": 1.0, "difficulty_match": 1.0, "area_match": 0.75, "se_seconds": 90.7, "se_tokens": 56497, "total_seconds": 164.1, "result_paths": 50, "missed_change": {}}, "M-4": {"complexity": "complex", "change_hit": 2, "change_total": 4, "tp": 3, "fn": 0, "fp": 24, "change_tp": 2, "change_fp": [], "node_recall": 1.0, "node_precision": 0.1111111111111111, "tag": 0.8, "difficulty_match": 0.0, "area_match": 1.0, "se_seconds": 58.1, "se_tokens": 34910, "total_seconds": 169.3, "result_paths": 22, "missed_change": {"TP:FeeCnslSvc.getFeeCnslInfo": "LLM 이 [참조] 판정", "TP:FeeCnslSvc.simulateFee": "LLM 이 [참조] 판정"}}, "H-1": {"complexity": "complex", "change_hit": 2, "change_total": 6, "tp": 5, "fn": 0, "fp": 42, "change_tp": 2, "change_fp": [], "node_recall": 1.0, "node_precision": 0.10638297872340426, "tag": 0.6875, "difficulty_match": 0.0, "area_match": 0.25, "se_seconds": 74.8, "se_tokens": 53381, "total_seconds": 146.4, "result_paths": 50, "missed_change": {"TP:CombScrbSvc.joinComb": "LLM 이 [참조] 판정", "MOD:CombDcBatch.calcDcAmt": "LLM 이 [참조] 판정", "TBL:TB_PROD": "LLM 이 [참조] 판정", "TP:CombScrbSvc.termComb": "LLM 이 [참조] 판정"}}, "H-2": {"complexity": "complex", "change_hit": 4, "change_total": 7, "tp": 3, "fn": 0, "fp": 34, "change_tp": 2, "change_fp": [], "node_recall": 1.0, "node_precision": 0.08108108108108109, "tag": 0.75, "difficulty_match": 1.0, "area_match": 0.5, "se_seconds": 82.0, "se_tokens": 66186, "total_seconds": 188.3, "result_paths": 67, "missed_change": {"MOD:ProdScrbSvc.checkAgeLimit": "LLM 이 [참조] 판정", "SCR:ZPRDSS0200010": "판정 누락 (기본값 [참조])", "TP:ProdScrbSvc.changeFeeProd": "LLM 이 [참조] 판정"}}}, "metrics": {"change_precision": 1.0, "change_recall": 0.7058823529411765, "node_recall": 0.9642857142857143, "tag_complex": 0.8257954545454546, "tag_simple": 1.0, "difficulty_match": 4.0, "area_match": 0.55, "unneeded": 1, "node_precision": 0.11563169164882227, "se_seconds": 769.8, "se_tokens": 500869, "total_seconds": 2249.2, "result_paths": 447, "miss_kinds": {"LLM 이 [참조] 판정": 16, "경로에 없음 (상류)": 4, "판정 누락 (기본값 [참조])": 1}}}, {"repeat": 2, "cases": {"SC-001": {"complexity": "complex", "change_hit": 2, "change_total": 2, "tp": 4, "fn": 0, "fp": 34, "change_tp": 2, "change_fp": [], "node_recall": 1.0, "node_precision": 0.10526315789473684, "tag": 0.9333333333333333, "difficulty_match": 1.0, "area_match": 0.5, "se_seconds": 76.3, "se_tokens": 50628, "total_seconds": 161.5, "result_paths": 29, "missed_change": {}}, "SC-002": {"complexity": "complex", "change_hit": 0, "change_total": 0, "tp": 5, "fn": 0, "fp": 16, "change_tp": 0, "change_fp": [], "node_recall": 1.0, "node_precision": 0.23809523809523808, "tag": 0.75, "difficulty_match": 0.0, "area_match": 0.5, "se_seconds": 59.6, "se_tokens": 34882, "total_seconds": 187.7, "result_paths": 21, "missed_change": {"TBL:TCM_USER_AUTH": "LLM 이 [참조] 판정", "TBL:TCM_USER_AUTH_HIST": "LLM 이 [참조] 판정", "BAT:TBHR2010": "LLM 이 [참조] 판정"}}, "SC-003": {"complexity": "complex", "change_hit": 1, "change_total": 2, "tp": 3, "fn": 0, "fp": 3, "change_tp": 1, "change_fp": ["SCR:TOSCP0220M"], "node_recall": 1.0, "node_precision": 0.5, "tag": 0.875, "difficulty_match": 1.0, "area_match": 0.75, "se_seconds": 45.9, "se_tokens": 21600, "total_seconds": 127.9, "result_paths": 6, "missed_change": {"TBL:TCP_CMM_CD": "LLM 이 [참조] 판정"}}, "SC-004": {"complexity": "complex", "change_hit": 0, "change_total": 0, "tp": 4, "fn": 0, "fp": 30, "change_tp": 0, "change_fp": [], "node_recall": 1.0, "node_precision": 0.11764705882352941, "tag": 0.7272727272727273, "difficulty_match": 0.0, "area_match": 0.5, "se_seconds": 55.0, "se_tokens": 40666, "total_seconds": 156.7, "result_paths": 24, "missed_change": {"SCR:TOSCP0300M": "LLM 이 [참조] 판정", "SCR:TOSCP0301P": "LLM 이 [참조] 판정", "SQL:CampMapper.selectAiChnlList": "LLM 이 [참조] 판정"}}, "SC-005": {"complexity": "simple", "change_hit": 1, "change_total": 1, "tp": 1, "fn": 0, "fp": 43, "change_tp": 1, "change_fp": [], "node_recall": 1.0, "node_precision": 0.022727272727272728, "tag": 1.0, "difficulty_match": null, "area_match": null, "se_seconds": 15.9, "se_tokens": 9155, "total_seconds": 104.3, "result_paths": 32, "missed_change": {}}, "SC-006": {"complexity": "simple", "change_hit": 0, "change_total": 0, "tp": 3, "fn": 0, "fp": 43, "change_tp": 0, "change_fp": [], "node_recall": 1.0, "node_precision": 0.06521739130434782, "tag": 1.0, "difficulty_match": null, "area_match": null, "se_seconds": 22.5, "se_tokens": 9024, "total_seconds": 126.5, "result_paths": 34, "missed_change": {}}, "L-1": {"complexity": "simple", "change_hit": 2, "change_total": 7, "tp": 7, "fn": 0, "fp": 42, "change_tp": 2, "change_fp": [], "node_recall": 1.0, "node_precision": 0.14285714285714285, "tag": 0.6153846153846154, "difficulty_match": null, "area_match": null, "se_seconds": 20.0, "se_tokens": 10018, "total_seconds": 138.2, "result_paths": 42, "missed_change": {"BAT:ZDOCBB0100010": "판정 누락 (기본값 [참조])", "BAT:ZDOCBB0100020": "판정 누락 (기본값 [참조])", "BAT:ZDOCBB0100030": "판정 누락 (기본값 [참조])", "BAT:ZDOCBB0100040": "판정 누락 (기본값 [참조])", "BAT:ZDOCBB0100050": "판정 누락 (기본값 [참조])"}}, "L-2": {"complexity": "simple", "change_hit": 2, "change_total": 2, "tp": 2, "fn": 0, "fp": 1, "change_tp": 2, "change_fp": [], "node_recall": 1.0, "node_precision": 0.6666666666666666, "tag": 1.0, "difficulty_match": null, "area_match": null, "se_seconds": 17.4, "se_tokens": 5382, "total_seconds": 102.0, "result_paths": 3, "missed_change": {}}, "L-3": {"complexity": "simple", "change_hit": 2, "change_total": 2, "tp": 2, "fn": 0, "fp": 3, "change_tp": 2, "change_fp": [], "node_recall": 1.0, "node_precision": 0.4, "tag": 1.0, "difficulty_match": null, "area_match": null, "se_seconds": 16.7, "se_tokens": 5615, "total_seconds": 62.0, "result_paths": 3, "missed_change": {}}, "L-4": {"complexity": "simple", "change_hit": 1, "change_total": 1, "tp": 1, "fn": 0, "fp": 14, "change_tp": 1, "change_fp": [], "node_recall": 1.0, "node_precision": 0.06666666666666667, "tag": 1.0, "difficulty_match": null, "area_match": null, "se_seconds": 10.7, "se_tokens": 5755, "total_seconds": 47.1, "result_paths": 10, "missed_change": {}}, "M-1": {"complexity": "complex", "change_hit": 2, "change_total": 2, "tp": 2, "fn": 0, "fp": 35, "change_tp": 2, "change_fp": [], "node_recall": 1.0, "node_precision": 0.05405405405405406, "tag": 1.0, "difficulty_match": 0.0, "area_match": 0.75, "se_seconds": 53.8, "se_tokens": 43940, "total_seconds": 120.8, "result_paths": 31, "missed_change": {}}, "M-2": {"complexity": "complex", "change_hit": 1, "change_total": 6, "tp": 2, "fn": 0, "fp": 27, "change_tp": 1, "change_fp": [], "node_recall": 1.0, "node_precision": 0.06896551724137931, "tag": 0.8, "difficulty_match": 0.0, "area_match": 0.5, "se_seconds": 76.0, "se_tokens": 59190, "total_seconds": 172.5, "result_paths": 59, "missed_change": {"TP:ProdScrbSvc.termProd": "LLM 이 [참조] 판정", "TBL:TB_PROD_RELN": "경로에 없음 (상류)", "COL:TB_PROD_RELN.RELN_TYP_CD": "경로에 없음 (상류)", "COL:TB_SVC_PROD.TERM_RSN_CD": "경로에 없음 (상류)", "SCR:ZPAYSS0100010": "LLM 이 [참조] 판정"}}, "M-3": {"complexity": "complex", "change_hit": 9, "change_total": 9, "tp": 9, "fn": 0, "fp": 12, "change_tp": 9, "change_fp": [], "node_recall": 1.0, "node_precision": 0.42857142857142855, "tag": 1.0, "difficulty_match": 1.0, "area_match": 0.75, "se_seconds": 127.0, "se_tokens": 69403, "total_seconds": 273.5, "result_paths": 33, "missed_change": {}}, "M-4": {"complexity": "complex", "change_hit": 2, "change_total": 4, "tp": 3, "fn": 0, "fp": 22, "change_tp": 2, "change_fp": [], "node_recall": 1.0, "node_precision": 0.12, "tag": 0.8, "difficulty_match": 0.0, "area_match": 1.0, "se_seconds": 58.7, "se_tokens": 34833, "total_seconds": 157.8, "result_paths": 18, "missed_change": {"TP:FeeCnslSvc.getFeeCnslInfo": "LLM 이 [참조] 판정", "TP:FeeCnslSvc.simulateFee": "LLM 이 [참조] 판정"}}, "H-1": {"complexity": "complex", "change_hit": 2, "change_total": 6, "tp": 5, "fn": 0, "fp": 68, "change_tp": 2, "change_fp": [], "node_recall": 1.0, "node_precision": 0.0684931506849315, "tag": 0.6875, "difficulty_match": 0.0, "area_match": 0.5, "se_seconds": 77.4, "se_tokens": 61688, "total_seconds": 168.7, "result_paths": 85, "missed_change": {"TP:CombScrbSvc.joinComb": "LLM 이 [참조] 판정", "MOD:CombDcBatch.calcDcAmt": "LLM 이 [참조] 판정", "TBL:TB_PROD": "LLM 이 [참조] 판정", "TP:CombScrbSvc.termComb": "LLM 이 [참조] 판정"}}, "H-2": {"complexity": "complex", "change_hit": 4, "change_total": 7, "tp": 3, "fn": 0, "fp": 44, "change_tp": 2, "change_fp": [], "node_recall": 1.0, "node_precision": 0.06382978723404255, "tag": 0.8125, "difficulty_match": 1.0, "area_match": 0.5, "se_seconds": 77.1, "se_tokens": 66208, "total_seconds": 182.0, "result_paths": 81, "missed_change": {"MOD:ProdScrbSvc.checkAgeLimit": "LLM 이 [참조] 판정", "SCR:ZPRDSS0200010": "LLM 입력 밖 (경로 상한)", "TP:ProdScrbSvc.changeFeeProd": "LLM 이 [참조] 판정"}}}, "metrics": {"change_precision": 0.9666666666666667, "change_recall": 0.6078431372549019, "node_recall": 1.0, "tag_complex": 0.8385606060606061, "tag_simple": 0.9358974358974358, "difficulty_match": 4.0, "area_match": 0.625, "unneeded": 1, "node_precision": 0.11359026369168357, "se_seconds": 810.0, "se_tokens": 527987, "total_seconds": 2289.2, "result_paths": 511, "miss_kinds": {"LLM 이 [참조] 판정": 17, "판정 누락 (기본값 [참조])": 5, "경로에 없음 (상류)": 3, "LLM 입력 밖 (경로 상한)": 1}}}, {"repeat": 3, "cases": {"SC-001": {"complexity": "complex", "change_hit": 0, "change_total": 2, "tp": 4, "fn": 0, "fp": 34, "change_tp": 0, "change_fp": [], "node_recall": 1.0, "node_precision": 0.10526315789473684, "tag": 0.8, "difficulty_match": 1.0, "area_match": 0.5, "se_seconds": 31.2, "se_tokens": 35901, "total_seconds": 120.9, "result_paths": 29, "missed_change": {"DBIO:DCP_MSGSCRT_S02": "판정 누락 (기본값 [참조])", "BAT:TBTW1010": "판정 누락 (기본값 [참조])"}}, "SC-002": {"complexity": "complex", "change_hit": 0, "change_total": 0, "tp": 3, "fn": 2, "fp": 15, "change_tp": 0, "change_fp": [], "node_recall": 0.6, "node_precision": 0.16666666666666666, "tag": 0.625, "difficulty_match": 0.0, "area_match": 0.5, "se_seconds": 60.8, "se_tokens": 30552, "total_seconds": 167.9, "result_paths": 15, "missed_change": {"TBL:TCM_USER_AUTH": "LLM 이 [참조] 판정", "TBL:TCM_USER_AUTH_HIST": "LLM 이 [참조] 판정", "BAT:TBHR2010": "LLM 이 [참조] 판정"}}, "SC-003": {"complexity": "complex", "change_hit": 1, "change_total": 2, "tp": 3, "fn": 0, "fp": 2, "change_tp": 1, "change_fp": [], "node_recall": 1.0, "node_precision": 0.6, "tag": 0.8888888888888888, "difficulty_match": 0.0, "area_match": 0.75, "se_seconds": 41.0, "se_tokens": 21685, "total_seconds": 134.9, "result_paths": 5, "missed_change": {"TBL:TCP_CMM_CD": "LLM 이 [참조] 판정"}}, "SC-004": {"complexity": "complex", "change_hit": 0, "change_total": 0, "tp": 4, "fn": 0, "fp": 24, "change_tp": 0, "change_fp": [], "node_recall": 1.0, "node_precision": 0.14285714285714285, "tag": 0.7272727272727273, "difficulty_match": 0.0, "area_match": 0.5, "se_seconds": 50.1, "se_tokens": 34492, "total_seconds": 149.2, "result_paths": 16, "missed_change": {"SCR:TOSCP0300M": "LLM 이 [참조] 판정", "SCR:TOSCP0301P": "LLM 이 [참조] 판정", "SQL:CampMapper.selectAiChnlList": "LLM 이 [참조] 판정"}}, "SC-005": {"complexity": "simple", "change_hit": 1, "change_total": 1, "tp": 1, "fn": 0, "fp": 28, "change_tp": 1, "change_fp": [], "node_recall": 1.0, "node_precision": 0.034482758620689655, "tag": 1.0, "difficulty_match": null, "area_match": null, "se_seconds": 14.5, "se_tokens": 8197, "total_seconds": 99.4, "result_paths": 22, "missed_change": {}}, "SC-006": {"complexity": "simple", "change_hit": 0, "change_total": 0, "tp": 2, "fn": 1, "fp": 42, "change_tp": 0, "change_fp": [], "node_recall": 0.6666666666666666, "node_precision": 0.045454545454545456, "tag": 1.0, "difficulty_match": null, "area_match": null, "se_seconds": 23.9, "se_tokens": 8940, "total_seconds": 108.3, "result_paths": 33, "missed_change": {}}, "L-1": {"complexity": "simple", "change_hit": 5, "change_total": 7, "tp": 5, "fn": 2, "fp": 50, "change_tp": 5, "change_fp": [], "node_recall": 0.7142857142857143, "node_precision": 0.09090909090909091, "tag": 1.0, "difficulty_match": null, "area_match": null, "se_seconds": 25.5, "se_tokens": 9949, "total_seconds": 147.1, "result_paths": 35, "missed_change": {"TBL:TB_BAT_JOB": "경로에 없음 (상류)", "COL:TB_BAT_JOB.CRON_EXPR": "경로에 없음 (상류)"}}, "L-2": {"complexity": "simple", "change_hit": 2, "change_total": 2, "tp": 2, "fn": 0, "fp": 1, "change_tp": 2, "change_fp": [], "node_recall": 1.0, "node_precision": 0.6666666666666666, "tag": 1.0, "difficulty_match": null, "area_match": null, "se_seconds": 15.5, "se_tokens": 5441, "total_seconds": 76.9, "result_paths": 3, "missed_change": {}}, "L-3": {"complexity": "simple", "change_hit": 2, "change_total": 2, "tp": 2, "fn": 0, "fp": 3, "change_tp": 2, "change_fp": [], "node_recall": 1.0, "node_precision": 0.4, "tag": 1.0, "difficulty_match": null, "area_match": null, "se_seconds": 11.9, "se_tokens": 5398, "total_seconds": 57.6, "result_paths": 3, "missed_change": {}}, "L-4": {"complexity": "simple", "change_hit": 1, "change_total": 1, "tp": 1, "fn": 0, "fp": 27, "change_tp": 1, "change_fp": [], "node_recall": 1.0, "node_precision": 0.03571428571428571, "tag": 1.0, "difficulty_match": null, "area_match": null, "se_seconds": 11.4, "se_tokens": 7172, "total_seconds": 51.6, "result_paths": 19, "missed_change": {}}, "M-1": {"complexity": "complex", "change_hit": 2, "change_total": 2, "tp": 2, "fn": 0, "fp": 32, "change_tp": 2, "change_fp": [], "node_recall": 1.0, "node_precision": 0.058823529411764705, "tag": 1.0, "difficulty_match": 0.0, "area_match": 0.5, "se_seconds": 52.3, "se_tokens": 47406, "total_seconds": 157.1, "result_paths": 35, "missed_change": {}}, "M-2": {"complexity": "complex", "change_hit": 1, "change_total": 6, "tp": 2, "fn": 0, "fp": 26, "change_tp": 1, "change_fp": [], "node_recall": 1.0, "node_precision": 0.07142857142857142, "tag": 0.7272727272727273, "difficulty_match": 0.0, "area_match": 0.75, "se_seconds": 61.2, "se_tokens": 54407, "total_seconds": 171.0, "result_paths": 61, "missed_change": {"TP:ProdScrbSvc.termProd": "LLM 이 [참조] 판정", "TBL:TB_PROD_RELN": "LLM 이 [참조] 판정", "COL:TB_PROD_RELN.RELN_TYP_CD": "경로에 없음 (상류)", "COL:TB_SVC_PROD.TERM_RSN_CD": "경로에 없음 (상류)", "SCR:ZPAYSS0100010": "판정 누락 (기본값 [참조])"}}, "M-3": {"complexity": "complex", "change_hit": 9, "change_total": 9, "tp": 9, "fn": 0, "fp": 34, "change_tp": 9, "change_fp": [], "node_recall": 1.0, "node_precision": 0.20930232558139536, "tag": 1.0, "difficulty_match": 1.0, "area_match": 0.75, "se_seconds": 162.7, "se_tokens": 88634, "total_seconds": 331.2, "result_paths": 49, "missed_change": {}}, "M-4": {"complexity": "complex", "change_hit": 2, "change_total": 4, "tp": 3, "fn": 0, "fp": 25, "change_tp": 2, "change_fp": [], "node_recall": 1.0, "node_precision": 0.10714285714285714, "tag": 0.8, "difficulty_match": 0.0, "area_match": 1.0, "se_seconds": 58.5, "se_tokens": 37428, "total_seconds": 183.8, "result_paths": 23, "missed_change": {"TP:FeeCnslSvc.getFeeCnslInfo": "LLM 이 [참조] 판정", "TP:FeeCnslSvc.simulateFee": "LLM 이 [참조] 판정"}}, "H-1": {"complexity": "complex", "change_hit": 2, "change_total": 6, "tp": 5, "fn": 0, "fp": 42, "change_tp": 2, "change_fp": [], "node_recall": 1.0, "node_precision": 0.10638297872340426, "tag": 0.6666666666666666, "difficulty_match": 0.0, "area_match": 0.25, "se_seconds": 87.2, "se_tokens": 52272, "total_seconds": 169.8, "result_paths": 48, "missed_change": {"TP:CombScrbSvc.joinComb": "LLM 이 [참조] 판정", "MOD:CombDcBatch.calcDcAmt": "LLM 이 [참조] 판정", "TBL:TB_PROD": "LLM 이 [참조] 판정", "TP:CombScrbSvc.termComb": "LLM 이 [참조] 판정"}}, "H-2": {"complexity": "complex", "change_hit": 4, "change_total": 7, "tp": 3, "fn": 0, "fp": 41, "change_tp": 2, "change_fp": ["DBIO:SvcProdSql.selectActiveSvcProd"], "node_recall": 1.0, "node_precision": 0.06818181818181818, "tag": 0.7222222222222222, "difficulty_match": 1.0, "area_match": 0.5, "se_seconds": 94.6, "se_tokens": 85039, "total_seconds": 199.5, "result_paths": 98, "missed_change": {"MOD:ProdScrbSvc.checkAgeLimit": "LLM 이 [참조] 판정", "SCR:ZPRDSS0200010": "LLM 이 [참조] 판정", "TP:ProdScrbSvc.changeFeeProd": "LLM 이 [참조] 판정"}}}, "metrics": {"change_precision": 0.967741935483871, "change_recall": 0.6274509803921569, "node_recall": 0.9107142857142857, "tag_complex": 0.7957323232323232, "tag_simple": 1.0, "difficulty_match": 3.0, "area_match": 0.6, "unneeded": 0, "node_precision": 0.1069182389937107, "se_seconds": 802.3, "se_tokens": 532913, "total_seconds": 2326.2, "result_paths": 494, "miss_kinds": {"판정 누락 (기본값 [참조])": 3, "LLM 이 [참조] 판정": 18, "경로에 없음 (상류)": 4}}}], "always": [{"case": "SC-002", "node": "TBL:TCM_USER_AUTH", "kind": "LLM 이 [참조] 판정"}, {"case": "SC-002", "node": "TBL:TCM_USER_AUTH_HIST", "kind": "경로에 없음 (상류)"}, {"case": "SC-002", "node": "BAT:TBHR2010", "kind": "LLM 이 [참조] 판정"}, {"case": "SC-003", "node": "TBL:TCP_CMM_CD", "kind": "LLM 이 [참조] 판정"}, {"case": "SC-004", "node": "SCR:TOSCP0300M", "kind": "LLM 이 [참조] 판정"}, {"case": "SC-004", "node": "SCR:TOSCP0301P", "kind": "LLM 이 [참조] 판정"}, {"case": "SC-004", "node": "SQL:CampMapper.selectAiChnlList", "kind": "LLM 이 [참조] 판정"}, {"case": "M-2", "node": "TP:ProdScrbSvc.termProd", "kind": "LLM 이 [참조] 판정"}, {"case": "M-2", "node": "TBL:TB_PROD_RELN", "kind": "경로에 없음 (상류)"}, {"case": "M-2", "node": "COL:TB_PROD_RELN.RELN_TYP_CD", "kind": "경로에 없음 (상류)"}, {"case": "M-2", "node": "COL:TB_SVC_PROD.TERM_RSN_CD", "kind": "경로에 없음 (상류)"}, {"case": "M-2", "node": "SCR:ZPAYSS0100010", "kind": "LLM 이 [참조] 판정"}, {"case": "M-4", "node": "TP:FeeCnslSvc.getFeeCnslInfo", "kind": "LLM 이 [참조] 판정"}, {"case": "M-4", "node": "TP:FeeCnslSvc.simulateFee", "kind": "LLM 이 [참조] 판정"}, {"case": "H-1", "node": "TP:CombScrbSvc.joinComb", "kind": "LLM 이 [참조] 판정"}, {"case": "H-1", "node": "MOD:CombDcBatch.calcDcAmt", "kind": "LLM 이 [참조] 판정"}, {"case": "H-1", "node": "TBL:TB_PROD", "kind": "LLM 이 [참조] 판정"}, {"case": "H-1", "node": "TP:CombScrbSvc.termComb", "kind": "LLM 이 [참조] 판정"}, {"case": "H-2", "node": "MOD:ProdScrbSvc.checkAgeLimit", "kind": "LLM 이 [참조] 판정"}, {"case": "H-2", "node": "SCR:ZPRDSS0200010", "kind": "판정 누락 (기본값 [참조])"}, {"case": "H-2", "node": "TP:ProdScrbSvc.changeFeeProd", "kind": "LLM 이 [참조] 판정"}], "fps": [{"case": "SC-003", "node": "SCR:TOSCP0220M", "n": 1}, {"case": "H-2", "node": "DBIO:SvcProdSql.selectActiveSvcProd", "n": 1}], "base": null};
+const META = D.meta, REPS = D.repeats, BASE = D.base;
+const M = [
+  { k: "change_precision", n: "[변경] 노드 정밀도", ratio: true, s: 1, main: true },
+  { k: "change_recall", n: "[변경] 재현율", ratio: true, s: 1 },
+  { k: "node_recall", n: "노드 탐지율", ratio: true, s: 1 },
+  { k: "tag_complex", n: "태그 정확도 complex", ratio: true, s: 1 },
+  { k: "tag_simple", n: "태그 정확도 simple", ratio: true, s: 1 },
+  { k: "area_match", n: "영역 일치", ratio: true, s: 1 },
+  { k: "node_precision", n: "노드 정밀도 (참고)", ratio: true, s: 1 },
+  { k: "difficulty_match", n: "난이도 일치 (건)", s: 1 },
+  { k: "unneeded", n: "불필요한 권장 (건)", s: -1 },
+  { k: "se_seconds", n: "SE 구간 시간 (초)", s: -1 },
+  { k: "se_tokens", n: "SE 토큰", s: -1 },
+  { k: "total_seconds", n: "전체 시간 (초)", s: -1 },
+  { k: "result_paths", n: "결과 경로 수 (합)", s: -1 },
+];
+const E2E = META.from === "e2e";
+const upstreamText = m => m.from === "e2e" ? "e2e (회차마다 전체 흐름)" : `상류 고정 ${m.from}`;
+const KINDS = ["경로에 없음 (상류)", "LLM 입력 밖 (경로 상한)", "판정 누락 (기본값 [참조])", "LLM 이 [참조] 판정", "표시 없음"];
+const NS = "http://www.w3.org/2000/svg";
+const el = (t, a = {}, p) => { const e = document.createElementNS(NS, t); for (const [k, v] of Object.entries(a)) e.setAttribute(k, v); if (p) p.appendChild(e); return e; };
+const text = (p, x, y, s, a = {}) => { const t = el("text", { x, y, ...a }, p); t.textContent = s; return t; };
+const tip = document.getElementById("tip");
+function bindTip(node, html) {
+  node.addEventListener("mousemove", ev => {
+    tip.innerHTML = html; tip.style.display = "block";
+    const w = tip.offsetWidth, h = tip.offsetHeight; let x = ev.clientX + 14, y = ev.clientY + 14;
+    if (x + w > innerWidth - 8) x = ev.clientX - w - 14; if (y + h > innerHeight - 8) y = ev.clientY - h - 14;
+    tip.style.left = x + "px"; tip.style.top = y + "px";
+  });
+  node.addEventListener("mouseleave", () => tip.style.display = "none");
+}
+const fmt = (v, m) => v == null ? "-" : m && m.ratio ? v.toFixed(3)
+  : Number.isInteger(v) || Math.abs(v) >= 1000 ? Math.round(v).toLocaleString("ko-KR") : (Math.round(v * 10) / 10).toLocaleString("ko-KR");
+const stat = xs => { xs = xs.filter(x => x != null); return xs.length ? { mean: xs.reduce((a, b) => a + b, 0) / xs.length, lo: Math.min(...xs), hi: Math.max(...xs) } : null; };
+const vals = (reps, k) => reps.map(r => r.metrics[k]);
+const cases = Object.keys(REPS[0].cases);
+const sumc = (r, f) => Object.values(r.cases).reduce((a, c) => a + f(c), 0);
+
+document.getElementById("title").textContent = `SE 반복 실험 ${META.exp_id}` + (META.label ? ` · ${META.label}` : "");
+document.getElementById("sub").textContent = `${upstreamText(META)} · ${REPS.length}회 반복 · 케이스 ${cases.length}건 · 코드 ${META.commit} · ${META.updated}`;
+
+// --- 타일 ---
+const T = k => stat(vals(REPS, k));
+const hits = REPS.map(r => sumc(r, c => c.change_hit)), tot = sumc(REPS[0], c => c.change_total);
+const tiles = [
+  ["[변경] 노드 정밀도 (주 지표)", T("change_precision").mean.toFixed(3), `범위 ${T("change_precision").lo.toFixed(3)} ~ ${T("change_precision").hi.toFixed(3)}`],
+  ["[변경] 재현율", T("change_recall").mean.toFixed(3), `맞힌 수 ${Math.min(...hits)}~${Math.max(...hits)} / ${tot}`],
+  ["노드 탐지율", T("node_recall").mean.toFixed(3), `범위 ${T("node_recall").lo.toFixed(3)} ~ ${T("node_recall").hi.toFixed(3)}`],
+  E2E && T("total_seconds")
+    ? ["전체 시간 (16건 합)", `${Math.round(T("total_seconds").mean)}초`, `범위 ${Math.round(T("total_seconds").lo)}~${Math.round(T("total_seconds").hi)}초 · 경로 수 ${Math.round(T("result_paths").lo)}~${Math.round(T("result_paths").hi)}`]
+    : ["SE 구간 시간", `${Math.round(T("se_seconds").mean)}초`, `범위 ${Math.round(T("se_seconds").lo)}~${Math.round(T("se_seconds").hi)}초 · 토큰 평균 ${Math.round(T("se_tokens").mean).toLocaleString("ko-KR")}`],
+];
+document.getElementById("tiles").innerHTML = tiles.map(([l, v, n]) => `<div class="tile"><div class="label">${l}</div><div class="value">${v}</div><div class="note">${n}</div></div>`).join("");
+
+// --- 확인된 것 (데이터에서 자동 작성) ---
+const varying = cases.filter(c => { const vs = REPS.map(r => r.cases[c]); return new Set(vs.map(v => `${v.change_hit}|${v.change_fp.length}|${v.tag}`)).size > 1; });
+const missMean = KINDS.map(k => [k, REPS.reduce((a, r) => a + (r.metrics.miss_kinds[k] || 0), 0) / REPS.length]).filter(x => x[1] > 0).sort((a, b) => b[1] - a[1]);
+const always = D.always, fps = D.fps;
+const cp = T("change_precision"), cr = T("change_recall");
+const F = [
+  `<b>회차 간 편차: [변경] 노드 정밀도 ${cp.lo.toFixed(3)} ~ ${cp.hi.toFixed(3)} (폭 ${(cp.hi - cp.lo).toFixed(3)}), [변경] 재현율 ${cr.lo.toFixed(3)} ~ ${cr.hi.toFixed(3)} (폭 ${(cr.hi - cr.lo).toFixed(3)}).</b> 다음 실험에서 이 폭보다 작은 변화는 LLM 응답 편차 안입니다.`,
+  `<b>케이스 ${cases.length}건 중 ${cases.length - varying.length}건은 ${REPS.length}회 모두 같은 결과입니다.</b> ` + (varying.length ? `회차마다 달라진 케이스: ${varying.join(", ")}. 편차는 이 케이스들에서만 나옵니다.` : "회차마다 달라진 케이스가 없습니다."),
+  `<b>놓친 [변경] 노드 (회차 평균): ${missMean.map(([k, v]) => `${k} ${Math.round(v * 10) / 10}`).join(", ") || "없음"}.</b> 모든 회차에서 놓친 노드는 ${always.length}개이고, 그중 ${always.filter(a => a.kind === "LLM 이 [참조] 판정").length}개가 LLM 이 근거를 대고 [참조] 로 판정한 것, ${always.filter(a => a.kind.startsWith("경로에 없음")).length}개가 상류에서 경로에 없는 것입니다.`,
+  fps.length ? `<b>[변경] 오탐 ${fps.length}종.</b> ` + fps.slice(0, 4).map(f => `${f.case} <code>${f.node}</code> ${f.n}/${REPS.length}회`).join(", ") + "." : "<b>[변경] 오탐이 없습니다.</b>",
+];
+document.getElementById("findings").innerHTML = F.map(s => `<li>${s}</li>`).join("");
+
+// --- 회차 간 편차: 범위 막대 (비율 지표, 0~1 공통 축) ---
+(function () {
+  const box = document.getElementById("spread"), ms = M.filter(m => m.ratio);
+  const W = 1000, L = 170, R = 70, row = 30, T0 = 8, B = 26, H = T0 + ms.length * row + B;
+  const x = v => L + v * (W - L - R);
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "지표별 회차 간 편차" }, box);
+  for (let t = 0; t <= 1.0001; t += 0.2) { el("line", { x1: x(t), x2: x(t), y1: T0, y2: H - B, class: "axis" }, svg); text(svg, x(t), H - B + 18, t.toFixed(1), { "text-anchor": "middle" }); }
+  ms.forEach((m, i) => {
+    const y = T0 + i * row + row / 2, s = stat(vals(REPS, m.k));
+    text(svg, 0, y + 4, m.n, { fill: "var(--text-primary)", "font-weight": m.main ? 650 : 400 });
+    if (!s) return;
+    el("rect", { x: x(s.lo) - 5, y: y - 5, width: Math.max(x(s.hi) - x(s.lo), 0) + 10, height: 10, rx: 5, fill: "var(--range)" }, svg);
+    REPS.forEach(r => {
+      const v = r.metrics[m.k]; if (v == null) return;
+      const c = el("circle", { cx: x(v), cy: y, r: 5, fill: "var(--neutral-mark)", stroke: "var(--surface)", "stroke-width": 2 }, svg);
+      bindTip(c, `<b>${m.n} · r${r.repeat}</b><br>${v.toFixed(3)}`);
+    });
+    el("rect", { x: x(s.mean) - 1.25, y: y - 9, width: 2.5, height: 18, fill: "var(--accent)" }, svg);
+    const right = x(s.hi) + 12 + 130 <= W;  // 오른쪽에 공간이 없으면 범위 왼쪽에
+    text(svg, right ? x(s.hi) + 12 : x(s.lo) - 12, y + 4, `${s.mean.toFixed(3)} · 폭 ${(s.hi - s.lo).toFixed(3)}`,
+         { fill: "var(--text-primary)", "text-anchor": right ? "start" : "end" });
+  });
+})();
+document.getElementById("metricTbl").innerHTML = `<thead><tr><th class="l">지표</th><th>평균</th><th>범위</th>${REPS.map(r => `<th>r${r.repeat}</th>`).join("")}</tr></thead><tbody>` +
+  M.map(m => { const s = stat(vals(REPS, m.k)); return `<tr><td>${m.n}</td><td>${s ? fmt(s.mean, m) : "-"}</td><td>${s ? `${fmt(s.lo, m)} ~ ${fmt(s.hi, m)}` : "-"}</td>${REPS.map(r => `<td>${fmt(r.metrics[m.k], m)}</td>`).join("")}</tr>`; }).join("") + "</tbody>";
+
+// --- 이전 실험 대비 ---
+if (BASE && BASE.repeats.length) {
+  document.getElementById("cmpSec").hidden = false;
+  document.getElementById("cmpDesc").textContent = `${BASE.meta.exp_id}${BASE.meta.label ? " · " + BASE.meta.label : ""} (${upstreamText(BASE.meta)}, ${BASE.repeats.length}회) 대비. 판정: 평균 차이가 두 실험의 회차 범위(최대-최소) 중 큰 값보다 크면 개선·악화, 아니면 편차 안.` +
+    (BASE.meta.from !== META.from ? (BASE.meta.from === "e2e" || E2E ? " ⚠️ 한쪽은 e2e, 한쪽은 상류 고정이라 탐지율·경로 수·시간 차이에는 상류 변동이 섞입니다. SE 판정 지표 위주로 보세요." : " ⚠️ 상류가 달라 직접 비교가 어렵습니다.") : "");
+  document.getElementById("cmpTbl").innerHTML = `<thead><tr><th class="l">지표</th><th>이전 평균 (범위)</th><th>이번 평균 (범위)</th><th>차이</th><th class="l">판정</th></tr></thead><tbody>` +
+    M.map(m => {
+      const b = stat(vals(BASE.repeats, m.k)), a = stat(vals(REPS, m.k));
+      if (!a || !b) return `<tr><td>${m.n}</td><td>-</td><td>-</td><td>-</td><td class="l">-</td></tr>`;
+      const d = a.mean - b.mean, spread = Math.max(b.hi - b.lo, a.hi - a.lo);
+      const v = Math.abs(d) <= spread ? "편차 안" : d * m.s > 0 ? "개선" : "악화";
+      return `<tr><td>${m.n}</td><td>${fmt(b.mean, m)} (${fmt(b.lo, m)}~${fmt(b.hi, m)})</td><td>${fmt(a.mean, m)} (${fmt(a.lo, m)}~${fmt(a.hi, m)})</td>` +
+        `<td>${d > 0 ? "+" : ""}${fmt(d, m)}</td><td class="l ${v === "악화" ? "var" : ""}">${v}${v === "악화" ? " ↓" : v === "개선" ? " ↑" : ""}</td></tr>`;
+    }).join("") + "</tbody>";
+}
+
+// --- 놓친 [변경] 노드 분류 ---
+(function () {
+  const box = document.getElementById("miss");
+  const rows = KINDS.map(k => [k, REPS.map(r => r.metrics.miss_kinds[k] || 0)]);
+  const max = Math.max(1, ...rows.flatMap(r => r[1]));
+  const W = 1000, L = 210, R = 140, row = 26, barH = 14, H = rows.length * row + 4;
+  const x = v => L + (v / max) * (W - L - R);
+  const svg = el("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": "놓친 변경 노드 분류" }, box);
+  rows.forEach(([k, vs], i) => {
+    const y = i * row + (row - barH) / 2, mean = vs.reduce((a, b) => a + b, 0) / vs.length;
+    text(svg, 0, y + barH - 3, k, { fill: "var(--text-primary)" });
+    const r = el("rect", { x: L, y, width: Math.max(x(mean) - L, mean ? 2 : 0), height: barH, rx: 3, fill: "var(--accent)" }, svg);
+    bindTip(r, `<b>${k}</b><br>회차 평균 ${Math.round(mean * 10) / 10}<br><span class="muted">${vs.map((v, j) => `r${j + 1} ${v}`).join(" · ")}</span>`);
+    text(svg, x(mean) + 8, y + barH - 3, `${Math.round(mean * 10) / 10}  (${vs.join(" · ")})`, { fill: "var(--text-primary)" });
+  });
+})();
+document.getElementById("alwaysTitle").textContent = `모든 회차에서 놓친 노드 (${always.length}개)`;
+const byKind = KINDS.map(k => [k, always.filter(a => a.kind === k)]).filter(x => x[1].length);
+document.getElementById("always").innerHTML = byKind.map(([k, xs]) => `<li><b>${k}</b> (${xs.length}): ${xs.map(a => `${a.case} <code>${a.node}</code>`).join(", ")}</li>`).join("") || "<li>없음</li>";
+document.getElementById("fps").innerHTML = fps.map(f => `<li>${f.case} <code>${f.node}</code> — ${f.n}/${REPS.length}회</li>`).join("") || "<li>없음</li>";
+
+// --- 케이스별 회차 값 ---
+(function () {
+  const cols = [["[변경] 재현", c => c.change_total ? `${c.change_hit}/${c.change_total}` : "-"], ["[변경] 오탐", c => `${c.change_fp.length}`],
+                ["태그 정확도", c => c.tag == null ? "-" : c.tag.toFixed(2)], ["탐지율", c => c.node_recall == null ? "-" : c.node_recall.toFixed(2)],
+                ["SE(s)", c => `${Math.round(c.se_seconds)}`]];
+  const reps = REPS.map(r => `r${r.repeat}`).join(" · ");
+  const head = `<thead><tr><th class="l">케이스</th><th class="l">흐름</th>${cols.map(([n]) => `<th>${n} <span style="font-weight:400">(${reps})</span></th>`).join("")}</tr></thead>`;
+  const body = cases.map(cs => {
+    const vs = REPS.map(r => r.cases[cs]);
+    const cells = cols.map(([n, f], ci) => { const xs = vs.map(f); const diff = ci < 4 && new Set(xs).size > 1; return `<td class="${diff ? "var" : ""}">${xs.join(" · ")}</td>`; }).join("");
+    return `<tr><td>${cs}${varying.includes(cs) ? '<span class="badge">변동</span>' : ""}</td><td class="l">${vs[0].complexity}</td>${cells}</tr>`;
+  }).join("");
+  document.getElementById("caseTbl").innerHTML = head + `<tbody>${body}</tbody>`;
+})();
+
+document.getElementById("foot").textContent = `scripts/SE/run_experiment.py 결과 (outputs/runs/SE/experiments/${META.exp_id}/experiment.json). ` +
+  (E2E ? "회차마다 전체 흐름(Planner → Explorer ⇄ Retriever → Simulator → Verifier → Composer → KPI, 재계획 포함)을 새로 실행 (run_scenarios.py 와 같음)."
+       : `상류(Planner·Explorer·Retriever)는 ${META.from} 그대로, SE 구간(Simulator·Verifier·Composer·KPI)만 회차마다 다시 실행 (재계획 미실행).`) + ` [변경] 노드 정밀도·재현율·노드 탐지율·노드 정밀도는 케이스별 TP·FP·FN·맞힌 수를 합산한 비율 (KPI 화면·배치 평가와 같음, [변경] 재현율은 운영 문의 제외), 그 밖의 비율 지표는 케이스 평균.`;
+</script>
+</body>
+</html>
