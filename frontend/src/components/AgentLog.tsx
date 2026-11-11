@@ -44,7 +44,7 @@ function Rows({ rows, compact }: { rows: SessionLog[]; compact?: boolean }) {
             <div key={i} className="whitespace-pre">{r.text}</div>
           ) : (
             <div key={i} className="flex gap-3">
-              <span className={cn('shrink-0 text-muted', compact ? 'w-16' : 'w-20')}>{r.label}</span>
+              <span className={cn('shrink-0 break-all text-muted', compact ? 'w-16' : 'w-20')}>{r.label}</span>
               <span className="min-w-0 break-words">{r.text}</span>
             </div>
           ),
@@ -75,7 +75,7 @@ export function LogItems({ logs, compact }: { logs: SessionLog[]; compact?: bool
           <div key={i} className="shrink-0 pl-3 text-muted">↓ {item.log.text}</div>
         ) : (
           <div key={i} className="flex shrink-0 gap-3 pl-3">
-            <span className={cn('shrink-0 text-muted', label)}>{item.log.label}</span>
+            <span className={cn('shrink-0 break-all text-muted', label)}>{item.log.label}</span>
             <span className="min-w-0 break-words">{item.log.text}</span>
           </div>
         ),
