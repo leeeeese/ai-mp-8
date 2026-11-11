@@ -115,15 +115,30 @@ export const handlers = [
     return HttpResponse.json(s);
   }),
   http.get('/api/sessions/:id/logs', () => {
-    const row = (kind: string, text: string, section: string | null = null, label = '') => ({ at: '10:00:00', agent: 'planner', kind, section, label, text });
+    // 에이전트별 블록 (진행 패널의 단계별 펼치기가 agent 로 거른다)
+    const row = (agent: string, kind: string, text: string, section: string | null = null, label = '') =>
+      ({ at: '10:00:00', agent, kind, section, label, text });
     return HttpResponse.json([
-      row('run', '1차 실행 · 목업 로그 (실제 API 모드에서 상세 로그 표시)'),
-      row('route', 'PLANNER  새 요건'),
-      row('open', '1 Planner · 10:00:00'),
-      row('row', '목업 요청 문장', '받은 입력 ← 요청 접수', '요청 문장'),
-      row('row', 'gpt-6.1-sol PlannerDraft 11.2s · 입력 6,781 · 출력 828 토큰', '동작 · LLM 판정', 'LLM'),
-      row('row', '단순 — 목업 판정', '결과 → Explorer', '복잡도'),
-      row('close', '완료 11.2s │ 단순 · 항목 1개 │ 토큰 7,609'),
+      row('supervisor', 'run', '1차 실행 · 목업 로그 (실제 API 모드에서 상세 로그 표시)'),
+      row('supervisor', 'route', 'PLANNER  새 요건'),
+      row('planner', 'open', '1 Planner · 10:00:00'),
+      row('planner', 'row', '목업 요청 문장', '받은 입력 ← 요청 접수', '요청 문장'),
+      row('planner', 'row', 'gpt-6.1-sol PlannerDraft 11.2s · 입력 6,781 · 출력 828 토큰', '동작 · LLM 판정', 'LLM'),
+      row('planner', 'row', '단순 — 목업 판정', '결과 → Explorer', '복잡도'),
+      row('planner', 'close', '완료 11.2s │ 단순 · 항목 1개 │ 토큰 7,609'),
+      row('supervisor', 'route', 'EXPLORER  탐색 시작'),
+      row('explorer', 'open', '2-1 Explorer · 10:00:12'),
+      row('explorer', 'row', '항목 1 · 목표 EntryHandler · forward · hop 5', '받은 입력 ← Planner', '탐색 명세'),
+      row('explorer', 'row', "search_graph_nodes ['안내 문구'] → SCR:MOCK0100 외 2", '동작 · 규칙 탐색', 'tool'),
+      row('explorer', 'row', '경로 3 · 노드 8 · 목표 도달 1', '결과 → Retriever', '경로'),
+      row('explorer', 'close', '완료 4.1s │ tool 3'),
+      row('retriever', 'open', '2-2 Retriever · 10:00:16'),
+      row('retriever', 'row', 'read_source SCR:MOCK0100 → screen/MOCK0100.jsp L12-30', '동작 · 원문 읽기', 'tool'),
+      row('retriever', 'row', '근거 4 · 근거 없음 0', '결과 → Composer', '근거'),
+      row('retriever', 'close', '완료 3.2s │ tool 2'),
+      row('composer', 'open', '3 Composer · 10:00:20'),
+      row('composer', 'row', '[변경] SCR:MOCK0100 안내 문구 텍스트 변경', '결과', '결론'),
+      row('composer', 'close', '완료 5.0s │ 단순 응답'),
     ]);
   }),
   http.get('/api/sessions/:id/report', async ({ params, request }) => {

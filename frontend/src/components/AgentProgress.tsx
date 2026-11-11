@@ -1,7 +1,9 @@
-import { Check, Circle, Loader2, MinusCircle, ScrollText } from 'lucide-react';
-import type { AgentCounters, AgentEvent, AgentNode, NodeStatus } from '@/api/types';
+import { useEffect, useRef } from 'react';
+import { Check, ChevronDown, ChevronRight, Circle, Loader2, MinusCircle, ScrollText } from 'lucide-react';
+import type { AgentCounters, AgentEvent, AgentNode, NodeStatus, SessionLog } from '@/api/types';
 import { LIMITS } from '@/config';
 import { cn, formatMs } from '@/lib/cn';
+import { LogItems } from './AgentLog';
 
 /** 사용자에게 보여 주는 분석 단계. KPI Agent 는 Composer 이후 PoC 평가(개발·운영용)라 세션 화면에 넣지 않는다 (KPI 페이지에서 본다) */
 export const NODES: { node: AgentNode; label: string; loop?: boolean }[] = [
@@ -64,8 +66,27 @@ function Meter({ label, value, max }: { label: string; value: number; max: numbe
   );
 }
 
-/** 우측 "Agent 진행" 패널 (SSE 로 실시간 갱신) */
-export function AgentProgress({ state, onOpenLog }: { state: ProgressState; onOpenLog: () => void }) {
+/** 단계 하나의 상세 로그 (펼쳤을 때). 실행 중인 단계면 새 로그가 붙을 때 이 영역만 아래로 따라간다 */
+function NodeLog({ logs, follow }: { logs: SessionLog[]; follow: boolean }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (follow && ref.current) ref.current.scrollTop = ref.current.scrollHeight;
+  }, [follow, logs.length]);
+  return (
+    <div ref={ref} className="mt-1.5 flex max-h-64 flex-col gap-1.5 overflow-auto rounded-card bg-surface-2 p-1.5 font-mono text-[11px] leading-relaxed">
+      {logs.length ? <LogItems logs={logs} compact /> : <p className="px-1 text-muted">로그를 불러오는 중…</p>}
+    </div>
+  );
+}
+
+/** 우측 "Agent 진행" 패널 (SSE 로 실시간 갱신). 단계마다 펼침 버튼으로 그 에이전트의 상세 로그(실행 로그와 같은 내용)를 바로 아래에 보인다 */
+export function AgentProgress({ state, onOpenLog, logs = [], expanded = new Set(), onToggle }: {
+  state: ProgressState;
+  onOpenLog: () => void;
+  logs?: SessionLog[];
+  expanded?: Set<AgentNode>;
+  onToggle?: (node: AgentNode) => void;
+}) {
   return (
     <section aria-label="Agent 진행" aria-live="polite" className="glass flex max-h-full min-h-0 flex-col gap-4 p-4">
       <div className="flex items-center justify-between">
@@ -74,9 +95,11 @@ export function AgentProgress({ state, onOpenLog }: { state: ProgressState; onOp
           <ScrollText size={14} /> 실행 로그
         </button>
       </div>
-      <ol className="flex shrink-0 flex-col">
+      <ol className="flex min-h-0 shrink flex-col overflow-y-auto pr-1">
         {NODES.map((n, i) => {
           const st = state.status[n.node];
+          const open = expanded.has(n.node);
+          const canOpen = !!onToggle && st !== 'waiting' && st !== 'skipped';
           return (
             <li key={n.node} className="relative flex gap-3 pb-3 last:pb-0">
               {i < NODES.length - 1 && <span className="absolute left-[11px] top-6 h-[calc(100%-18px)] w-px bg-[color:var(--border)]" aria-hidden="true" />}
@@ -85,7 +108,18 @@ export function AgentProgress({ state, onOpenLog }: { state: ProgressState; onOp
               </span>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2 text-[13px]">
-                  <span className={cn('font-mono', st === 'waiting' || st === 'skipped' ? 'text-muted' : 'text-text')}>{n.label}</span>
+                  <button
+                    type="button"
+                    disabled={!canOpen}
+                    aria-expanded={open}
+                    aria-label={`${n.label} 상세 로그 ${open ? '접기' : '펼치기'}`}
+                    title={canOpen ? (open ? '상세 로그 접기' : '상세 로그 펼치기') : undefined}
+                    onClick={() => onToggle?.(n.node)}
+                    className="-ml-1 flex items-center gap-1 rounded px-1 hover:bg-surface-2 disabled:cursor-default disabled:hover:bg-transparent"
+                  >
+                    {open ? <ChevronDown size={13} className="text-muted" /> : <ChevronRight size={13} className={canOpen ? 'text-muted' : 'text-transparent'} />}
+                    <span className={cn('font-mono', st === 'waiting' || st === 'skipped' ? 'text-muted' : 'text-text')}>{n.label}</span>
+                  </button>
                   {n.loop && <span className="text-[10px] text-muted">⇄</span>}
                   <span className="ml-auto text-[11px] text-muted">
                     {STATUS_LABEL[st]}
@@ -93,6 +127,7 @@ export function AgentProgress({ state, onOpenLog }: { state: ProgressState; onOp
                   </span>
                 </div>
                 {state.detail[n.node] && <p className="mt-0.5 truncate text-xs text-muted" title={state.detail[n.node]}>{state.detail[n.node]}</p>}
+                {open && <NodeLog logs={logs.filter((l) => l.agent === n.node)} follow={st === 'running'} />}
               </div>
             </li>
           );

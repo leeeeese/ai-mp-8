@@ -2,9 +2,9 @@ import { useQueryClient } from '@tanstack/react-query';
 import { ArrowUp, Lock, Star } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useParams } from 'react-router-dom';
-import { useSendMessage, useSession, useToggleStar } from '@/api/client';
+import { useSendMessage, useSession, useSessionLogs, useToggleStar } from '@/api/client';
 import { openAgentStream } from '@/api/stream';
-import { INPUT_KINDS, MESSAGE_KIND_LABEL, SM_LABEL, type MessageKind, type Session as SessionT } from '@/api/types';
+import { INPUT_KINDS, MESSAGE_KIND_LABEL, SM_LABEL, type AgentNode, type MessageKind, type Session as SessionT } from '@/api/types';
 import { AgentLog } from '@/components/AgentLog';
 import { AgentProgress, NODES, emptyProgress, reduceProgress, type ProgressState } from '@/components/AgentProgress';
 import { AnswerCard } from '@/components/AnswerCard';
@@ -31,10 +31,20 @@ export function Session() {
   const [kind, setKind] = useState<MessageKind>('chat');
   const [text, setText] = useState('');
   const [logOpen, setLogOpen] = useState(false);
+  // 진행 패널의 단계별 상세 로그 펼치기 (항상 접힌 채로 시작). 하나라도 펼쳤을 때만 로그를 불러온다
+  const [expanded, setExpanded] = useState<Set<AgentNode>>(() => new Set());
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
   const running = session?.status === 'running';
   const loaded = !!session;
+  const { data: logs = [] } = useSessionLogs(id, expanded.size > 0, !!running);
+  useEffect(() => setExpanded(new Set()), [id]); // 다른 세션으로 옮기면 다시 접힘
+  const toggleNode = (node: AgentNode) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (!next.delete(node)) next.add(node);
+      return next;
+    });
 
   useEffect(() => {
     if (!session) return;
@@ -188,7 +198,7 @@ export function Session() {
         </div>
 
         <aside className="xl:sticky xl:top-[76px] xl:flex xl:max-h-[calc(100vh-92px)] xl:flex-col xl:self-start">
-          <AgentProgress state={progress} onOpenLog={() => setLogOpen(true)} />
+          <AgentProgress state={progress} onOpenLog={() => setLogOpen(true)} logs={logs} expanded={expanded} onToggle={toggleNode} />
         </aside>
       </div>
       <AgentLog sessionId={id} running={!!running} open={logOpen} onClose={() => setLogOpen(false)} />
