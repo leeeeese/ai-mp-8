@@ -267,7 +267,7 @@ PYTHONPATH=src PYTHONWARNINGS=ignore $PY -m uvicorn impact_agent.api.app:app --a
   ■ 2-1 Explorer     완료 14.5s │ 시작 노드 4 · 경로 10 │ tool 누적 7/20 │ 토큰 13,134
     ↓ COMPOSER  단순 흐름 (Simulator · Verifier 생략)
   ```
-- 상세(에이전트마다 **받은 입력 → 동작 → 근거 → 결과**)는 `outputs/logs/<세션 8자>.log` 와 세션 화면 **실행 로그**에 남는다:
+- 상세(에이전트마다 **받은 입력 → 동작 → 근거 → 결과**)는 `outputs/logs/<세션 8자>.log` 와 세션 화면 **실행 로그**·진행 패널의 단계별 펼치기에 남는다. **터미널에도 전체를 찍으려면** `.env` 에 `AGENT_LOG=full` (또는 실행 명령 앞에 `AGENT_LOG=full`, 시연용). 동작 섹션에는 LLM 판정·ReAct 와 함께 SE 단계의 **LLM 판정 → 규칙 검증·보정**(Simulator 영역 판정 보정·경로 제외 가드, Verifier 점검·대안 판단·재계획 판단, Composer 출력 검증·체크리스트 출처·권장 판단)이 남는다:
   ```
   ▶ 2-1 Explorer · 왕복 1/3 · 19:02:47
     ▸ 받은 입력 ← Planner

@@ -49,9 +49,16 @@ from ..schemas import (
 )
 from ..state import AgentState
 from ..tools import GraphStore, get_graph_store
+from ..trace import clip, trace
 from .base import BaseAgent
 
 DEFAULT_IMPACT = "영향 검토 필요"
+# 상세 실행 로그 섹션 (api/agent_log.py: "동작 · …" 은 동작 묶음). 결과만이 아니라 LLM 판정 → 규칙 검증·보정 과정을 남긴다
+SKELETON_SECTION = "동작 · 경로 골격 (규칙)"
+LLM_SECTION = "동작 · LLM 판정"
+NODE_SECTION = "동작 · 노드별 [변경]/[참조] 판정 (LLM)"
+CHECK_SECTION = "동작 · 규칙 검증·보정 (LLM 판정 → 최종)"
+DROP_SECTION = "동작 · 경로 제외 가드"
 MAX_CONTEXT_PATHS = 40  # LLM 입력에 보여 줄 경로 수
 CONTEXT_LINES_PER_EVIDENCE = 12  # 노드당 원문 줄 수
 MAX_CONTEXT_CHARS = 16000  # 원문 블록 전체 문자 수 상한
@@ -166,6 +173,13 @@ class SimulatorAgent(BaseAgent[SimulationOutput]):
         limits = unverified_segments(state, [p for p, _ in built])
         limits += assign_orphan_areas([p for p, _ in built], areas_of, hop_areas, exp.edges if exp else [],
                                       lambda: self.store)
+        trace(f"Explorer 경로 {len(exp.paths) if exp else 0} → 영향 경로 {len(built)}개 (같은 노드 순서는 하나로, 근거 있는 hop 은 confirmed)",
+              section=SKELETON_SECTION, label="골격")
+        for area in AREA_ORDER:
+            if ids := [p.path_id for p, _ in built if area in areas_of[p.path_id]]:
+                trace(f"경로 {len(ids)}개: {', '.join(ids[:8])}{' …' if len(ids) > 8 else ''}", section=SKELETON_SECTION, label=area.value)
+        if shared:
+            trace("; ".join(f"{n} ({why})" for n, why in shared.items()), section=SKELETON_SECTION, label="공유 노드")
         on_paths = {h.node for p, _ in built for h in p.hops}
         if missing := [n for n in reanalysis_nodes(state) if n not in on_paths]:
             asked = set(reanalysis_nodes(state, notes=False))
@@ -175,18 +189,35 @@ class SimulatorAgent(BaseAgent[SimulationOutput]):
                 limits.append(f"재분석 참고 노드 미탐색: {', '.join(ref)} (참고 신호, 이번 탐색 경로에 없어 판정하지 못함)")
 
         draft = None
+        if not built:
+            trace("영향 경로 없음 → LLM 판정 생략", section=LLM_SECTION, label="생략")
+        elif self.llm is None:
+            trace("LLM 없음 → 규칙 판정 (review · 난이도 기준표)", section=LLM_SECTION, label="생략")
         if built and self.llm is not None:
+            trace(f"경로 {min(len(built), MAX_CONTEXT_PATHS)}/{len(built)}개 · 근거 원문 노드당 {CONTEXT_LINES_PER_EVIDENCE}줄 · "
+                  f"전체 {MAX_CONTEXT_CHARS:,}자까지 · 공유 노드 {len(shared)} → SimulatorDraft (Structured Output, Few-shot)",
+                  section=LLM_SECTION, label="입력")
             try:
                 draft, self.last_usage = self.llm.parse(
                     self.system_prompt, user_message(state, [p for p, _ in built], areas_of, nodes, shared), SimulatorDraft)
             except LLM_FAILURES as exc:  # LLM 실패는 규칙 판정으로 대체 (분석 흐름을 끊지 않음)
                 limits.append(f"LLM 판정 실패로 규칙 판정 사용: {exc}")
+                trace(f"실패 → 규칙 판정으로 대체: {clip(exc, 150)}", section=LLM_SECTION, label="대체")
+        if draft is not None:
+            trace(f"노드 판정 {len(draft.nodes)}건 ([변경] {sum(d.change for d in draft.nodes)}) · 영역 {len(draft.areas)} · "
+                  f"제외 제안 {len(draft.drop_paths)} · 요청안/대안 {'있음' if draft.requested_vs_alternative else '없음'}",
+                  section=LLM_SECTION, label="응답")
+            for d in draft.nodes:
+                trace(f"{d.node} — {clip(d.impact.strip().removeprefix(CHANGE_TAG).removeprefix(REFERENCE_TAG).strip(), 240)}",
+                      section=NODE_SECTION, label=CHANGE_TAG if d.change else REFERENCE_TAG)
 
         if draft is not None:  # LLM 에 보여 준 경로(MAX_CONTEXT_PATHS)의 노드만 판정된 것으로 본다
             shown = {h.node for p, _ in built[:MAX_CONTEXT_PATHS] for h in p.hops}
             apply_node_impacts(draft, [p for p, _ in built], shown)
             written = {d.node for d in draft.nodes}
             if skipped := [n for _, ns in target_nodes(state, shown) for n in ns if n not in written]:
+                trace(f"요건 대상인데 LLM 이 판정하지 않음 → [참조] 기본값: {', '.join(dict.fromkeys(skipped))}",
+                      section=NODE_SECTION, label="누락 보정")
                 limits.append(f"요건 대상 노드 판정 누락: {', '.join(dict.fromkeys(skipped))} ([참조] 기본값으로 둠, 변경 여부 확인 필요)")
         kept, dropped = apply_drops(draft, built, state, shared)
         return SimulationOutput(
@@ -311,9 +342,16 @@ def apply_drops(
     dropped = []
     for path, sources in built:
         reason = reasons.get(path.path_id)
-        if reason and not drop_guarded(path, sources, confirmed, kept, requested, changed_shared):
-            kept.remove((path, sources))
-            dropped.append(DroppedPath(path=path, reason=reason))
+        if not reason:
+            continue
+        if guard := drop_guard_reason(path, sources, confirmed, kept, requested, changed_shared):
+            trace(f"{path.path_id} 제외 제안 거절 — 가드: {guard} (LLM 사유: {clip(reason, 120)})", section=DROP_SECTION, label="거절")
+            continue
+        kept.remove((path, sources))
+        dropped.append(DroppedPath(path=path, reason=reason))
+        trace(f"{path.path_id} 제외 ({' → '.join(h.node for h in path.hops)}) — {clip(reason, 160)}", section=DROP_SECTION, label="수용")
+    if unknown := [pid for pid in reasons if pid not in {p.path_id for p, _ in built}]:
+        trace(f"골격에 없는 경로 id 라 무시: {', '.join(unknown)}", section=DROP_SECTION, label="무시")
     return [p for p, _ in kept], dropped
 
 
@@ -322,16 +360,26 @@ def drop_guarded(
     requested: set[str] | None = None, changed_shared: set[str] | None = None,
 ) -> bool:
     """제외하면 안 되는 경로인지 (설계서 1장 경로 제외 가드)."""
+    return drop_guard_reason(path, sources, confirmed, kept, requested, changed_shared) is not None
+
+
+def drop_guard_reason(
+    path: ImpactPath, sources: list[ExplorePath], confirmed: set[str], kept: list[tuple[ImpactPath, list[ExplorePath]]],
+    requested: set[str] | None = None, changed_shared: set[str] | None = None,
+) -> str | None:
+    """경로 제외를 막은 가드 (없으면 None). 실행 로그에 거절 사유로 남긴다."""
     if any(s.stop_reason is StopReason.TARGET_REACHED for s in sources) and path.hops[-1].confidence is Confidence.CONFIRMED:
-        return True  # 목표 역할에 도달했고 마지막 노드에 근거가 있음
-    if any(h.node in confirmed for h in path.hops):
-        return True  # 사용자가 확정한 노드가 있음
-    if requested and any(h.node in requested for h in path.hops):
-        return True  # 사용자가 재분석으로 확인을 요청한 노드가 있음 (설계서 1-4)
-    if changed_shared and any(h.node in changed_shared for h in path.hops):
-        return True  # [변경] 된 공유 노드를 지남 → 함께 영향받는 진입점 경로 (설계서 1-3 (c))
+        return "목표 역할에 도달했고 마지막 노드에 근거가 있음"
+    if hit := [h.node for h in path.hops if h.node in confirmed]:
+        return f"사용자가 확정한 노드 {', '.join(hit)}"
+    if requested and (hit := [h.node for h in path.hops if h.node in requested]):
+        return f"재분석으로 확인 요청한 노드 {', '.join(hit)} (설계서 1-4)"
+    if changed_shared and (hit := [h.node for h in path.hops if h.node in changed_shared]):
+        return f"[변경] 된 공유 노드 {', '.join(hit)} 를 지남 → 함께 영향받는 진입점 경로 (설계서 1-3 (c))"
     others = {s.item_id for p, ss in kept if p is not path for s in ss}
-    return any(s.item_id not in others for s in sources)  # 빼면 그 요건 항목의 경로가 없어짐
+    if lone := [s.item_id for s in sources if s.item_id not in others]:
+        return f"빼면 요건 항목 {', '.join(map(str, dict.fromkeys(lone)))} 의 경로가 하나도 남지 않음"
+    return None
 
 
 def rule_difficulty(area: Area, paths: list[ImpactPath], state: AgentState) -> tuple[Difficulty, str]:
@@ -381,6 +429,7 @@ def apply_shared_floor(
     if values["difficulty"] is Difficulty.MINOR:
         values["difficulty"] = Difficulty.MEDIUM
         values["difficulty_basis"] = f"(보정) 공유 노드 변경: {why} / LLM: {values['difficulty_basis']}"
+        trace(f"난이도 Minor → Medium: 공유 노드를 [변경] ({why})", section=CHECK_SECTION, label=area.value)
     factor = f"공유 노드 회귀 테스트: {why}"
     if factor not in values["schedule_factors"] and len(values["schedule_factors"]) < MAX_SCHEDULE_FACTORS:
         values["schedule_factors"].append(factor)
@@ -427,7 +476,11 @@ def judge_areas(
             "difficulty": difficulty, "difficulty_basis": basis, "schedule_factors": [], "infeasible_reason": None,
             "alternatives": [],
         }
+        if draft is not None and area not in drafts:
+            trace(f"LLM 판정 없음 → 규칙 판정 {values['impact_type'].value} · review · {difficulty.value} ({basis})",
+                  section=CHECK_SECTION, label=area.value)
         if (d := drafts.get(area)) is not None:
+            llm_said = f"{d.impact_type.value} · {d.feasibility.value} · {d.difficulty.value}"
             values.update(
                 impact_type=d.impact_type, feasibility=d.feasibility, difficulty=d.difficulty,
                 difficulty_basis=d.difficulty_basis.strip() or basis,
@@ -438,12 +491,20 @@ def judge_areas(
             changes = values["impact_type"] in (ImpactType.ADD, ImpactType.MODIFY)
             if values["feasibility"] is Feasibility.FEASIBLE and changes and not any_confirmed:
                 values["feasibility"] = Feasibility.REVIEW  # 근거(원문)가 하나도 없으면 가능 여부를 확정하지 않음
+                trace("가능 여부 feasible → review: 이 영역 경로에 원문 근거(confirmed hop)가 하나도 없음", section=CHECK_SECTION,
+                      label=area.value)
             if values["feasibility"] is Feasibility.HARD and not (values["infeasible_reason"] and values["alternatives"]):
                 values["feasibility"] = Feasibility.REVIEW
                 limits.append(f"[{area.value}] hard 판정의 사유·대안이 없어 review 로 둠")
+                trace("가능 여부 hard → review: 불가 사유·대안이 없음", section=CHECK_SECTION, label=area.value)
             apply_shared_floor(values, area, ps, shared_by_node, hop_areas)
             if tagged and (warning := tag_mismatch(area, values["impact_type"], ps, hop_areas)):
                 limits.append(warning)
+                trace(f"경고: {warning}", section=CHECK_SECTION, label=area.value)
+            final = f"{values['impact_type'].value} · {values['feasibility'].value} · {values['difficulty'].value}"
+            trace(f"LLM {llm_said} → 최종 {final}" + (" (유지)" if final == llm_said else " (보정)")
+                  + f" | 근거 hop {sum(c is Confidence.CONFIRMED for c in hop_conf)}/{len(hop_conf)} · 난이도 근거: {clip(values['difficulty_basis'], 120)}",
+                  section=CHECK_SECTION, label=area.value)
         out.append(AreaImpact(area=area, paths=ps, confidence=Confidence.CONFIRMED if all_confirmed else Confidence.INFERRED,
                               **values))
     return out

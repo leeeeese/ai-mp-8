@@ -50,6 +50,13 @@
 - **라벨이 아니라 역할로 판단.** tos(Controller·Service·SQL·DBIO)·swing(TP·Module·DBIO) 차이는 `GraphNode.role`(`NodeRole`) 로 흡수한다.
 - **확인과 추정 구분.** 근거(Evidence)가 있는 hop 만 `confirmed`, 나머지는 `inferred`. 근거 없이 구현 가능 여부를 확정하지 않고 `review`.
 - **실행 로그.** LLM 을 쓰면 `self.last_usage` 에 토큰 사용량을 남긴다 (Supervisor 가 `AgentRunRecord` 에 기록).
+- **추론 과정 로그 (`trace`).** 결과만이 아니라 **LLM 판정 → 규칙 검증·보정** 과정을 상세 실행 로그(세션 화면 실행 로그·진행 패널 단계별 펼치기, `outputs/logs/<세션>.log`, `AGENT_LOG=full` 이면 터미널)에 남긴다. 판단 로직은 바꾸지 않고 기록만 한다.
+
+  | 에이전트 | 동작 섹션 | 남기는 것 |
+  |---|---|---|
+  | Simulator | 경로 골격 (규칙) / LLM 판정 / 노드별 [변경]/[참조] 판정 (LLM) / 경로 제외 가드 / 규칙 검증·보정 | 영역별 경로·공유 노드, LLM 입력 범위·응답 요약, 노드별 판정 문장, 제외 제안 수용·거절과 걸린 가드, 영역별 "LLM 판정 → 최종 (유지/보정)"과 보정 사유(근거 없음 → review, 사유·대안 없는 hard → review, 공유 노드 → Medium, [변경] hop 불일치 경고), 판정 누락 보정 |
+  | Verifier | 규칙 점검 / 대안 근거 판단 (LLM) / 재계획 판단 | 점검별 이상 없음·보완·경고와 추가 범위, 대안마다 LLM 판단(근거 있음/부족 + 이유), 반복 사유라 재계획하지 않은 판단, 최종 결정(재계획 요청 / Composer) |
+  | Composer | LLM 작성 / 출력 검증 (LLM 초안 → 코드 조립) / 상세 분석 권장 판단 / 체크리스트 조립 | LLM 입력, [변경] 노드 선택과 경로 밖이라 버린 노드, 확인 쿼리 통과·차단(이유), 결론 보충, 강·약 신호와 권장 결정, 체크리스트 출처(규칙/LLM)·중복 제거, 후속 답변의 재분석 판단 |
 
 상수: `MAX_REPLAN` 2 (`schemas/schemas.json#/constants`), Simulator `MAX_CONTEXT_PATHS` 40 · `MAX_CONTEXT_CHARS` 16000 · `MAX_SCHEDULE_FACTORS` 3 (영역당), Verifier `MAX_SCOPE` 5, Composer `MAX_SCHEDULE_FACTORS` 8 (레포트 전체) · `MAX_CONTEXT_EVIDENCE` 40.
 
