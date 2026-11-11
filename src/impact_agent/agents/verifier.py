@@ -34,6 +34,7 @@ from ..schemas import (
 )
 from ..schemas.verifier import CheckKind
 from ..state import AgentState
+from ..trace import clip, trace
 from .base import BaseAgent
 from .simulator import CHANGE_TAG, REFERENCE_IMPACT, REFERENCE_TAG, reanalysis_nodes
 
@@ -51,6 +52,10 @@ CHECK_ORDER: list[CheckKind] = ["area_path_missing", "evidence_missing", "cross_
 MAX_SCOPE = 5  # 점검 하나가 additional_scope 에 넣는 항목 수
 REPEATED = "(반복) 재계획으로 해결되지 않음: "
 WARNING = "(경고) "
+# 상세 실행 로그 섹션: 규칙 점검 결과·LLM 대안 판단·재계획 여부 판단 과정을 남긴다
+RULE_SECTION = "동작 · 규칙 점검"
+ALT_SECTION = "동작 · 대안 근거 판단 (LLM)"
+DECIDE_SECTION = "동작 · 재계획 판단"
 
 
 @dataclass
@@ -99,23 +104,44 @@ class VerifierAgent(BaseAgent[VerifierOutput]):
         self.last_usage = None
         if state.simulation is None:
             return decide([Issue("area_path_missing", "Simulator 결과가 없어 점검하지 못함", blocking=False)], [])
-        issues = (area_path_missing(state) + evidence_missing(state) + cross_domain_link(state)
-                  + redundant_path(state) + self._alternative_basis(state) + reanalysis_coverage(state))
+        head = area_path_missing(state) + evidence_missing(state) + cross_domain_link(state) + redundant_path(state)
+        tail = reanalysis_coverage(state)
+        rule_issues = head + tail
+        for kind in CHECK_ORDER:
+            if kind == "alternative_basis":
+                continue
+            found = [i for i in rule_issues if i.check == kind]
+            if not found:
+                trace("이상 없음", section=RULE_SECTION, label=kind)
+            for i in found:
+                trace(("보완 필요: " if i.blocking else "경고: ") + clip(i.note, 220) + (f" → 추가 범위 {i.scope}" if i.scope else ""),
+                      section=RULE_SECTION, label=kind)
+        issues = head + self._alternative_basis(state) + tail  # 사유 순서는 이전과 같게 (재계획 사유 문자열)
         return decide(issues, state.replan_feedback)
 
     def _alternative_basis(self, state: AgentState) -> list[Issue]:
         areas = state.simulation.area_impacts
         issues = [Issue("alternative_basis", f"[{a.area.value}] hard 판정인데 대안이 없음", a.area, [f"area:{a.area.value}"])
                   for a in areas if a.feasibility is Feasibility.HARD and not a.alternatives]
+        for i in issues:
+            trace(f"보완 필요: {i.note}", section=ALT_SECTION, label="규칙")
         valid = {(a.area, i) for a in areas for i in range(len(a.alternatives))}
         if not valid or self.llm is None:
+            trace("Simulator 대안 없음 → LLM 판단 생략" if not valid else "LLM 없음 → 대안 유무만 규칙 점검", section=ALT_SECTION, label="생략")
             return issues
+        trace(f"대안 {len(valid)}건 · 경로 노드·근거 요약과 대조 → VerifierDraft (Structured Output)", section=ALT_SECTION, label="입력")
         try:
             draft, self.last_usage = self.llm.parse(self.system_prompt, alternatives_message(state), VerifierDraft)
         except LLM_FAILURES as exc:  # LLM 실패 시 대안 유무만 규칙 점검
+            trace(f"실패 → 대안 근거 점검 생략 (경고): {clip(exc, 150)}", section=ALT_SECTION, label="대체")
             return issues + [Issue("alternative_basis", f"LLM 판단 실패로 대안 근거 점검 생략: {exc}", blocking=False)]
         for j in draft.judgements:
-            if not j.has_basis and (j.area, j.index) in valid:
+            if (j.area, j.index) not in valid:
+                trace(f"{j.area.value} 대안 {j.index + 1} — 입력에 없는 대안이라 무시", section=ALT_SECTION, label="무시")
+                continue
+            trace(f"{j.area.value} 대안 {j.index + 1}: {'근거 있음' if j.has_basis else '근거 부족 → 보완 필요'} — {clip(j.note, 220)}",
+                  section=ALT_SECTION, label="판단")
+            if not j.has_basis:
                 issues.append(Issue("alternative_basis", f"[{j.area.value}] 대안 {j.index + 1} 근거 부족: {j.note}", j.area,
                                     [f"area:{j.area.value}"]))
         return issues
@@ -276,6 +302,8 @@ def decide(issues: list[Issue], feedback: list[ReplanFeedback]) -> VerifierOutpu
     checks, reasons, scope = [], [], []
     for i in issues:
         repeated = i.blocking and any(i.note in r for r in past)
+        if repeated:
+            trace(f"{clip(i.note, 200)} → 이전 재계획에도 같은 사유라 재계획하지 않고 분석 한계로 넘김", section=DECIDE_SECTION, label="반복")
         if i.blocking and not repeated:
             checks.append(VerifyCheck(check=i.check, area=i.area, result=VerifyResult.NEEDS_SUPPLEMENT, note=i.note))
             reasons.append(i.note)
@@ -286,6 +314,8 @@ def decide(issues: list[Issue], feedback: list[ReplanFeedback]) -> VerifierOutpu
     seen = {c.check for c in checks}
     checks += [VerifyCheck(check=k, result=VerifyResult.PASS, note="이상 없음") for k in CHECK_ORDER if k not in seen]
     checks.sort(key=lambda c: CHECK_ORDER.index(c.check))
+    trace(f"보완 필요 {len(reasons)}건 · 경고 {sum(not i.blocking for i in issues)}건 · 반복 {sum(c.note.startswith(REPEATED) for c in checks)}건 → "
+          + ("Supervisor 에 재계획 요청 (한도 안이면 Planner 로)" if reasons else "통과 → Composer"), section=DECIDE_SECTION, label="결정")
     return VerifierOutput(
         result=VerifyResult.NEEDS_SUPPLEMENT if reasons else VerifyResult.PASS,
         checks=checks,

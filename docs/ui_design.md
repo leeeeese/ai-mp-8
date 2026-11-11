@@ -62,8 +62,8 @@ Dribbble "Forge – AI Agent Code Workspace"(라이트) · "AI Knowledge Base Em
 | `ChipSelect` | 칩 모양 네이티브 select |
 | `Badge`, `ConfidenceBadge` | 상태 배지, 근거 `● 확인` / `◐ 추정` |
 | `Layout`, `Sidebar`, `ThemeToggle` | 공통 레이아웃, 사이드바(메뉴·세션 트리·master 대비 카드·mock 사용자), 해/달 테마 토글 |
-| `AgentProgress` | Agent 진행 패널 (단계·경과·한도 미터·근거, "실행 로그" 버튼) |
-| `AgentLog` | 상세 실행 로그 모달 (에이전트별 받은 입력 → 동작 → 근거 → 결과, `GET /api/sessions/{id}/logs`) |
+| `AgentProgress` | Agent 진행 패널 (단계·경과·한도 미터·근거, "실행 로그" 버튼, 단계별 상세 로그 펼치기) |
+| `AgentLog` | 상세 실행 로그 모달 (에이전트별 받은 입력 → 동작 → 근거 → 결과, `GET /api/sessions/{id}/logs`). 항목 렌더링 `LogItems` 는 진행 패널의 단계별 펼치기와 공용 |
 | `AnswerCard`, `AreaTable`, `QueryBlock` | 답변 카드, 영역별 판정표, 복사용 확인 쿼리 |
 | `GraphPreview` | Cytoscape 2 hop 그래프 (색 = 공통 역할) |
 | `MasterSyncCard` | 적재 현황 · master 대비 카드 |
@@ -150,7 +150,7 @@ Dribbble "Forge – AI Agent Code Workspace"(라이트) · "AI Knowledge Base Em
 | 답변 카드 (복잡) | Planner 판정 → 분석 과정(접힘) → 요약 결론 → 영역별 판정표(영역 / 영향·경로(노드 ID) / 요청안·대안 가능성·난이도 / 근거 확인·추정) → 확인 필요 N건 → 액션 |
 | 답변 카드 (단순) | 결론 + 근거 표(내용·근거·위치·확인) + **복사 가능한 확인 쿼리**(읽기 전용, 사용자가 직접 실행) |
 | 상세 분석 요청 | 단순 응답에서 상세 분석이 권장되면(`detail_analysis_recommended`) "상세 분석 권장" 박스에 사유(`detail_analysis_reasons`, 노드 ID 포함)를 보여 주고, "상세 분석 요청" 버튼 한 번으로 사유를 `reanalysis` 후속 입력으로 보낸다 → 같은 세션이 복잡 요건으로 다시 돈다. 요청 후·분석 중에는 버튼을 막는다. `reanalysis` 는 입력창 유형 선택에는 없다 ([YJ_agent_design.md](YJ_agent_design.md) 1-1) |
-| Agent 진행 패널 | SSE 로 실시간 갱신. 단계별 대기/진행/완료/생략, 경과 시간, 한도 미터(도구 호출 n/20, Explorer ⇄ Retriever 왕복 n/3, 재계획 n/2, 한도 도달 시 경고색), 근거 목록(노드 ID · 파일 · 라인). `aria-live=polite` |
+| Agent 진행 패널 | SSE 로 실시간 갱신. 단계별 대기/진행/완료/생략, 경과 시간, 한도 미터(도구 호출 n/20, Explorer ⇄ Retriever 왕복 n/3, 재계획 n/2, 한도 도달 시 경고색), 근거 목록(노드 ID · 파일 · 라인). `aria-live=polite`. **단계별 상세 로그**: 단계 이름 앞 ▸ 를 누르면 그 에이전트의 실행 로그(실행 로그 모달과 같은 내용, `agent` 로 거름)를 단계 바로 아래에 펼친다 (최대 16rem, 내부 스크롤, 실행 중인 단계는 새 로그를 따라감). 항상 접힌 채로 시작하고 대기·생략 단계는 펼칠 수 없음. 하나라도 펼쳤을 때만 로그를 불러온다 (실행 중 2초 갱신) |
 | 실행 로그 | 진행 패널의 "실행 로그" 버튼 → 모달. 에이전트마다 받은 입력 → 동작 → 근거 → 결과를 라운드 누적으로 보여 주고, 분석 중이면 이어서 갱신 (`AgentLog`, 백엔드 `outputs/logs/<세션 8자>.log` 와 같은 내용) |
 | 후속 입력 | 유형 칩 `추가 질문 / 조회 결과 입력 / 현업 답변 입력 / 변경 분석 요청`, SM 파트 고정 표시. 분석 중에는 비활성 |
 

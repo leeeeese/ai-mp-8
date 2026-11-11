@@ -61,6 +61,7 @@ from ..schemas import (
 from ..state import AgentState
 from ..templates import render_complex, render_simple
 from ..tools import save_report
+from ..trace import clip, trace
 from .base import BaseAgent
 from .simulator import (
     CHANGE_TAG,
@@ -85,6 +86,11 @@ MAX_DETAIL_REASONS = 5  # 상세 분석 권장 사유 수
 LLM_DETAIL_REASON = "원문에서 변경 요소가 보이나 탐색 신호가 없어 상세 분석은 권장하지 않음 (Agent 판단)"
 NO_TAG_NOTE = "LLM 응답이 없어 노드별 [변경] 표시를 하지 못함 - 공통 모듈·여러 진입점 신호로는 권장 여부를 판단하지 못함"
 MAX_CLAIMS = 10  # 단순 응답 LLM 이 쓰는 근거 문장 수
+# 상세 실행 로그 섹션: LLM 초안 → 코드 검증·조립 과정(버린 것·출처·권장 판단)을 남긴다
+LLM_SECTION = "동작 · LLM 작성"
+GUARD_SECTION = "동작 · 출력 검증 (LLM 초안 → 코드 조립)"
+DETAIL_SECTION = "동작 · 상세 분석 권장 판단"
+CHECKLIST_SECTION = "동작 · 체크리스트 조립"
 
 
 # --- LLM 응답 형식 (Structured Outputs 호환: 기본값 없이 모든 필드 명시) ---------------------
@@ -185,11 +191,14 @@ class ComposerAgent(BaseAgent[ComposerOutput]):
 
     def _draft(self, schema: type[BaseModel], user: str) -> BaseModel | None:
         if self.llm is None:
+            trace("LLM 없음 → 규칙 문구로 작성", section=LLM_SECTION, label="생략")
             return None
+        trace(f"{schema.__name__} (Structured Output, 문장 필드만) · 입력 {len(user):,}자", section=LLM_SECTION, label="입력")
         try:
             draft, self.last_usage = self.llm.parse(self.system_prompt, user, schema)
         except LLM_FAILURES as exc:  # LLM 실패는 규칙 문구로 대체
             self.notes.append(f"LLM 작성 실패로 규칙 문구 사용: {exc}")
+            trace(f"실패 → 규칙 문구로 대체: {clip(exc, 150)}", section=LLM_SECTION, label="대체")
             return None
         return draft
 
@@ -201,19 +210,40 @@ class ComposerAgent(BaseAgent[ComposerOutput]):
         paths = [p for p, _ in build_impact_paths(exp.paths if exp else [], exp.edges if exp else [], evidence)]
         draft: SimpleDraft | None = self._draft(SimpleDraft, simple_message(state, paths))
         if draft is not None:
+            on_path = {h.node for p in paths for h in p.hops}
+            for c in draft.changes:
+                trace(f"{c.node} — {clip(c.impact.strip().removeprefix(CHANGE_TAG).strip(), 220)}"
+                      + ("" if c.node in on_path else " → 경로 밖 노드라 버림"), section=GUARD_SECTION,
+                      label=CHANGE_TAG if c.node in on_path else "버림")
+            trace(f"경로 {len(paths)}개 · 노드 {len(on_path)}개 중 [변경] {len({c.node for c in draft.changes} & on_path)}개, 나머지 [참조]",
+                  section=GUARD_SECTION, label="표시")
             apply_changes(draft.changes, paths)
             paths = changed_first(paths)
+            if len(draft.claims) > MAX_CLAIMS:
+                trace(f"근거 문장 {len(draft.claims)}개 중 앞 {MAX_CLAIMS}개만 사용", section=GUARD_SECTION, label="근거 문장")
         claims = {c.node_id: c.claim for c in draft.claims[:MAX_CLAIMS]} if draft else {}
         reasons, notes = detail_reasons(state, paths)
         if draft is None:  # [변경] 표시가 없으면 노드 신호가 조용히 빠지므로 알린다
             notes.append(NO_TAG_NOTE)
         elif not reasons and draft.detail_analysis_recommended:  # LLM 판단만으로는 권장하지 않음
             notes.append(LLM_DETAIL_REASON)
+        for x in reasons:
+            trace(x, section=DETAIL_SECTION, label="강한 신호")
+        for x in notes:
+            trace(x, section=DETAIL_SECTION, label="약한 신호")
+        llm_said = f"LLM {'권장' if draft and draft.detail_analysis_recommended else '권장 안 함'}" if draft else "LLM 없음"
+        trace(f"강한 신호 {len(reasons)} · 약한 신호 {len(notes)} · {llm_said} → "
+              + ("권장 (강한 신호가 있어서)" if reasons else "권장 안 함 (강한 신호 없음, 약한 신호는 참고로만 표시)"),
+              section=DETAIL_SECTION, label="결정")
+        if draft is not None:
+            raw = [x for x in draft.conclusion_lines if x.strip()]
+            if len(raw) < 3:
+                trace(f"LLM 결론 {len(raw)}줄 → 규칙 문구로 3줄까지 채움", section=GUARD_SECTION, label="결론")
         answer = SimpleAnswer(
             conclusion_lines=fit_lines(draft.conclusion_lines if draft else [], rule_conclusion(state, paths, evidence)),
             impact_paths=paths,
             evidence_table=evidence_rows(ordered_evidence(evidence, paths), claims),
-            check_queries=safe_queries(draft.check_queries) if draft else [],
+            check_queries=safe_queries(draft.check_queries, log=True) if draft else [],
             inquiry_contacts=draft.inquiry_contacts if draft else [],
             analysis_limits=unverified_segments(state, paths) + self.notes,
             detail_analysis_recommended=bool(reasons),
@@ -233,6 +263,21 @@ class ComposerAgent(BaseAgent[ComposerOutput]):
         sim = state.simulation
         base_items = required_checklist(state)
         draft: ComplexDraft | None = self._draft(ComplexDraft, complex_message(state, base_items))
+        extra = [(d.owner, d.question, d.related_area) for d in draft.checklist] if draft else rule_checklist(sim.area_impacts)
+        level, basis = requirement_difficulty(sim.area_impacts)
+        trace(f"요건 전체 난이도 {level.value} ({clip(basis, 120)}) - 코드 계산값을 LLM 에 주고 요약에 그대로 쓰게 함",
+              section=GUARD_SECTION, label="난이도")
+        if draft is None or not draft.summary_conclusion.strip():
+            trace("LLM 요약 없음 → 규칙 요약 (영역·가능 여부·난이도 나열)", section=GUARD_SECTION, label="요약")
+        trace(f"규칙 {len(base_items)}건 (요건 미확정·검토 제외 경로·공유 노드·공통 모듈, LLM 과 무관하게 항상) + "
+              f"{'LLM' if draft else '규칙 대체'} {len(extra)}건", section=CHECKLIST_SECTION, label="출처")
+        for o, q, _ in base_items:
+            trace(clip(q, 200), section=CHECKLIST_SECTION, label=f"규칙 {o.value}")
+        for o, q, _ in extra:
+            trace(clip(q, 200), section=CHECKLIST_SECTION, label=f"{'LLM' if draft else '규칙'} {o.value}")
+        merged = number_checklist(base_items + extra)
+        if dup := len([q for _, q, _ in base_items + extra if q.strip()]) - len(merged):
+            trace(f"같은 질문 {dup}건 제거 → 업무 B-n · 개발 D-n 번호 {len(merged)}건", section=CHECKLIST_SECTION, label="정리")
         report = ComplexReport(
             summary_conclusion=with_flow_note(state, (draft.summary_conclusion.strip() if draft else "") or rule_summary(sim.area_impacts)),
             area_verdicts=area_rows(sim.area_impacts),
@@ -240,8 +285,7 @@ class ComposerAgent(BaseAgent[ComposerOutput]):
             path_details=unique_paths(state),
             analysis_limits=complex_limits(state) + self.notes,
             dropped_paths=sim.dropped_paths,
-            checklist=number_checklist(base_items + (
-                [(d.owner, d.question, d.related_area) for d in draft.checklist] if draft else rule_checklist(sim.area_impacts))),
+            checklist=merged,
         )
         business = [c.question for c in report.checklist if c.owner is ChecklistOwner.BUSINESS]
         return ComposerOutput(
@@ -275,6 +319,10 @@ class ComposerAgent(BaseAgent[ComposerOutput]):
             out.markdown = render_simple(s)
         out.reanalysis_request = (ReanalysisRequest(reason=draft.reason, changed_assumptions=draft.changed_assumptions)
                                   if draft and draft.needs_reanalysis and draft.reason else None)
+        if out.complex_report is not None:
+            trace(f"답변 반영 {', '.join(fu.target_item_ids) or '-'} → 단계 {out.complex_report.stage}", section=GUARD_SECTION, label="체크리스트")
+        trace(f"재분석 필요: {out.reanalysis_request.reason} (바뀐 가정 {out.reanalysis_request.changed_assumptions})"
+              if out.reanalysis_request else "재분석 필요 없음 (답변이 기존 판단을 확정·보완)", section=GUARD_SECTION, label="재분석 판단")
         if out.reanalysis_request:
             out.markdown += (f"\n> 재분석 필요: {out.reanalysis_request.reason} "
                              f"(바뀐 가정: {', '.join(out.reanalysis_request.changed_assumptions) or '-'})\n")
@@ -363,13 +411,19 @@ def evidence_rows(evidence: list[Evidence], claims: dict[str, str]) -> list[Simp
     return rows
 
 
-def safe_queries(queries: list[DraftQuery]) -> list[GuidanceQuery]:
-    """읽기 전용 SELECT 한 문장만 통과 (쓰기·DDL·여러 문장은 버림)."""
+def safe_queries(queries: list[DraftQuery], log: bool = False) -> list[GuidanceQuery]:
+    """읽기 전용 SELECT 한 문장만 통과 (쓰기·DDL·여러 문장은 버림). log 면 통과·버림을 실행 로그에 남긴다."""
     out = []
     for q in queries:
         sql = q.sql.strip().rstrip(";").strip()
         if re.match(r"(select|with)\b", sql, re.IGNORECASE) and ";" not in sql and not WRITE_SQL.search(sql):
             out.append(GuidanceQuery(purpose=q.purpose, sql=sql))
+            if log:
+                trace(f"{clip(q.purpose, 80)}: {clip(sql, 160)}", section=GUARD_SECTION, label="쿼리 통과")
+        elif log:
+            why = ("쓰기·DDL 키워드 " + WRITE_SQL.search(sql).group(0) if WRITE_SQL.search(sql)
+                   else "여러 문장" if ";" in sql else "SELECT 로 시작하지 않음")
+            trace(f"{clip(q.purpose, 80)}: {clip(sql, 120)} → 버림 ({why})", section=GUARD_SECTION, label="쿼리 차단")
     return out
 
 

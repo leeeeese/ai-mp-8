@@ -4,12 +4,14 @@
   ProgressAgent 로 감싸 실행 시작·완료 때 AgentEvent(frontend AgentEvent 모양)를 남긴다. last_usage 등은 그대로 넘긴다.
 - Supervisor 하나를 공유한다 (세션 기억 = checkpointer). 분석은 한 번에 하나씩 (PoC, 순서 보장).
 - 상세 실행 로그: 에이전트 완료 요약(agent_log.py)과 진행 중 로그(trace.py: 라우팅·tool·LLM·ReAct)를 세션 로그로 모은다.
-  터미널 · 세션 로그 파일(outputs/logs/<세션 8자>.log) · GET /api/sessions/{id}/logs 에 같은 내용.
+  세션 로그 파일(outputs/logs/<세션 8자>.log) · GET /api/sessions/{id}/logs 에 같은 내용. 터미널은 진행 요약만,
+  AGENT_LOG=full 이면 터미널에도 전체 블록 (시연·발표용: 받은 입력 → 동작(LLM 판정·ReAct·규칙 보정) → 근거 → 결과).
 - KPI 기록·관리 데이터는 JSON 파일에 쌓는다 (세션·분석 결과는 메모리, 서버를 다시 띄우면 사라짐).
 """
 
 import json
 import logging
+import os
 import threading
 import time
 from collections.abc import Callable
@@ -29,6 +31,13 @@ Emit = Callable[[dict], None]
 Log = Callable[..., None]  # SessionRecord.log
 console = logging.getLogger("impact_agent.console")  # 터미널 진행 출력 (uvicorn 머리표 없이, 에이전트 시작·끝·라우팅만)
 console.propagate = False
+
+
+def full_console() -> bool:
+    """터미널에도 전체 로그를 찍는지 (AGENT_LOG=full). .env 를 앱 시작 때 읽으므로 import 시점이 아니라 출력 때 본다."""
+    return os.environ.get("AGENT_LOG", "").strip().lower() == "full"
+
+
 if not console.handlers:
     console.addHandler(logging.StreamHandler())
     console.setLevel(logging.INFO)
@@ -180,9 +189,9 @@ class SessionRecord:
         self.logs.append(entry)
         if kind == "open":
             self._title = text
-        for line in render_brief(entry, self._title):
-            console.info(line)
         lines, self._section = render(entry, self._section)
+        for line in (lines if full_console() else render_brief(entry, self._title)):
+            console.info(line)
         if self.log_path is not None:
             self.log_path.parent.mkdir(parents=True, exist_ok=True)
             with open(self.log_path, "a", encoding="utf-8") as f:
