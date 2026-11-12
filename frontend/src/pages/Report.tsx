@@ -1,7 +1,7 @@
 import { ArrowLeft, Check, Copy, FileDown, Loader2, Mail, RefreshCw, Send } from 'lucide-react';
 import { useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router-dom';
-import { useAnswerChecklist, useDownloadOutput, useMailDraft, useReport, useSession, useSessions } from '@/api/client';
+import { errorText, useAnswerChecklist, useDownloadOutput, useMailDraft, useReport, useSession, useSessions } from '@/api/client';
 import {
   DIFFICULTY_LABEL,
   FEASIBILITY_LABEL,
@@ -33,7 +33,7 @@ export function Report() {
   const { id = '' } = useParams();
   const [version, setVersion] = useState<number | undefined>();
   const { data: session } = useSession(id);
-  const { data: report, isLoading } = useReport(id, version);
+  const { data: report, isLoading, error: reportError } = useReport(id, version);
   const { data: sessions = [] } = useSessions();
   const { can, smParts } = useAuth();
   const navigate = useNavigate();
@@ -46,7 +46,17 @@ export function Report() {
     (s) => s.complexity === 'complex' && s.status === 'done',
   );
 
-  if (isLoading || !report) return <PageHeader title="결과물" />;
+  if (isLoading || !report)
+    return (
+      <>
+        <PageHeader title="결과물" />
+        {reportError && (
+          <p className="p-4 text-sm text-muted md:p-6" role="alert">
+            결과물을 불러오지 못했습니다: {errorText(reportError)}
+          </p>
+        )}
+      </>
+    );
   const current = version ?? report.version;
   const unconfirmed = report.checklist.filter((c) => c.status === 'unconfirmed').length;
   const done = report.checklist.length - unconfirmed;
@@ -58,7 +68,7 @@ export function Report() {
       { kind },
       {
         onSuccess: (got) => setNotice(got === 'md' ? 'PDF 변환을 할 수 없는 환경이라 Markdown(.md)으로 저장했습니다.' : null),
-        onError: (e) => setNotice(`저장하지 못했습니다: ${(e as Error).message}`),
+        onError: (e) => setNotice(`저장하지 못했습니다: ${errorText(e)}`),
       },
     );
   };
@@ -193,7 +203,15 @@ export function Report() {
                 ))}
             </section>
           ))}
-          <p className="text-[11px] leading-relaxed text-muted">답변은 결과물에 반영되어 회신 메일 초안(확정 사항)과 개발 전달용 정리본에 들어갑니다.</p>
+          {unconfirmed === 0 && report.checklist.length > 0 ? (
+            <button type="button" className="btn-primary justify-center" disabled={!can('report') || running || busy('handover')} onClick={() => save('handover')}>
+              {busy('handover') ? <Loader2 size={16} className="animate-spin" /> : <Send size={16} />} 모두 확정 · 개발 전달용 정리본 받기
+            </button>
+          ) : null}
+          <p className="text-[11px] leading-relaxed text-muted">
+            답변을 입력하고 저장하면 그 항목이 확정되고 결과물에 반영됩니다 (몇 초 걸림). 답변 없이 확정하려면 왼쪽 동그라미를 누르세요. 확정한 답변은 회신
+            메일 초안(확정 사항)과 개발 전달용 정리본에 들어갑니다.
+          </p>
         </aside>
       </div>
 
@@ -212,7 +230,7 @@ function MailPanel({ mail }: { mail: ReturnType<typeof useMailDraft> }) {
         <Loader2 size={16} className="animate-spin" /> 체크리스트 답변을 반영해 초안을 작성하는 중…
       </p>
     );
-  if (mail.isError) return <p className="text-sm text-muted">초안을 만들지 못했습니다: {(mail.error as Error).message}</p>;
+  if (mail.isError) return <p className="text-sm text-muted">초안을 만들지 못했습니다: {errorText(mail.error)}</p>;
   if (!mail.data) return null;
   const text = `제목: ${mail.data.subject}\n\n${mail.data.body}`;
   return (
@@ -252,18 +270,20 @@ function ChecklistRow({ sessionId, item, highlight, editable }: { sessionId: str
   const save = useAnswerChecklist(sessionId);
   const [answer, setAnswer] = useState(item.answer ?? '');
   const confirmed = item.status === 'confirmed';
+  const pending = save.isPending;
+  const dirty = answer.trim() !== (item.answer ?? '').trim();
   return (
-    <div className={cn('rounded-chip border border-border bg-surface-2 p-3', highlight && item.changed && 'border-[color:var(--accent)]')}>
+    <div className={cn('rounded-chip border border-border bg-surface-2 p-3', highlight && item.changed && 'border-[color:var(--accent)]')} aria-busy={pending}>
       <div className="flex items-start gap-2">
         <button
           type="button"
-          disabled={!editable}
+          disabled={!editable || pending}
           onClick={() => save.mutate({ itemId: item.id, answer, status: confirmed ? 'unconfirmed' : 'confirmed' })}
           className={cn('mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border', confirmed ? 'border-transparent bg-accent text-accent-fg' : 'border-border')}
           aria-label={confirmed ? '미확정으로 되돌리기' : '확정으로 표시'}
           aria-pressed={confirmed}
         >
-          {confirmed && <Check size={14} />}
+          {pending ? <Loader2 size={14} className="animate-spin" /> : confirmed && <Check size={14} />}
         </button>
         <div className="min-w-0 flex-1">
           <p className="text-sm leading-snug">{item.question}</p>
@@ -283,11 +303,24 @@ function ChecklistRow({ sessionId, item, highlight, editable }: { sessionId: str
         <label className="sr-only" htmlFor={`ans-${item.id}`}>
           답변
         </label>
-        <input id={`ans-${item.id}`} className="input py-1.5" placeholder="답변 입력" value={answer} disabled={!editable} onChange={(e) => setAnswer(e.target.value)} />
-        <button type="submit" className="btn min-h-[34px] px-3 text-xs" disabled={!editable || !answer.trim()}>
-          저장
+        <input
+          id={`ans-${item.id}`}
+          className="input py-1.5"
+          placeholder="답변 입력"
+          value={answer}
+          disabled={!editable || pending}
+          onChange={(e) => setAnswer(e.target.value)}
+        />
+        <button type="submit" className="btn min-h-[34px] px-3 text-xs" disabled={!editable || pending || !answer.trim() || (confirmed && !dirty)}>
+          {pending ? <Loader2 size={14} className="animate-spin" /> : confirmed && !dirty ? '저장됨' : '저장'}
         </button>
       </form>
+      {pending && <p className="mt-1.5 text-[11px] text-muted">결과물에 반영하는 중… (Composer)</p>}
+      {save.isError && (
+        <p className="mt-1.5 text-[11px] text-warn" role="alert">
+          저장하지 못했습니다: {errorText(save.error)}
+        </p>
+      )}
     </div>
   );
 }

@@ -14,10 +14,11 @@ import logging
 import os
 import threading
 import time
+import uuid
 from collections.abc import Callable
 from copy import deepcopy
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -182,6 +183,30 @@ class SessionRecord:
     finished: bool = False
     state: AgentState | None = None
     cond: threading.Condition = field(default_factory=threading.Condition)
+    save_path: Path | None = None  # 세션 저장 파일 (서버를 다시 띄워도 세션·결과물·체크리스트 답변이 남는다)
+
+    def save(self) -> None:
+        """메타·메시지·상세 로그·분석 상태를 파일에 저장한다 (임시 파일에 쓰고 바꿔 끼워 중간에 끊겨도 깨지지 않게)."""
+        if self.save_path is None:
+            return
+        data = {"meta": self.meta, "messages": self.messages, "logs": self.logs,
+                "state": self.state.model_dump(mode="json") if self.state else None}
+        self.save_path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = self.save_path.with_suffix(".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(self.save_path)
+
+    @classmethod
+    def load(cls, path: Path, log_path: Path | None = None) -> "SessionRecord":
+        """저장한 세션을 되살린다. 분석 중에 서버가 꺼졌던 세션은 중단으로 끝낸다."""
+        data = json.loads(path.read_text(encoding="utf-8"))
+        rec = cls(meta=data["meta"], messages=data["messages"], logs=data["logs"], log_path=log_path, finished=True,
+                  state=AgentState.model_validate(data["state"]) if data.get("state") else None, save_path=path)
+        if rec.meta.get("status") == "running":
+            rec.meta["status"] = "done"
+            rec.messages.append({"id": uuid.uuid4().hex, "role": "agent", "createdAt": datetime.now(UTC).isoformat(),
+                                 "text": "서버가 다시 시작되어 분석이 중단되었습니다. 같은 내용으로 다시 요청해 주세요."})
+        return rec
 
     def log(self, agent: str, text: str, kind: str = "row", section: str | None = None, label: str = "") -> None:
         """로그 한 건을 저장하고, 터미널엔 진행만(agent_log.render_brief), 세션 로그 파일엔 전체 블록(agent_log.render)을 찍는다."""

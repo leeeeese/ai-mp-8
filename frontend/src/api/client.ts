@@ -36,6 +36,20 @@ async function request<T>(url: string, init?: RequestInit): Promise<T> {
 
 const json = (body: unknown) => ({ body: JSON.stringify(body) });
 
+/** API 오류 → 화면 문구. 서버 응답의 detail 을 꺼내고, 세션이 없으면(서버 재시작 전 세션 등) 다시 열라고 안내한다 */
+export function errorText(e: unknown): string {
+  const msg = e instanceof Error ? e.message : String(e);
+  const [, code = '', body = ''] = /^(\d{3}) ?([\s\S]*)$/.exec(msg) ?? [];
+  let detail = body;
+  try {
+    detail = (JSON.parse(body) as { detail?: string }).detail ?? body;
+  } catch {
+    /* 본문이 JSON 이 아님 */
+  }
+  if (code === '404' && detail.includes('세션')) return '세션을 찾을 수 없습니다. 목록에서 세션을 다시 열어 주세요.';
+  return code ? `${detail || '요청 실패'} (${code})` : `서버에 연결하지 못했습니다: ${msg}`;
+}
+
 // --- 세션 ---------------------------------------------------------------------
 
 export const useSessions = () =>

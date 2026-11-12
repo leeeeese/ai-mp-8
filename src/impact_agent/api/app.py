@@ -40,6 +40,7 @@ DEFAULT_KPI_PATH = ROOT / "outputs" / "kpi" / "records.json"
 DEFAULT_RELOAD_PATH = ROOT / "outputs" / "graph" / "reload_requests.json"
 DEFAULT_ADMIN_DIR = ROOT / "outputs" / "admin"
 DEFAULT_LOG_DIR = ROOT / "outputs" / "logs"
+DEFAULT_SESSION_DIR = ROOT / "outputs" / "sessions"
 SM_TO_BACKEND = {"prod": SmPart.PRODUCT, "dbm": SmPart.MARKETING}
 # UI 입력 유형 → 후속 입력 유형. chat(추가 질문)은 대응 유형이 없어 변경 분석(Planner 부터)으로 둔다 (가안)
 KIND_TO_FOLLOWUP = {
@@ -99,9 +100,10 @@ def ground_truth_keys(gt_dir: Path = GT_DIR) -> dict[str, Path]:
 def create_app(supervisor_factory: Callable[[], Any] | None = None, kpi_path: Path = DEFAULT_KPI_PATH,
                gt_dir: Path = GT_DIR, run_in_thread: bool = True, graph_source: Callable[[], GraphSource] = default_source,
                reload_path: Path = DEFAULT_RELOAD_PATH, admin_dir: Path = DEFAULT_ADMIN_DIR,
-               log_dir: Path = DEFAULT_LOG_DIR) -> FastAPI:
+               log_dir: Path = DEFAULT_LOG_DIR, session_dir: Path | None = None) -> FastAPI:
     """앱 생성. 테스트는 supervisor_factory(가짜 에이전트)·kpi_path·admin_dir·log_dir(임시 경로)·run_in_thread=False 를 넘긴다.
-    적재 현황은 graph_source(기본 .env 의 Neo4j, 첫 요청 때 연결)·reload_path(재적재 요청 저장 파일)."""
+    적재 현황은 graph_source(기본 .env 의 Neo4j, 첫 요청 때 연결)·reload_path(재적재 요청 저장 파일).
+    세션은 session_dir(기본 log_dir 옆 sessions/)에 저장하고 앱을 만들 때 되살린다 (서버 재시작·--reload 에도 남음)."""
     if supervisor_factory is None:
         from dotenv import load_dotenv
 
@@ -114,8 +116,21 @@ def create_app(supervisor_factory: Callable[[], Any] | None = None, kpi_path: Pa
     reload_requests = JsonStore(reload_path)
     auth = Auth(admin_dir)
     gt = ground_truth_keys(gt_dir)
+    session_dir = session_dir or log_dir.parent / "sessions"
     sessions: dict[str, SessionRecord] = {}
+    for f in sorted(session_dir.glob("*.json")):
+        try:
+            rec = SessionRecord.load(f, log_dir / f"{f.stem[:8]}.log")
+        except (OSError, ValueError, KeyError) as exc:  # 깨진 파일은 건너뛴다
+            logging.getLogger("uvicorn.error").warning("세션 파일을 읽지 못함 %s: %s", f.name, exc)
+            continue
+        sessions[rec.meta["id"]] = rec
     app = FastAPI(title="Impact Agent API")
+
+    def restored(rec: SessionRecord) -> None:
+        """후속 입력 전에 Supervisor 체크포인트를 저장한 상태로 채운다 (서버를 다시 띄운 뒤에도 이어서 답변·재분석)."""
+        if rec.state is not None:
+            runner.supervisor.restore(rec.meta["id"], rec.state)
 
     def get(session_id: str, user: dict, view: bool = False) -> SessionRecord:
         """세션 조회 + SM 파트 검사. view 는 읽기 전용 경로 (sessions.all 이면 다른 파트도 통과)."""
@@ -170,6 +185,7 @@ def create_app(supervisor_factory: Callable[[], Any] | None = None, kpi_path: Pa
         finally:
             rec.push({"node": "supervisor", "status": "done", "detail": "완료"})
             rec.finish()
+            rec.save()
 
     def start(rec: SessionRecord, fn: Callable[[], AgentState], label: str, intake: list[Row]) -> None:
         rec.start_round()
@@ -194,9 +210,10 @@ def create_app(supervisor_factory: Callable[[], Any] | None = None, kpi_path: Pa
             "id": sid, "title": text[:TITLE_LEN] + ("…" if len(text) > TITLE_LEN else ""), "smPart": req.smPart,
             "inputType": req.inputType, "source": req.source, "starred": False, "status": "running", "createdAt": _now(),
             "agentVersion": _agent_version(), "createdBy": user["name"], "rounds": 0,
-        }, log_path=log_dir / f"{sid[:8]}.log")
+        }, log_path=log_dir / f"{sid[:8]}.log", save_path=session_dir / f"{sid}.json")
         rec.messages.append({"id": uuid.uuid4().hex, "role": "user", "text": text, "createdAt": _now()})
         sessions[sid] = rec
+        rec.save()
         key: AnswerKey | None = load_answer_key(gt[_norm(text)]) if _norm(text) in gt else None
         user_input = UserInput(request_text=text, sm_part=SM_TO_BACKEND[req.smPart], output_options=req.outputOptions)
         start(rec, lambda: runner.supervisor.analyze(user_input, session_id=sid, answer_key=key),
@@ -216,13 +233,15 @@ def create_app(supervisor_factory: Callable[[], Any] | None = None, kpi_path: Pa
         rec.messages.append({"id": uuid.uuid4().hex, "role": "user", "kind": req.kind, "text": req.text, "createdAt": _now()})
         fu = FollowupInput(type=KIND_TO_FOLLOWUP[req.kind], content=req.text)
         intake = followup_rows(user, rec.meta["smPart"], req.kind, fu.type.value, req.text, rec.state, fu.type not in COMPOSER_FOLLOWUPS)
-        start(rec, lambda: runner.supervisor.followup(session_id, fu), f'후속 입력 {fu.type.value} · {user["name"]}', intake)
+        start(rec, lambda: (restored(rec), runner.supervisor.followup(session_id, fu))[1], f'후속 입력 {fu.type.value} · {user["name"]}',
+              intake)
         return view(rec)
 
     @app.post("/api/sessions/{session_id}/star")
     def toggle_star(session_id: str, user: dict = Depends(auth.current_user)) -> dict:
         rec = get(session_id, user, view=True)
         rec.meta["starred"] = not rec.meta["starred"]
+        rec.save()
         return summary(rec)
 
     @app.get("/api/sessions/{session_id}/report")
@@ -248,14 +267,16 @@ def create_app(supervisor_factory: Callable[[], Any] | None = None, kpi_path: Pa
             kind = FollowupType.BUSINESS_ANSWER if item.owner is ChecklistOwner.BUSINESS else FollowupType.DEVELOPER_OPINION
             fu = FollowupInput(type=kind, content=req.answer, target_item_ids=[item_id])
             rec.log("supervisor", _clip(req.answer), kind="note", label=f"답변 {item_id}")
-            rec.state = runner.run(lambda _e: None, lambda: runner.supervisor.followup(session_id, fu), rec.log)
+            rec.state = runner.run(lambda _e: None, lambda: (restored(rec), runner.supervisor.followup(session_id, fu))[1], rec.log)
         else:  # 답변 없이 확정 표시 · 미확정으로 되돌리기: 결과물만 고치고 단계를 다시 매긴 뒤 세션 상태에 저장
             item.status, item.answer = ChecklistStatus(req.status), req.answer or item.answer
             done = all(c.status is ChecklistStatus.CONFIRMED for c in report.checklist)
             report.stage = "final_for_dev" if done else "updated"
             rec.state.composer.markdown = render_complex(report)
+            restored(rec)
             runner.supervisor.update_composer(session_id, rec.state.composer)
             rec.log("supervisor", f"{item_id} → {req.status} · 단계 {report.stage}", kind="note", label="체크리스트")
+        rec.save()
         items = rec.state.composer.complex_report.checklist
         c = next(x for x in items if x.item_id == item_id)
         return {"id": c.item_id, "owner": c.owner.value, "question": c.question, "status": c.status.value,
@@ -292,6 +313,7 @@ def create_app(supervisor_factory: Callable[[], Any] | None = None, kpi_path: Pa
         rec = finished(session_id, user)
         mail = composer_call(rec, "회신 메일 초안", lambda c: c.compose_mail(rec.state))
         rec.state.composer.mail_draft = mail
+        rec.save()
         return mail.model_dump()
 
     @app.get("/api/sessions/{session_id}/outputs/report")

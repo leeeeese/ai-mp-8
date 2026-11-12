@@ -98,6 +98,13 @@ class Supervisor:
         state.followups = (state.followups + [followup])[-config.MEMORY_WINDOW_N:]
         return self._invoke(state, until, session_id)
 
+    def restore(self, session_id: str, state: AgentState) -> None:
+        """서버 재시작 등으로 체크포인트가 비어 있으면 저장해 둔 상태로 세션을 되살린다 (이미 있으면 그대로)."""
+        graph = self._graph(None)
+        config = self._config(session_id)
+        if not graph.get_state(config).values:
+            graph.update_state(config, _updates(state), as_node="KPI")
+
     def update_composer(self, session_id: str, composer: ComposerOutput) -> None:
         """그래프 밖에서 고친 결과물(체크리스트 미확정 되돌리기 등)을 세션 상태에 저장한다. 다음 후속 입력이 이 결과물에서 이어진다."""
         graph = self._graph(None)

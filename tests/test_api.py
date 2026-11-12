@@ -240,3 +240,33 @@ def test_create_session_output_options(tmp_path, gt_dir):
     assert r.status_code == 200
     assert c.post(f"/api/sessions/{r.json()['sessionId']}/outputs/mail").json()["body"].startswith("안녕하세요")
     assert c.get(f"/api/sessions/{r.json()['sessionId']}/outputs/handover").status_code == 404   # 단순 응답엔 정리본 없음
+
+
+def test_sessions_survive_server_restart(tmp_path, gt_dir):
+    """서버를 다시 띄워도(--reload 포함) 세션·체크리스트 답변이 남고, 이어서 답변(후속 입력)·정리본까지 된다."""
+    sid = create(c1 := client(tmp_path, gt_dir))
+    items = c1.get(f"/api/sessions/{sid}/report").json()["checklist"]
+    c1.patch(f"/api/sessions/{sid}/checklist/{items[0]['id']}", json={"answer": "재시작 전 답변", "status": "confirmed"})
+    c1.post(f"/api/sessions/{sid}/star")
+
+    c2 = client(tmp_path, gt_dir)                                  # 새 앱 = 새 Supervisor (체크포인트 비어 있음)
+    assert [s["id"] for s in c2.get("/api/sessions").json()] == [sid] and c2.get(f"/api/sessions/{sid}").json()["starred"]
+    report = c2.get(f"/api/sessions/{sid}/report").json()
+    assert report["checklist"][0]["answer"] == "재시작 전 답변" and report["stage"] == "updated"
+
+    r = c2.patch(f"/api/sessions/{sid}/checklist/{items[1]['id']}", json={"answer": "재시작 후 답변", "status": "confirmed"})
+    assert r.status_code == 200 and r.json()["answer"] == "재시작 후 답변"   # 저장한 상태로 체크포인트를 되살려 후속 입력
+    for i in items[2:]:
+        c2.patch(f"/api/sessions/{sid}/checklist/{i['id']}", json={"status": "confirmed"})
+    r = client(tmp_path, gt_dir).get(f"/api/sessions/{sid}/outputs/handover", params={"format": "md"})   # 한 번 더 재시작
+    assert r.status_code == 200 and "재시작 전 답변" in r.text and "재시작 후 답변" in r.text
+
+
+def test_session_interrupted_by_restart_is_closed(tmp_path, gt_dir):
+    from impact_agent.api.runner import SessionRecord
+    path = tmp_path / "sessions" / "abc.json"
+    SessionRecord(meta={"id": "abc", "title": "t", "smPart": "dbm", "inputType": "requirement", "source": "mail",
+                        "starred": False, "status": "running", "createdAt": "2026-11-12T00:00:00+00:00", "rounds": 1},
+                  save_path=path).save()
+    s = client(tmp_path, gt_dir).get("/api/sessions/abc").json()
+    assert s["status"] == "done" and "다시 시작되어 분석이 중단" in s["messages"][-1]["text"]
