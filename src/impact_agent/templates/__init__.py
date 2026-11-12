@@ -20,3 +20,9 @@ def render_simple(answer: SimpleAnswer) -> str:
 
 def render_complex(report: ComplexReport) -> str:
     return _env.get_template("complex_report.md.j2").render(report=report)
+
+
+def render_handover(report: ComplexReport, request_text: str, target: str | None,
+                    changes: list[tuple[str, str, str | None]]) -> str:
+    """개발 전달용 정리본 (체크리스트 전부 확정 후)."""
+    return _env.get_template("handover.md.j2").render(report=report, request_text=request_text, target=target, changes=changes)

@@ -1,0 +1,52 @@
+# 개발 전달용 정리본{% if target %} · {{ target }}{% endif %}
+
+- 단계: {{ report.stage }} (체크리스트 {{ report.checklist | length }}건 전부 확정)
+- 요청 원문: {{ request_text }}
+
+## 요약 결론
+{{ report.summary_conclusion }}
+
+## 확정 사항 (체크리스트 답변)
+| ID | 담당 | 질문 | 확정 답변 |
+|---|---|---|---|
+{% for c in report.checklist %}
+| {{ c.item_id }} | {{ c.owner.value }} | {{ c.question }} | {{ c.answer or "확정 (답변 없음)" }} |
+{% endfor %}
+
+## 수정 대상 노드
+{% for node, impact, ref in changes %}
+- `{{ node }}` — {{ impact }}{% if ref %} [`{{ ref }}`]{% endif %}
+
+{% else %}
+- [변경] 표시 노드 없음 (경로 상세 확인)
+{% endfor %}
+
+## 영역별 판정
+| 영역 | 영향 경로 | 가능성 | 난이도 | 대안 | 확신도 |
+|---|---|---|---|---|---|
+{% for r in report.area_verdicts %}
+| {{ r.area.value }} | {{ r.impact_path_summary }} | {{ r.feasibility.value }} | {{ r.difficulty.value }} | {{ r.alternative or "-" }} | {{ r.confidence.value }} |
+{% endfor %}
+
+## 일정 영향 요인
+{% for f in report.schedule_factors %}
+- {{ f }}
+{% else %}
+- 없음
+{% endfor %}
+
+## 경로 상세
+{% for p in report.path_details %}
+### {{ p.path_id }}{% if p.cross_domain %} (도메인 연계){% endif %}
+
+{% for h in p.hops %}
+{{ loop.index }}. {{ h.node }} → {{ h.relation }} → {{ h.impact }}{% if h.evidence_ref %} [`{{ h.evidence_ref }}`]{% endif %} ({{ h.confidence.value }})
+{% endfor %}
+{% endfor %}
+
+## 분석 한계
+{% for l in report.analysis_limits %}
+- {{ l }}
+{% else %}
+- 없음
+{% endfor %}

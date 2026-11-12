@@ -7,12 +7,15 @@
 - 후속 답변 (Supervisor 가 Composer 로 바로 보냄): 체크리스트 답변 반영·stage 갱신, 조회 결과 요약,
   답변 때문에 경로가 바뀌어야 하면 reanalysis_request (사용자가 확인 후 reanalysis 후속 입력으로 보냄)
 - 요청 시 (UserInput.output_options): 회신 메일 초안, PDF 저장 (save_report, 실패하면 MD 저장)
+- 분석 후 요청 (API · 결과물 화면 버튼, 그래프 밖에서 바로 호출): compose_mail(회신 메일 초안, 체크리스트 답변 반영),
+  handover_markdown(개발 전달용 정리본, 체크리스트 전부 확정 후), save_output(결과물·정리본 PDF 저장, 실패하면 MD)
 구조화 항목(경로·근거·판정표·분석 한계)은 코드가, 문장(결론·요약·체크리스트 질문·메일)만 LLM 이 쓴다.
 markdown 은 항상 templates/ 로 렌더링한다. LLM 이 없거나 실패하면 규칙 문구로 쓴다.
 """
 
 import re
 from collections.abc import Callable
+from typing import Literal
 
 from pydantic import BaseModel, Field
 
@@ -59,7 +62,7 @@ from ..schemas import (
     VerifyResult,
 )
 from ..state import AgentState
-from ..templates import render_complex, render_simple
+from ..templates import render_complex, render_handover, render_simple
 from ..tools import save_report
 from ..trace import clip, trace
 from .base import BaseAgent
@@ -91,6 +94,7 @@ LLM_SECTION = "동작 · LLM 작성"
 GUARD_SECTION = "동작 · 출력 검증 (LLM 초안 → 코드 조립)"
 DETAIL_SECTION = "동작 · 상세 분석 권장 판단"
 CHECKLIST_SECTION = "동작 · 체크리스트 조립"
+OUTPUT_SECTION = "동작 · 결과물 요청 (메일·저장·정리본)"
 
 
 # --- LLM 응답 형식 (Structured Outputs 호환: 기본값 없이 모든 필드 명시) ---------------------
@@ -333,17 +337,62 @@ class ComposerAgent(BaseAgent[ComposerOutput]):
     def _save_pdf(self, state: AgentState, out: ComposerOutput) -> None:
         if "pdf" not in state.user_input.output_options:
             return
+        out.report_file_path, note = self._try_pdf(out.markdown)
+        if note is None:
+            return
+        if out.complex_report is not None:  # 저장 실패 사유를 결과물 분석 한계에 남기고 MD 로 저장
+            out.complex_report.analysis_limits.append(note)
+            out.markdown = render_complex(out.complex_report)
+        elif out.simple_answer is not None:
+            out.simple_answer.analysis_limits.append(note)
+            out.markdown = render_simple(out.simple_answer)
+        out.report_file_path = self.saver(SaveReportInput(content=out.markdown, format="md")).file_path
+
+    def _try_pdf(self, markdown: str) -> tuple[str | None, str | None]:
+        """PDF 저장 → (경로, None). 변환 패키지·폰트가 없으면 (None, 사유)."""
         try:
-            out.report_file_path = self.saver(SaveReportInput(content=out.markdown, format="pdf")).file_path
-        except (ImportError, OSError, NotImplementedError) as exc:  # 변환 패키지·폰트가 없으면 MD 로 저장
-            note = f"PDF 변환 불가로 MD 로 저장: {exc}"
-            if out.complex_report is not None:
-                out.complex_report.analysis_limits.append(note)
-                out.markdown = render_complex(out.complex_report)
-            elif out.simple_answer is not None:
-                out.simple_answer.analysis_limits.append(note)
-                out.markdown = render_simple(out.simple_answer)
-            out.report_file_path = self.saver(SaveReportInput(content=out.markdown, format="md")).file_path
+            return self.saver(SaveReportInput(content=markdown, format="pdf")).file_path, None
+        except (ImportError, OSError, NotImplementedError) as exc:
+            note = f"PDF 변환 불가로 MD 로 저장: {clip(exc, 160)}"
+            trace(note, section=OUTPUT_SECTION, label="저장")
+            return None, note
+
+    # --- 분석 후 요청 (API: 회신 메일 초안 · 결과물 저장 · 개발 전달용 정리본) ------------------------
+
+    def save_output(self, markdown: str, fmt: Literal["pdf", "md"] = "pdf") -> tuple[str, str | None]:
+        """markdown 을 저장하고 (경로, PDF 실패 사유) 를 돌려준다. PDF 변환이 안 되면 MD 로 저장한다."""
+        if fmt == "pdf":
+            path, note = self._try_pdf(markdown)
+            if path is not None:
+                return path, None
+            return self.saver(SaveReportInput(content=markdown, format="md")).file_path, note
+        return self.saver(SaveReportInput(content=markdown, format="md")).file_path, None
+
+    def compose_mail(self, state: AgentState) -> MailDraft:
+        """분석이 끝난 세션의 회신 메일 초안 (output_options 와 무관하게 요청 시). 체크리스트 답변까지 반영한다.
+        LLM 은 제목·본문 문장만 쓰고, 없거나 실패하면 규칙 문구로 쓴다."""
+        self.last_usage, self.notes = None, []
+        if state.composer is None:
+            raise ValueError("Composer 결과가 없습니다")
+        draft: DraftMail | None = self._draft(DraftMail, mail_message(state))
+        if draft is not None and draft.subject.strip() and draft.body.strip():
+            trace("LLM 초안 사용", section=OUTPUT_SECTION, label="회신 메일")
+            return MailDraft(subject=draft.subject.strip(), body=draft.body.strip())
+        trace("규칙 문구 사용 (결론 → 영향 영역 → 확정 사항 → 확인 요청)", section=OUTPUT_SECTION, label="회신 메일")
+        return rule_mail(state, *mail_parts(state))
+
+    def handover_markdown(self, state: AgentState) -> str:
+        """개발 전달용 정리본 (복잡 요건, 체크리스트 전부 확정 후). 확정 답변 · 수정 대상 노드 · 판정 · 경로를 코드로 정리한다."""
+        report = state.composer.complex_report if state.composer else None
+        if report is None:
+            raise ValueError("복잡 요건 결과물이 없습니다")
+        if open_ := [c.item_id for c in report.checklist if c.status is not ChecklistStatus.CONFIRMED]:
+            raise ValueError(f"미확정 항목이 남아 있습니다: {', '.join(open_)}")
+        changes = change_targets(report.path_details)
+        trace(f"확정 답변 {len(report.checklist)}건 · 수정 대상 노드 {len(changes)}개 · 경로 {len(report.path_details)}개",
+              section=OUTPUT_SECTION, label="정리본")
+        return render_handover(report, request_text=state.user_input.request_text.strip(),
+                               target=state.planner.structured_request.target if state.planner else None, changes=changes)
 
 
 # --- 구조화 항목 (코드) ----------------------------------------------------------------------------
@@ -606,19 +655,48 @@ def number_checklist(items: list[tuple[ChecklistOwner, str, Area | None]]) -> li
 
 def mail_draft(state: AgentState, draft: DraftMail | None, conclusion: list[str], rows: list[AreaVerdictRow],
                business: list[str]) -> MailDraft | None:
-    """회신 메일 초안 (요청 시). 결론 → 영향 영역 → 확인 요청 순서. 수신자는 비워 둔다."""
+    """회신 메일 초안 (분석 시작 때 output_options 로 요청한 경우). 결론 → 영향 영역 → 확인 요청 순서. 수신자는 비워 둔다."""
     if "mail_draft" not in state.user_input.output_options:
         return None
     if draft is not None:
         return MailDraft(subject=draft.subject, body=draft.body)
+    return rule_mail(state, conclusion, rows, business, [])
+
+
+def rule_mail(state: AgentState, conclusion: list[str], rows: list[AreaVerdictRow], business: list[str],
+              answered: list[ChecklistItem]) -> MailDraft:
+    """규칙 문구 메일: 결론 → 영향 영역 → 확정 사항(체크리스트 답변) → 확인 요청(미확정 업무 항목)."""
     target = state.planner.structured_request.target if state.planner else state.user_input.request_text.strip()[:40]
     lines = ["안녕하세요.", "", "요청하신 건의 영향도 분석 결과를 공유드립니다.", "", "[결론]"] + [f"- {x}" for x in conclusion]
     if rows:
         lines += ["", "[영향 영역]"] + [f"- {r.area.value}: {r.feasibility.value} / {r.difficulty.value}" for r in rows]
+    if answered:
+        lines += ["", "[확정 사항]"] + [f"- {c.question} → {c.answer}" for c in answered]
     if business:
         lines += ["", "[확인 요청]"] + [f"- {q}" for q in business]
     lines += ["", "감사합니다."]
     return MailDraft(subject=f"[영향도 분석] {target}", body="\n".join(lines))
+
+
+def mail_parts(state: AgentState) -> tuple[list[str], list[AreaVerdictRow], list[str], list[ChecklistItem]]:
+    """지금 결과물 기준 메일 재료: 결론, 영역 판정, 미확정 업무 질문, 답변이 있는 확정 항목."""
+    out = state.composer
+    if out.complex_report is not None:
+        r = out.complex_report
+        business = [c.question for c in r.checklist if c.owner is ChecklistOwner.BUSINESS and c.status is not ChecklistStatus.CONFIRMED]
+        answered = [c for c in r.checklist if c.status is ChecklistStatus.CONFIRMED and c.answer]
+        return [r.summary_conclusion], r.area_verdicts, business, answered
+    return out.simple_answer.conclusion_lines if out.simple_answer else [], [], [], []
+
+
+def change_targets(paths: list[ImpactPath]) -> list[tuple[str, str, str | None]]:
+    """경로 상세에서 [변경] 노드만 (노드, 바뀌는 것, 근거 위치). 노드당 한 번."""
+    seen: dict[str, tuple[str, str, str | None]] = {}
+    for p in paths:
+        for h in p.hops:
+            if h.impact.startswith(CHANGE_TAG) and h.node not in seen:
+                seen[h.node] = (h.node, h.impact.removeprefix(CHANGE_TAG).strip(), h.evidence_ref)
+    return list(seen.values())
 
 
 # --- LLM 입력 ------------------------------------------------------------------------------------
@@ -679,4 +757,16 @@ def followup_message(state: AgentState, fu: FollowupInput) -> str:
         lines += ["", "[요약 결론]", report.summary_conclusion]
     elif state.composer and state.composer.simple_answer:
         lines += ["", "[결론]"] + state.composer.simple_answer.conclusion_lines
+    return "\n".join(lines)
+
+
+def mail_message(state: AgentState) -> str:
+    """분석 후 회신 메일 요청 (compose_mail) LLM 입력."""
+    conclusion, rows, business, answered = mail_parts(state)
+    lines = _request_lines(state)[:-2] + ["", "[출력 요청] mail_draft (분석 후 요청 · 회신 메일만 쓴다)", "", "[결론]"]
+    lines += [f"- {x}" for x in conclusion]
+    if rows:
+        lines += ["", "[영역별 판정] 영역: 가능 여부 / 난이도"] + [f"- {r.area.value}: {r.feasibility.value} / {r.difficulty.value}" for r in rows]
+    lines += ["", "[확정 사항] 질문 → 답변"] + ([f"- {c.item_id} {c.question} → {c.answer}" for c in answered] or ["- 없음"])
+    lines += ["", "[확인 요청] 미확정 업무 질문"] + ([f"- {q}" for q in business] or ["- 없음"])
     return "\n".join(lines)

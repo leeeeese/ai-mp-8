@@ -152,6 +152,8 @@ export function checklistOf(sessionId: string, version: number) {
   const report = reportFor(answer, version);
   const saved = db.checklists[sessionId];
   if (saved) report.checklist = report.checklist.map((c) => saved.find((x) => x.id === c.id) ?? c);
+  const allDone = report.checklist.length > 0 && report.checklist.every((c) => c.status === 'confirmed');
+  report.stage = allDone ? 'final_for_dev' : saved || version >= 2 ? 'updated' : 'initial';
   return report;
 }
 

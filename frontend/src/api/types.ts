@@ -31,6 +31,8 @@ export interface CreateSessionRequest {
   source: InputSource;
   text: string;
   files?: string[];
+  /** 분석과 함께 만들 산출물 (분석 후에는 /outputs/* 로 요청) */
+  outputOptions?: ('mail_draft' | 'pdf')[];
 }
 
 export interface SessionSummary {
@@ -154,7 +156,23 @@ export interface Report {
   scheduleFactors: string[];
   limits: string[];
   checklist: ChecklistItem[];
+  /** 백엔드 결과물 단계: 최초 → 답변 반영 → 체크리스트 전부 확정 (개발 전달 가능) */
+  stage?: ReportStage;
 }
+
+export type ReportStage = 'initial' | 'updated' | 'final_for_dev';
+export const STAGE_LABEL: Record<ReportStage, string> = { initial: '최초 분석', updated: '답변 반영', final_for_dev: '개발 전달 가능' };
+
+/** 회신 메일 초안 (POST /api/sessions/{id}/outputs/mail). 수신자는 비워 둔다 */
+export interface MailDraft {
+  to: string[];
+  subject: string;
+  body: string;
+}
+
+/** 파일 산출물: 결과물 저장(report) · 개발 전달용 정리본(handover). PDF 변환이 안 되면 서버가 MD 로 내려준다 */
+export type OutputKind = 'report' | 'handover';
+export type OutputFormat = 'pdf' | 'md';
 
 // --- KPI (개발·운영용 측정, 세션 화면에는 표시하지 않음) -------------------------------------------
 // 백엔드 KpiOutput 과 같은 필드명을 쓴다 (snake_case). 세션 분석이 끝날 때마다 기록 1건 (state.kpi 저장)

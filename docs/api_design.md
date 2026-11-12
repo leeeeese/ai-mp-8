@@ -43,6 +43,9 @@
 | `POST /api/sessions/{id}/star` | 즐겨찾기 토글 | 200 | 404 |
 | `GET /api/sessions/{id}/report` | 복잡 요건 결과물 | 200 | 404 |
 | `PATCH /api/sessions/{id}/checklist/{itemId}` | 체크리스트 답변 → 결과물 갱신 | 200 | 404 · 409 · 422 |
+| `POST /api/sessions/{id}/outputs/mail` | 회신 메일 초안 (체크리스트 답변 반영) | 200 | 404 · 409 |
+| `GET /api/sessions/{id}/outputs/report?format=pdf\|md` | 결과물 파일 저장 (PDF 안 되면 MD) | 200 | 404 · 409 |
+| `GET /api/sessions/{id}/outputs/handover?format=pdf\|md` | 개발 전달용 정리본 (체크리스트 전부 확정 후) | 200 | 404 · 409 |
 | `GET /api/sessions/{id}/stream` | 진행 이벤트 (SSE) | 200 | 404 |
 | `GET /api/sessions/{id}/logs` | 상세 실행 로그 (라운드 누적) | 200 | 404 |
 | `GET /api/kpi/records` | KPI 기록 (최근 순, 자기 SM 파트) | 200 | - |
@@ -155,8 +158,17 @@
 ```
 
 - `confirmed` + 답변 → 항목 owner 에 따라 `business_answer` / `developer_opinion` 후속 입력으로 Composer 가 결과물을 갱신한다 (응답은 갱신이 끝난 뒤).
-- `unconfirmed` → 결과물의 항목 상태만 되돌린다.
+- 답변 없는 `confirmed`(확정 표시) · `unconfirmed` → 결과물의 항목 상태만 고치고 `stage` 를 다시 매긴 뒤 세션 상태(체크포인트)에 저장한다. 다음 답변도 이 상태에서 이어진다.
 - 응답 200: `ChecklistItem { id, owner, question, status, answer? }`.
+- 결과물 응답의 `stage`: `initial` → `updated`(답변 반영) → `final_for_dev`(전부 확정, 개발 전달용 정리본 가능).
+
+**분석 후 산출물** (결과물 화면 버튼, 권한 `report`, 분석 중이면 409, 결과가 없으면 404)
+
+Composer 를 그래프 밖에서 바로 부른다 (Supervisor 공유 잠금, 상세 로그는 세션 로그 `3 Composer` 블록). 분석 시작 때 산출물을 같이 만들려면 `POST /api/sessions` 에 `outputOptions: ["mail_draft", "pdf"]` 를 넣는다 (선택).
+
+- `POST …/outputs/mail` → `MailDraft { to: [], subject, body }`. 결론 → 영향 영역 → 확정 사항(답변 있는 확정 항목) → 확인 요청(미확정 업무 질문). LLM 이 없거나 실패하면 규칙 문구. 요청할 때마다 새로 만든다.
+- `GET …/outputs/report` → 지금 결과물 markdown 을 파일로 내려준다. PDF 변환(weasyprint·pango)이 안 되는 환경이면 MD. 실제 형식은 `X-Output-Format` 헤더.
+- `GET …/outputs/handover` → 개발 전달용 정리본 (확정 사항 · 수정 대상 `[변경]` 노드 · 영역별 판정 · 일정 요인 · 경로 상세 · 분석 한계, `templates/handover.md.j2`). 복잡 요건만 (단순이면 404), 미확정 항목이 있으면 409.
 
 ### 4-2. 진행 SSE (`GET /api/sessions/{id}/stream`)
 

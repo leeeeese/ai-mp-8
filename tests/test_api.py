@@ -183,3 +183,60 @@ def test_trace_goes_nowhere_after_run(tmp_path, gt_dir, caplog):
     create(c)
     trace("실행 밖 로그")
     assert logger.handlers == []
+
+
+def test_outputs_mail_report_and_handover(tmp_path, gt_dir):
+    """분석 후 산출물: 회신 메일 초안(답변 반영) · 결과물 저장(PDF 안 되면 MD) · 전부 확정 후 개발 전달용 정리본."""
+    from impact_agent.schemas import SaveReportOutput
+
+    def saver(p):
+        if p.format == "pdf":
+            raise OSError("PDF 변환 패키지 없음")
+        path = tmp_path / f"out{len(list(tmp_path.glob('out*')))}.md"
+        path.write_text(p.content, encoding="utf-8")
+        return SaveReportOutput(file_path=str(path))
+
+    def factory():
+        sup = fake_supervisor()
+        sup.composer = ComposerAgent(use_llm=False, saver=saver)
+        return sup
+
+    app = create_app(factory, kpi_path=tmp_path / "kpi.json", gt_dir=gt_dir, run_in_thread=False,
+                     admin_dir=tmp_path / "admin", log_dir=tmp_path / "logs", reload_path=tmp_path / "reload.json")
+    c = TestClient(app, headers=as_header())
+    sid = create(c)
+    items = c.get(f"/api/sessions/{sid}/report").json()["checklist"]
+    business = items[0]
+
+    # 답변 → 메일에 확정 사항(질문 → 답변)으로 들어간다
+    c.patch(f"/api/sessions/{sid}/checklist/{business['id']}", json={"answer": "신규 건만 적용", "status": "confirmed"})
+    mail = c.post(f"/api/sessions/{sid}/outputs/mail").json()
+    assert mail["subject"].startswith("[영향도 분석]") and "[확정 사항]" in mail["body"] and "신규 건만 적용" in mail["body"]
+
+    r = c.get(f"/api/sessions/{sid}/outputs/report")                      # PDF 실패 → MD 로 내려줌
+    assert r.status_code == 200 and r.headers["x-output-format"] == "md" and "# 영향도 분석 보고서" in r.text
+
+    assert c.get(f"/api/sessions/{sid}/outputs/handover").status_code == 409   # 미확정 남음
+    for i in items:
+        if i["id"] != business["id"]:
+            c.patch(f"/api/sessions/{sid}/checklist/{i['id']}", json={"status": "confirmed"})   # 답변 없이 확정 표시
+    assert c.get(f"/api/sessions/{sid}/report").json()["stage"] == "final_for_dev"
+    r = c.get(f"/api/sessions/{sid}/outputs/handover", params={"format": "md"})
+    assert r.status_code == 200 and "# 개발 전달용 정리본" in r.text and "신규 건만 적용" in r.text
+
+    # 미확정으로 되돌리면 단계가 내려가고, 다음 답변(후속 입력)도 그 상태에서 이어진다
+    c.patch(f"/api/sessions/{sid}/checklist/{items[-1]['id']}", json={"status": "unconfirmed"})
+    assert c.get(f"/api/sessions/{sid}/report").json()["stage"] == "updated"
+    c.patch(f"/api/sessions/{sid}/checklist/{business['id']}", json={"answer": "기존 건도 적용", "status": "confirmed"})
+    report = c.get(f"/api/sessions/{sid}/report").json()
+    assert report["stage"] == "updated" and next(i for i in report["checklist"] if i["id"] == items[-1]["id"])["status"] == "unconfirmed"
+    assert c.get(f"/api/sessions/{sid}/outputs/handover").status_code == 409
+
+
+def test_create_session_output_options(tmp_path, gt_dir):
+    c = client(tmp_path, gt_dir, complexity=Complexity.SIMPLE)
+    r = c.post("/api/sessions", json={"smPart": "dbm", "inputType": "requirement", "source": "mail", "text": "단순 요청",
+                                      "outputOptions": ["mail_draft"]})
+    assert r.status_code == 200
+    assert c.post(f"/api/sessions/{r.json()['sessionId']}/outputs/mail").json()["body"].startswith("안녕하세요")
+    assert c.get(f"/api/sessions/{r.json()['sessionId']}/outputs/handover").status_code == 404   # 단순 응답엔 정리본 없음

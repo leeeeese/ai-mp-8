@@ -82,6 +82,7 @@ def report_view(state: AgentState) -> dict | None:
     return {
         "version": 1,
         "versions": [{"version": 1, "label": f"v1 ({r.stage})"}],
+        "stage": r.stage,
         "feasibility": feas.value,
         "difficulty": level.value,
         "scheduleUncertainty": uncertainty,

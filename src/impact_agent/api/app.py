@@ -1,7 +1,7 @@
 """FastAPI 앱. 실행: uvicorn impact_agent.api.app:app --reload --port 8000 (프론트는 Vite 프록시로 /api 를 여기로 보낸다)
 
 경로·응답은 목업(frontend/src/mocks/handlers.ts)과 같다. 구현한 것: 세션(목록·생성·조회·후속 입력·즐겨찾기·결과물·
-체크리스트 답변·진행 SSE·상세 로그), KPI 기록(조회·초기화). 적재 현황(/api/graph/*, api/graph.py). 관리(권한)(/api/admin/*, api/auth.py).
+체크리스트 답변·진행 SSE·상세 로그·분석 후 산출물(회신 메일 초안·결과물 저장·개발 전달용 정리본)), KPI 기록(조회·초기화). 적재 현황(/api/graph/*, api/graph.py). 관리(권한)(/api/admin/*, api/auth.py).
 - 모든 경로는 사용자 필요 (X-User, api/auth.py). 권한·SM 파트 위반은 403.
 - 분석은 백그라운드 스레드에서 Supervisor 로 돌고, 진행은 /stream (SSE) 으로 받는다.
 - 요청 문장이 정답셋(eval/ground_truth)의 request_text 와 같으면 정답을 붙여 KPI 품질·판정 지표까지 계산한다.
@@ -19,13 +19,14 @@ from pathlib import Path
 from typing import Any, Literal
 
 from fastapi import Depends, FastAPI, HTTPException
-from fastapi.responses import StreamingResponse
+from fastapi.responses import FileResponse, StreamingResponse
 from pydantic import BaseModel
 
 from ..agents.kpi import load_answer_key
 from ..agents.supervisor import COMPOSER_FOLLOWUPS
 from ..schemas import AnswerKey, ChecklistOwner, ChecklistStatus, FollowupInput, FollowupType, SmPart, UserInput
 from ..state import AgentState
+from ..templates import render_complex
 from ..trace import clip as _clip
 from .agent_log import INTAKE_TITLE, Row, followup_rows, intake_rows, kpi_brief, kpi_rows, run_table, run_total
 from .auth import Auth, admin_router, auth_router, can
@@ -47,6 +48,8 @@ KIND_TO_FOLLOWUP = {
 }
 TITLE_LEN = 28
 KEEPALIVE_SEC = 15
+OutputFormat = Literal["pdf", "md"]
+MEDIA_TYPE = {".pdf": "application/pdf", ".md": "text/markdown; charset=utf-8"}
 
 
 class CreateSessionRequest(BaseModel):
@@ -55,6 +58,7 @@ class CreateSessionRequest(BaseModel):
     source: Literal["mail", "itsd", "etc"]
     text: str
     files: list[str] = []
+    outputOptions: list[Literal["mail_draft", "pdf"]] = []  # 분석과 함께 만들 산출물 (분석 후에는 /outputs/* 로 요청)
 
 
 class MessageRequest(BaseModel):
@@ -194,7 +198,7 @@ def create_app(supervisor_factory: Callable[[], Any] | None = None, kpi_path: Pa
         rec.messages.append({"id": uuid.uuid4().hex, "role": "user", "text": text, "createdAt": _now()})
         sessions[sid] = rec
         key: AnswerKey | None = load_answer_key(gt[_norm(text)]) if _norm(text) in gt else None
-        user_input = UserInput(request_text=text, sm_part=SM_TO_BACKEND[req.smPart])
+        user_input = UserInput(request_text=text, sm_part=SM_TO_BACKEND[req.smPart], output_options=req.outputOptions)
         start(rec, lambda: runner.supervisor.analyze(user_input, session_id=sid, answer_key=key),
               f'새 분석 · SM {req.smPart} · {user["name"]} · 정답셋 {key.req_id if key else "없음"}',
               intake_rows(user, req.smPart, req.inputType, req.source, text, SM_TO_BACKEND[req.smPart], key.req_id if key else None, sid))
@@ -245,12 +249,71 @@ def create_app(supervisor_factory: Callable[[], Any] | None = None, kpi_path: Pa
             fu = FollowupInput(type=kind, content=req.answer, target_item_ids=[item_id])
             rec.log("supervisor", _clip(req.answer), kind="note", label=f"답변 {item_id}")
             rec.state = runner.run(lambda _e: None, lambda: runner.supervisor.followup(session_id, fu), rec.log)
-        else:  # 미확정으로 되돌리기: 결과물만 고친다
-            item.status, item.answer = ChecklistStatus(req.status), req.answer
+        else:  # 답변 없이 확정 표시 · 미확정으로 되돌리기: 결과물만 고치고 단계를 다시 매긴 뒤 세션 상태에 저장
+            item.status, item.answer = ChecklistStatus(req.status), req.answer or item.answer
+            done = all(c.status is ChecklistStatus.CONFIRMED for c in report.checklist)
+            report.stage = "final_for_dev" if done else "updated"
+            rec.state.composer.markdown = render_complex(report)
+            runner.supervisor.update_composer(session_id, rec.state.composer)
+            rec.log("supervisor", f"{item_id} → {req.status} · 단계 {report.stage}", kind="note", label="체크리스트")
         items = rec.state.composer.complex_report.checklist
         c = next(x for x in items if x.item_id == item_id)
         return {"id": c.item_id, "owner": c.owner.value, "question": c.question, "status": c.status.value,
                 **({"answer": c.answer} if c.answer else {})}
+
+    # --- 분석 후 산출물 (결과물 화면 버튼) ---------------------------------------------------
+
+    def finished(session_id: str, user: dict) -> SessionRecord:
+        rec = get(session_id, user, view=True)
+        if rec.meta["status"] == "running":
+            raise HTTPException(409, "분석이 끝난 뒤 요청할 수 있습니다")
+        if rec.state is None or rec.state.composer is None:
+            raise HTTPException(404, "분석 결과가 없습니다")
+        return rec
+
+    def composer_call(rec: SessionRecord, title: str, fn: Callable[[Any], Any]) -> Any:
+        """Composer 를 그래프 밖에서 부른다 (Supervisor 공유 잠금 · 상세 로그는 세션 로그에)."""
+        def go() -> Any:
+            runner.current = "composer"
+            rec.log("composer", f"{title} · {datetime.now():%H:%M:%S}", kind="open")
+            try:
+                return fn(runner.supervisor.composer)
+            finally:
+                rec.log("composer", f"{title} 완료", kind="close")
+        return runner.run(lambda _e: None, go, rec.log)
+
+    def download(rec: SessionRecord, path: str, name: str) -> FileResponse:
+        p = Path(path)
+        return FileResponse(p, media_type=MEDIA_TYPE.get(p.suffix, "application/octet-stream"),
+                            filename=f"{name}_{rec.meta['id'][:8]}{p.suffix}", headers={"X-Output-Format": p.suffix[1:]})
+
+    @app.post("/api/sessions/{session_id}/outputs/mail")
+    def output_mail(session_id: str, user: dict = Depends(auth.require("report"))) -> dict:
+        rec = finished(session_id, user)
+        mail = composer_call(rec, "회신 메일 초안", lambda c: c.compose_mail(rec.state))
+        rec.state.composer.mail_draft = mail
+        return mail.model_dump()
+
+    @app.get("/api/sessions/{session_id}/outputs/report")
+    def output_report(session_id: str, format: OutputFormat = "pdf",  # noqa: A002 - 쿼리 이름
+                      user: dict = Depends(auth.require("report"))) -> FileResponse:
+        rec = finished(session_id, user)
+        path, _ = composer_call(rec, f"결과물 저장 ({format})", lambda c: c.save_output(rec.state.composer.markdown, format))
+        rec.state.composer.report_file_path = path
+        return download(rec, path, "report")
+
+    @app.get("/api/sessions/{session_id}/outputs/handover")
+    def output_handover(session_id: str, format: OutputFormat = "pdf",  # noqa: A002 - 쿼리 이름
+                        user: dict = Depends(auth.require("report"))) -> FileResponse:
+        rec = finished(session_id, user)
+        report = rec.state.composer.complex_report
+        if report is None:
+            raise HTTPException(404, "복잡 요건 결과물이 없습니다")
+        if open_ := [c.item_id for c in report.checklist if c.status is not ChecklistStatus.CONFIRMED]:
+            raise HTTPException(409, f"미확정 항목이 남아 있습니다: {', '.join(open_)}")
+        path, _ = composer_call(rec, f"개발 전달용 정리본 ({format})",
+                                lambda c: c.save_output(c.handover_markdown(rec.state), format))
+        return download(rec, path, "handover")
 
     @app.get("/api/sessions/{session_id}/stream")
     async def stream(session_id: str, user: dict = Depends(auth.stream_user)) -> StreamingResponse:

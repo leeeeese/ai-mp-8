@@ -172,6 +172,50 @@ export const handlers = [
     return HttpResponse.json(item);
   }),
 
+  // --- 분석 후 산출물 (회신 메일 초안 · 결과물 저장 · 개발 전달용 정리본) ---
+  http.post('/api/sessions/:id/outputs/mail', async ({ params }) => {
+    await delay();
+    const report = checklistOf(String(params.id), 2);
+    const answered = report.checklist.filter((c) => c.status === 'confirmed' && c.answer);
+    const open = report.checklist.filter((c) => c.owner === 'business' && c.status !== 'confirmed');
+    const body = [
+      '안녕하세요.',
+      '',
+      '요청하신 건의 영향도 분석 결과를 공유드립니다.',
+      '',
+      '[영향 영역]',
+      ...report.areas.map((a) => `- ${a.area}: ${a.requested?.feasibility ?? '-'} / ${a.requested?.difficulty ?? '-'}`),
+      ...(answered.length ? ['', '[확정 사항]', ...answered.map((c) => `- ${c.question} → ${c.answer}`)] : []),
+      ...(open.length ? ['', '[확인 요청]', ...open.map((c) => `- ${c.question}`)] : []),
+      '',
+      '감사합니다.',
+    ].join('\n');
+    return HttpResponse.json({ to: [], subject: '[영향도 분석] (목업) 요청 건', body });
+  }),
+  http.get('/api/sessions/:id/outputs/:kind', async ({ params }) => {
+    await delay();
+    const id = String(params.id);
+    const report = checklistOf(id, 2);
+    const kind = String(params.kind);
+    const open = report.checklist.filter((c) => c.status !== 'confirmed');
+    if (kind === 'handover' && open.length) return new HttpResponse(`미확정 항목이 남아 있습니다: ${open.map((c) => c.id).join(', ')}`, { status: 409 });
+    const md = [
+      kind === 'handover' ? '# 개발 전달용 정리본 (목업)' : `# 영향도 분석 보고서 (${report.stage})`,
+      '',
+      '| ID | 담당 | 질문 | 답변 | 상태 |',
+      '|---|---|---|---|---|',
+      ...report.checklist.map((c) => `| ${c.id} | ${c.owner} | ${c.question} | ${c.answer ?? '-'} | ${c.status} |`),
+    ].join('\n');
+    // 목업은 PDF 변환 없이 MD 로 내려준다 (실서버도 변환 패키지가 없으면 MD)
+    return new HttpResponse(md, {
+      headers: {
+        'Content-Type': 'text/markdown; charset=utf-8',
+        'Content-Disposition': `attachment; filename="${kind}_${id.slice(0, 8)}.md"`,
+        'X-Output-Format': 'md',
+      },
+    });
+  }),
+
   // --- KPI (세션별 기록, 최근 순) ---
   http.get('/api/kpi/records', async () => {
     await delay();

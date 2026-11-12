@@ -6,8 +6,11 @@ import type {
   CreateSessionRequest,
   GraphStatus,
   KpiRecord,
+  MailDraft,
   MessageKind,
   Neighborhood,
+  OutputFormat,
+  OutputKind,
   ReloadRequest,
   Report,
   Session,
@@ -18,13 +21,17 @@ import type {
 } from './types';
 import { useAuthStore } from '@/store/auth';
 
-async function request<T>(url: string, init?: RequestInit): Promise<T> {
+async function send(url: string, init?: RequestInit): Promise<Response> {
   const res = await fetch(url, {
     ...init,
     headers: { 'Content-Type': 'application/json', 'X-User': encodeURIComponent(useAuthStore.getState().user.name), ...(init?.headers ?? {}) },
   });
   if (!res.ok) throw new Error(`${res.status} ${await res.text()}`);
-  return res.json() as Promise<T>;
+  return res;
+}
+
+async function request<T>(url: string, init?: RequestInit): Promise<T> {
+  return (await send(url, init)).json() as Promise<T>;
 }
 
 const json = (body: unknown) => ({ body: JSON.stringify(body) });
@@ -93,6 +100,27 @@ export function useAnswerChecklist(id: string) {
     onSuccess: () => qc.invalidateQueries({ queryKey: ['report', id] }),
   });
 }
+
+/** 회신 메일 초안. 체크리스트 답변(확정 사항)까지 반영해 매번 새로 만든다 */
+export const useMailDraft = (id: string) =>
+  useMutation({ mutationFn: () => request<MailDraft>(`/api/sessions/${id}/outputs/mail`, { method: 'POST' }) });
+
+/** 결과물·개발 전달용 정리본 파일을 받아 저장한다. 실제로 받은 형식(PDF 변환이 안 되면 md)을 돌려준다 */
+export async function downloadOutput(id: string, kind: OutputKind, format: OutputFormat = 'pdf'): Promise<OutputFormat> {
+  const res = await send(`/api/sessions/${id}/outputs/${kind}?format=${format}`);
+  const got = (res.headers.get('X-Output-Format') as OutputFormat | null) ?? format;
+  const name = /filename\*?=(?:UTF-8'')?"?([^";]+)"?/i.exec(res.headers.get('Content-Disposition') ?? '')?.[1] ?? `${kind}_${id.slice(0, 8)}.${got}`;
+  const url = URL.createObjectURL(await res.blob());
+  const a = Object.assign(document.createElement('a'), { href: url, download: decodeURIComponent(name) });
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+  return got;
+}
+
+export const useDownloadOutput = (id: string) =>
+  useMutation({ mutationFn: ({ kind, format }: { kind: OutputKind; format?: OutputFormat }) => downloadOutput(id, kind, format) });
 
 // --- KPI ------------------------------------------------------------------------
 

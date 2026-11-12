@@ -98,6 +98,14 @@ class Supervisor:
         state.followups = (state.followups + [followup])[-config.MEMORY_WINDOW_N:]
         return self._invoke(state, until, session_id)
 
+    def update_composer(self, session_id: str, composer: ComposerOutput) -> None:
+        """그래프 밖에서 고친 결과물(체크리스트 미확정 되돌리기 등)을 세션 상태에 저장한다. 다음 후속 입력이 이 결과물에서 이어진다."""
+        graph = self._graph(None)
+        config = self._config(session_id)
+        if not graph.get_state(config).values:
+            raise KeyError(f"세션 {session_id} 이 없습니다")
+        graph.update_state(config, {"composer": composer}, as_node="KPI")
+
     def _invoke(self, state: AgentState, until: str | None, session_id: str) -> AgentState:
         self.last_session_id = session_id
         result = self._graph(until).invoke(_updates(state), self._config(session_id))
