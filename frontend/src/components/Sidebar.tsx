@@ -44,7 +44,10 @@ export function Sidebar() {
   // SM 파트 무관 전체 열람은 슈퍼 권한. 일반 유저는 자기 SM 파트 세션만 (최종 필터링은 백엔드)
   const visible = can('sessions.all') ? sessions : sessions.filter((s) => smParts.includes(s.smPart));
   const starred = visible.filter((s) => s.starred);
-  const latest = visible.find((s) => s.complexity === 'complex' && s.status === 'done');
+  // 결과물(레포트)은 끝난 복잡 분석에만 있다. 지금 보고 있는 세션이 그런 세션이면 그 결과물, 아니면 가장 최근 것
+  const withReport = visible.filter((s) => s.complexity === 'complex' && s.status === 'done');
+  const currentId = location.pathname.match(/^\/session\/([^/]+)/)?.[1];
+  const latest = withReport.find((s) => s.id === currentId) ?? withReport[0];
   const groups = groupByDay(visible);
 
   return (

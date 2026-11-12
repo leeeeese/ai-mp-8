@@ -1,7 +1,7 @@
 import { ArrowLeft, Check, FileDown, Mail, Send } from 'lucide-react';
 import { useState } from 'react';
-import { Link, useParams } from 'react-router-dom';
-import { useAnswerChecklist, useReport, useSession } from '@/api/client';
+import { Link, useNavigate, useParams } from 'react-router-dom';
+import { useAnswerChecklist, useReport, useSession, useSessions } from '@/api/client';
 import { DIFFICULTY_LABEL, FEASIBILITY_LABEL, SM_LABEL, type ChecklistItem, type ChecklistOwner } from '@/api/types';
 import { AreaTable } from '@/components/AreaTable';
 import { Badge } from '@/components/Badge';
@@ -25,7 +25,13 @@ export function Report() {
   const [version, setVersion] = useState<number | undefined>();
   const { data: session } = useSession(id);
   const { data: report, isLoading } = useReport(id, version);
-  const { can } = useAuth();
+  const { data: sessions = [] } = useSessions();
+  const { can, smParts } = useAuth();
+  const navigate = useNavigate();
+  // 결과물이 있는 세션(끝난 복잡 분석) 목록. 사이드바와 같은 열람 범위 (전체 열람은 슈퍼 권한)
+  const withReport = (can('sessions.all') ? sessions : sessions.filter((s) => smParts.includes(s.smPart))).filter(
+    (s) => s.complexity === 'complex' && s.status === 'done',
+  );
 
   if (isLoading || !report) return <PageHeader title="결과물" />;
   const current = version ?? report.version;
@@ -38,16 +44,38 @@ export function Report() {
         title={session ? `결과물 · ${session.title}` : '결과물'}
         badges={session && <Badge tone="accent">SM {SM_LABEL[session.smPart]}</Badge>}
         actions={
-          <label className="flex items-center gap-1.5 text-xs text-muted">
-            <span className="hidden whitespace-nowrap sm:inline">버전</span>
-            <select className="input py-1.5 text-xs" value={current} onChange={(e) => setVersion(Number(e.target.value))} aria-label="결과물 버전">
-              {report.versions.map((v) => (
-                <option key={v.version} value={v.version}>
-                  {v.label}
-                </option>
-              ))}
-            </select>
-          </label>
+          <>
+            {withReport.length > 1 && (
+              <label className="flex items-center gap-1.5 text-xs text-muted">
+                <span className="hidden whitespace-nowrap sm:inline">세션</span>
+                <select
+                  className="input max-w-[260px] py-1.5 text-xs"
+                  value={id}
+                  onChange={(e) => {
+                    setVersion(undefined);
+                    navigate(`/session/${e.target.value}/report`);
+                  }}
+                  aria-label="결과물 세션"
+                >
+                  {withReport.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.title} · {new Date(s.createdAt).toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+            <label className="flex items-center gap-1.5 text-xs text-muted">
+              <span className="hidden whitespace-nowrap sm:inline">버전</span>
+              <select className="input py-1.5 text-xs" value={current} onChange={(e) => setVersion(Number(e.target.value))} aria-label="결과물 버전">
+                {report.versions.map((v) => (
+                  <option key={v.version} value={v.version}>
+                    {v.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+          </>
         }
       />
       <div className="grid gap-4 p-4 md:p-6 2xl:grid-cols-[minmax(0,1fr)_420px]">

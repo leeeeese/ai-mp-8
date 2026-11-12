@@ -68,7 +68,11 @@ export function useToggleStar() {
   const qc = useQueryClient();
   return useMutation({
     mutationFn: (id: string) => request<SessionSummary>(`/api/sessions/${id}/star`, { method: 'POST' }),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['sessions'] }),
+    // 사이드바 목록과 지금 보고 있는 세션(머리말 별) 둘 다 새로 읽는다
+    onSuccess: (_s, id) => {
+      qc.invalidateQueries({ queryKey: ['sessions'] });
+      qc.invalidateQueries({ queryKey: ['session', id] });
+    },
   });
 }
 
